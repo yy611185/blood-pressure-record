@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.bloodpressurerecord.domain.calculator.CategoryCalculatorTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:30" hostname="DESKTOP-E0VN8TS" time="0.001">
+  <properties/>
+  <testcase name="满足 stage2 阈值返回 STAGE2" classname="com.example.bloodpressurerecord.domain.calculator.CategoryCalculatorTest" time="0.001"/>
+  <testcase name="大于严重阈值返回 SEVERE" classname="com.example.bloodpressurerecord.domain.calculator.CategoryCalculatorTest" time="0.0"/>
+  <testcase name="满足 elevated 阈值返回 ELEVATED" classname="com.example.bloodpressurerecord.domain.calculator.CategoryCalculatorTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:ns1="http://schemas.android.com/tools">
+    <string name="app_name">家庭血压记录</string>
+    <style name="Theme.BloodPressureRecord" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor" ns1:targetApi="l">@android:color/transparent</item>
+    </style>
+</resources>

@@ -1,0 +1,75 @@
+com.example.bloodpressurerecord.app-ui-tooling-preview-release-0 C:\Users\OC\.gradle\caches\transforms-4\0205b8db8564743f1a50327026d850e7\transformed\ui-tooling-preview-release\res
+com.example.bloodpressurerecord.app-material-1.12.0-1 C:\Users\OC\.gradle\caches\transforms-4\024522bb6ad38c544941f191cb4d0f2a\transformed\material-1.12.0\res
+com.example.bloodpressurerecord.app-datastore-core-release-2 C:\Users\OC\.gradle\caches\transforms-4\069ceb7cb4f27eead0777bce6a3e2fc0\transformed\datastore-core-release\res
+com.example.bloodpressurerecord.app-transition-1.5.0-3 C:\Users\OC\.gradle\caches\transforms-4\08e430d4fa37327a757bc529d7806dd5\transformed\transition-1.5.0\res
+com.example.bloodpressurerecord.app-lifecycle-process-2.8.3-4 C:\Users\OC\.gradle\caches\transforms-4\0b2913c4631eb47cf8ffb6935d4668ce\transformed\lifecycle-process-2.8.3\res
+com.example.bloodpressurerecord.app-savedstate-ktx-1.2.1-5 C:\Users\OC\.gradle\caches\transforms-4\13d4945c406ed025a8f8ed422b3c6a39\transformed\savedstate-ktx-1.2.1\res
+com.example.bloodpressurerecord.app-lifecycle-livedata-2.8.3-6 C:\Users\OC\.gradle\caches\transforms-4\18c0ae646e0ac832ff34325e0d50be1b\transformed\lifecycle-livedata-2.8.3\res
+com.example.bloodpressurerecord.app-ui-tooling-data-release-7 C:\Users\OC\.gradle\caches\transforms-4\18e9effc53d8f0b8bf4857f62de66de0\transformed\ui-tooling-data-release\res
+com.example.bloodpressurerecord.app-core-ktx-1.13.1-8 C:\Users\OC\.gradle\caches\transforms-4\2150c7a44db579857c5ae12f28bbf766\transformed\core-ktx-1.13.1\res
+com.example.bloodpressurerecord.app-cardview-1.0.0-9 C:\Users\OC\.gradle\caches\transforms-4\265c20f64f5c2e1259a690408519b5a5\transformed\cardview-1.0.0\res
+com.example.bloodpressurerecord.app-lifecycle-runtime-release-10 C:\Users\OC\.gradle\caches\transforms-4\2ba9fa0cfb2420f906481f7e562f0221\transformed\lifecycle-runtime-release\res
+com.example.bloodpressurerecord.app-lifecycle-runtime-compose-release-11 C:\Users\OC\.gradle\caches\transforms-4\32e4da436a7bf112ffe8defe5ad1064e\transformed\lifecycle-runtime-compose-release\res
+com.example.bloodpressurerecord.app-material-ripple-release-12 C:\Users\OC\.gradle\caches\transforms-4\34767578d255487ca84648deab7c997e\transformed\material-ripple-release\res
+com.example.bloodpressurerecord.app-ui-graphics-release-13 C:\Users\OC\.gradle\caches\transforms-4\3b912933972fa5284084b6970524a3de\transformed\ui-graphics-release\res
+com.example.bloodpressurerecord.app-annotation-experimental-1.4.0-14 C:\Users\OC\.gradle\caches\transforms-4\3c89666feaab2a764e173ef16c2cec5f\transformed\annotation-experimental-1.4.0\res
+com.example.bloodpressurerecord.app-startup-runtime-1.1.1-15 C:\Users\OC\.gradle\caches\transforms-4\3cdb173ecec19b68ac404958df082c90\transformed\startup-runtime-1.1.1\res
+com.example.bloodpressurerecord.app-recyclerview-1.1.0-16 C:\Users\OC\.gradle\caches\transforms-4\42465769ad87ca70d2d24d5b1ff87892\transformed\recyclerview-1.1.0\res
+com.example.bloodpressurerecord.app-datastore-preferences-release-17 C:\Users\OC\.gradle\caches\transforms-4\4732392cbf926d02cac7e55711b38471\transformed\datastore-preferences-release\res
+com.example.bloodpressurerecord.app-emoji2-views-helper-1.3.0-18 C:\Users\OC\.gradle\caches\transforms-4\475a8f1c122c554896d4be7f9f1aac20\transformed\emoji2-views-helper-1.3.0\res
+com.example.bloodpressurerecord.app-activity-ktx-1.9.1-19 C:\Users\OC\.gradle\caches\transforms-4\4a8a3e1b8e402ea2421c3a126278c114\transformed\activity-ktx-1.9.1\res
+com.example.bloodpressurerecord.app-ui-test-manifest-1.6.8-20 C:\Users\OC\.gradle\caches\transforms-4\5af381967a73ffa790465f808eff020e\transformed\ui-test-manifest-1.6.8\res
+com.example.bloodpressurerecord.app-activity-compose-1.9.1-21 C:\Users\OC\.gradle\caches\transforms-4\5d5c938cf86c5f1c7bb053834d6cd422\transformed\activity-compose-1.9.1\res
+com.example.bloodpressurerecord.app-ui-util-release-22 C:\Users\OC\.gradle\caches\transforms-4\5eae472041b13ff8bfc88eecb69064ed\transformed\ui-util-release\res
+com.example.bloodpressurerecord.app-lifecycle-runtime-ktx-release-23 C:\Users\OC\.gradle\caches\transforms-4\5ff940f2ba5656f16e1db03b1b3eb959\transformed\lifecycle-runtime-ktx-release\res
+com.example.bloodpressurerecord.app-ui-unit-release-24 C:\Users\OC\.gradle\caches\transforms-4\62886b0d58057fe8f0d15d6184b48766\transformed\ui-unit-release\res
+com.example.bloodpressurerecord.app-viewpager2-1.0.0-25 C:\Users\OC\.gradle\caches\transforms-4\63c75fed3a935035771fd134210dbefd\transformed\viewpager2-1.0.0\res
+com.example.bloodpressurerecord.app-coordinatorlayout-1.1.0-26 C:\Users\OC\.gradle\caches\transforms-4\642138a93416a5e48ac5a0c668e9af46\transformed\coordinatorlayout-1.1.0\res
+com.example.bloodpressurerecord.app-foundation-release-27 C:\Users\OC\.gradle\caches\transforms-4\6683776e02f67a38af67eb6ee19daeeb\transformed\foundation-release\res
+com.example.bloodpressurerecord.app-drawerlayout-1.1.1-28 C:\Users\OC\.gradle\caches\transforms-4\6edb2ef2aec2b1274e72eccfd29ff873\transformed\drawerlayout-1.1.1\res
+com.example.bloodpressurerecord.app-core-1.13.1-29 C:\Users\OC\.gradle\caches\transforms-4\7a3f4104257706e5eb34693c1fba5abf\transformed\core-1.13.1\res
+com.example.bloodpressurerecord.app-navigation-common-ktx-2.7.7-30 C:\Users\OC\.gradle\caches\transforms-4\7d385048c206919565b62e65a9d11b41\transformed\navigation-common-ktx-2.7.7\res
+com.example.bloodpressurerecord.app-navigation-runtime-ktx-2.7.7-31 C:\Users\OC\.gradle\caches\transforms-4\7eac137aa51fe31ace733cef8eff428b\transformed\navigation-runtime-ktx-2.7.7\res
+com.example.bloodpressurerecord.app-lifecycle-viewmodel-compose-release-32 C:\Users\OC\.gradle\caches\transforms-4\7f3824d3bcbc6ac1f750d2c7b1d2ec8b\transformed\lifecycle-viewmodel-compose-release\res
+com.example.bloodpressurerecord.app-ui-text-release-33 C:\Users\OC\.gradle\caches\transforms-4\8005b89513380af05aba05f1e0a51a53\transformed\ui-text-release\res
+com.example.bloodpressurerecord.app-material-icons-extended-release-34 C:\Users\OC\.gradle\caches\transforms-4\80e73f09b6549d04303efacd5a7a924e\transformed\material-icons-extended-release\res
+com.example.bloodpressurerecord.app-sqlite-2.4.0-35 C:\Users\OC\.gradle\caches\transforms-4\8591fe573ba872aea1ea1fa12c7cf25e\transformed\sqlite-2.4.0\res
+com.example.bloodpressurerecord.app-customview-poolingcontainer-1.0.0-36 C:\Users\OC\.gradle\caches\transforms-4\8b20cb43207a6a8b340ccc62cc847e00\transformed\customview-poolingcontainer-1.0.0\res
+com.example.bloodpressurerecord.app-activity-1.9.1-37 C:\Users\OC\.gradle\caches\transforms-4\8be39087136da9120d769ca84e6605cc\transformed\activity-1.9.1\res
+com.example.bloodpressurerecord.app-fragment-1.3.6-38 C:\Users\OC\.gradle\caches\transforms-4\8fee240c3d054491f09b8ae56cd60881\transformed\fragment-1.3.6\res
+com.example.bloodpressurerecord.app-material-release-39 C:\Users\OC\.gradle\caches\transforms-4\9183f0b7f680a84902fa47efa727bbf3\transformed\material-release\res
+com.example.bloodpressurerecord.app-profileinstaller-1.3.1-40 C:\Users\OC\.gradle\caches\transforms-4\99fca1b364754e691d45b408d133065a\transformed\profileinstaller-1.3.1\res
+com.example.bloodpressurerecord.app-navigation-runtime-2.7.7-41 C:\Users\OC\.gradle\caches\transforms-4\9e6684a2d86dcb87c16f0469d7171a05\transformed\navigation-runtime-2.7.7\res
+com.example.bloodpressurerecord.app-ui-release-42 C:\Users\OC\.gradle\caches\transforms-4\9e6d0b520e90f354b6370c17be168e19\transformed\ui-release\res
+com.example.bloodpressurerecord.app-lifecycle-viewmodel-ktx-2.8.3-43 C:\Users\OC\.gradle\caches\transforms-4\a27036a4466b94149c466fb8d10746fa\transformed\lifecycle-viewmodel-ktx-2.8.3\res
+com.example.bloodpressurerecord.app-animation-release-44 C:\Users\OC\.gradle\caches\transforms-4\ad66ea63ad56dd6ab328557731857b75\transformed\animation-release\res
+com.example.bloodpressurerecord.app-material3-release-45 C:\Users\OC\.gradle\caches\transforms-4\aecfc432cb7818e308c224f6ac8f23a3\transformed\material3-release\res
+com.example.bloodpressurerecord.app-runtime-saveable-release-46 C:\Users\OC\.gradle\caches\transforms-4\b51d7d2a5896d596260f23ed094bf580\transformed\runtime-saveable-release\res
+com.example.bloodpressurerecord.app-datastore-release-47 C:\Users\OC\.gradle\caches\transforms-4\b6bdb3b2e3ae4ec786df65bdbf55b4e0\transformed\datastore-release\res
+com.example.bloodpressurerecord.app-lifecycle-viewmodel-savedstate-2.8.3-48 C:\Users\OC\.gradle\caches\transforms-4\bc73d5a013590caca4afdebde2ca4848\transformed\lifecycle-viewmodel-savedstate-2.8.3\res
+com.example.bloodpressurerecord.app-navigation-compose-2.7.7-49 C:\Users\OC\.gradle\caches\transforms-4\c0324aa0145ef1a3792d9fe15d52b79d\transformed\navigation-compose-2.7.7\res
+com.example.bloodpressurerecord.app-room-runtime-2.6.1-50 C:\Users\OC\.gradle\caches\transforms-4\c532c17efbaef21b1091423cacbb5bfd\transformed\room-runtime-2.6.1\res
+com.example.bloodpressurerecord.app-emoji2-1.3.0-51 C:\Users\OC\.gradle\caches\transforms-4\cb3734d6d15ca674756f9a36ed409e2f\transformed\emoji2-1.3.0\res
+com.example.bloodpressurerecord.app-appcompat-1.6.1-52 C:\Users\OC\.gradle\caches\transforms-4\ce69ea3601348498299d039b5496d34d\transformed\appcompat-1.6.1\res
+com.example.bloodpressurerecord.app-constraintlayout-2.0.1-53 C:\Users\OC\.gradle\caches\transforms-4\d058c55af1fbd97b43413f533bb4b3eb\transformed\constraintlayout-2.0.1\res
+com.example.bloodpressurerecord.app-core-runtime-2.2.0-54 C:\Users\OC\.gradle\caches\transforms-4\d0800203e9144808ab94ef0cf86d1657\transformed\core-runtime-2.2.0\res
+com.example.bloodpressurerecord.app-material-icons-core-release-55 C:\Users\OC\.gradle\caches\transforms-4\d0d9c3cf457989860b0633327ead704b\transformed\material-icons-core-release\res
+com.example.bloodpressurerecord.app-appcompat-resources-1.6.1-56 C:\Users\OC\.gradle\caches\transforms-4\d2c4a52c47ac70c143fae51e6b5f0964\transformed\appcompat-resources-1.6.1\res
+com.example.bloodpressurerecord.app-lifecycle-livedata-core-2.8.3-57 C:\Users\OC\.gradle\caches\transforms-4\d71ca50b2696a4241f33c3bd865c698f\transformed\lifecycle-livedata-core-2.8.3\res
+com.example.bloodpressurerecord.app-room-ktx-2.6.1-58 C:\Users\OC\.gradle\caches\transforms-4\dc5ae19edcdefe49453495e6989ff263\transformed\room-ktx-2.6.1\res
+com.example.bloodpressurerecord.app-ui-geometry-release-59 C:\Users\OC\.gradle\caches\transforms-4\dc786c09d16a7af36514f7f7872a7298\transformed\ui-geometry-release\res
+com.example.bloodpressurerecord.app-lifecycle-viewmodel-release-60 C:\Users\OC\.gradle\caches\transforms-4\e253b4f3e2990d9025e58a506a08cf35\transformed\lifecycle-viewmodel-release\res
+com.example.bloodpressurerecord.app-runtime-release-61 C:\Users\OC\.gradle\caches\transforms-4\e3900b8936162783257208166e3406a7\transformed\runtime-release\res
+com.example.bloodpressurerecord.app-ui-tooling-release-62 C:\Users\OC\.gradle\caches\transforms-4\e918de38943e67ac6c693d78826183fd\transformed\ui-tooling-release\res
+com.example.bloodpressurerecord.app-navigation-common-2.7.7-63 C:\Users\OC\.gradle\caches\transforms-4\eec97cf91293dfabf5907be615d94b7c\transformed\navigation-common-2.7.7\res
+com.example.bloodpressurerecord.app-foundation-layout-release-64 C:\Users\OC\.gradle\caches\transforms-4\ef0a3942540f99341a2c2b7f6d02b2c4\transformed\foundation-layout-release\res
+com.example.bloodpressurerecord.app-savedstate-1.2.1-65 C:\Users\OC\.gradle\caches\transforms-4\ef7ef5115d069985f69e263ac98ab8a0\transformed\savedstate-1.2.1\res
+com.example.bloodpressurerecord.app-animation-core-release-66 C:\Users\OC\.gradle\caches\transforms-4\f14c3b9aaa258cbaefea152827ea946a\transformed\animation-core-release\res
+com.example.bloodpressurerecord.app-sqlite-framework-2.4.0-67 C:\Users\OC\.gradle\caches\transforms-4\f2bca18c1cac9e11a1717698837680c8\transformed\sqlite-framework-2.4.0\res
+com.example.bloodpressurerecord.app-lifecycle-livedata-core-ktx-2.8.3-68 C:\Users\OC\.gradle\caches\transforms-4\f71d70ffb0ddca727e80e924b3aa6bcd\transformed\lifecycle-livedata-core-ktx-2.8.3\res
+com.example.bloodpressurerecord.app-resValues-69 E:\blood pressure record\app\build\generated\res\resValues\debug
+com.example.bloodpressurerecord.app-packageDebugResources-70 E:\blood pressure record\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.example.bloodpressurerecord.app-packageDebugResources-71 E:\blood pressure record\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.example.bloodpressurerecord.app-debug-72 E:\blood pressure record\app\build\intermediates\merged_res\debug\mergeDebugResources
+com.example.bloodpressurerecord.app-debug-73 E:\blood pressure record\app\src\debug\res
+com.example.bloodpressurerecord.app-main-74 E:\blood pressure record\app\src\main\res
