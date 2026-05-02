@@ -91,6 +91,11 @@ class SettingsRepositoryStable(
                 appName = "家庭血压记录",
                 appVersion = currentAppVersion()
             )
+            
+            // 诊断日志
+            android.util.Log.d("BackupExport", "payload.measurements.size = ${payload.measurements.size}")
+            android.util.Log.d("BackupExport", "diagnostics: ${payload.diagnostics}")
+            
             if (payload.measurements.isEmpty()) {
                 error(
                     "未读取到可导出的历史测量记录。\n" +
@@ -105,13 +110,21 @@ class SettingsRepositoryStable(
                 val writer = BackupFileWriter()
                 val template = runCatching {
                     context.assets.open(BackupFileWriter.TEMPLATE_ASSET_NAME)
+                }.onFailure {
+                    android.util.Log.w("BackupExport", "模板加载失败，将使用默认样式", it)
                 }.getOrNull()
+                
                 if (template != null) {
                     template.use { input ->
                         writer.writeXlsx(payload, stream, input)
                     }
                 } else {
                     writer.writeXlsx(payload, stream)
+                }
+                
+                // 检查模板加载是否有错误
+                writer.getTemplateLoadError()?.let {
+                    android.util.Log.e("BackupExport", "模板解析错误", it)
                 }
             }
             "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n${payload.diagnostics.toUserMessage()}\n文件仅保存在本地，不会上传。"
