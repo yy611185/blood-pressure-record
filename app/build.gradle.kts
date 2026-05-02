@@ -23,10 +23,11 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("keystore/release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "bloodpressure"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            // 使用 debug 签名配置（与之前版本保持一致）
+            storeFile = file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 

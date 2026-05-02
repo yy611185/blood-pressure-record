@@ -24,21 +24,24 @@ jobs:
         distribution: 'temurin'
         cache: gradle
     
-    - name: Decode keystore
-      env:
-        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+    - name: Generate debug keystore
       run: |
         mkdir -p keystore
-        echo "$KEYSTORE_BASE64" | base64 -d > keystore/release.jks
+        # Generate standard Android debug keystore using keytool
+        keytool -genkeypair -v \
+          -alias androiddebugkey \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -keystore keystore/debug.keystore \
+          -storepass android \
+          -keypass android \
+          -dname "CN=Android Debug,O=Android,C=US"
         
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
       
     - name: Build Release APK
-      env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: ./gradlew assembleRelease
       
     - name: Get version name
@@ -71,9 +74,9 @@ jobs:
           - 增强模板加载错误处理和提示
           
           ### 下载
-          下载下方的 APK 文件安装即可使用。
+          下载下方的 APK 文件安装即可。
           
-          > 💡 如遇签名冲突，请先卸载旧版本再安装新版本。
+          > 💡 此版本使用 debug 签名，可直接覆盖安装之前通过 Android Studio 安装的版本。
         files: app/build/outputs/apk/release/blood-pressure-record-v${{ steps.version.outputs.VERSION_NAME }}-release.apk
         draft: false
         prerelease: false
