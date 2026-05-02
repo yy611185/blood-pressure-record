@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -42,7 +45,24 @@ jobs:
         
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
+        name: Release v${{ steps.version.outputs.VERSION_NAME }}
+        tag_name: ${{ github.ref_name }}
+        body: |
+          ## 血压追踪 v${{ steps.version.outputs.VERSION_NAME }}
+          
+          ### 更新内容
+          - 修复 Excel 导出空白表格问题
+          - 修复导出时模板标题行被错误清除导致 Excel 表格空白的 Bug
+          - 新增保留模板标题行逻辑，确保导出格式正确
+          - 添加详细的导出诊断日志，便于问题排查
+          - 增强模板加载错误处理和提示
+          
+          ### 下载
+          下载下方的 APK 文件安装即可使用。
         files: app/build/outputs/apk/release/blood-pressure-record-v${{ steps.version.outputs.VERSION_NAME }}-release.apk
-        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
