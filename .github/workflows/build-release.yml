@@ -27,8 +27,7 @@ jobs:
     - name: Generate debug keystore
       run: |
         mkdir -p keystore
-        # Generate standard Android debug keystore using keytool
-        keytool -genkeypair -v \
+        keytool -genkeypair \
           -alias androiddebugkey \
           -keyalg RSA \
           -keysize 2048 \
@@ -37,12 +36,14 @@ jobs:
           -storepass android \
           -keypass android \
           -dname "CN=Android Debug,O=Android,C=US"
+        echo "Keystore generated successfully"
+        ls -la keystore/
         
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
       
     - name: Build Release APK
-      run: ./gradlew assembleRelease
+      run: ./gradlew assembleRelease --stacktrace
       
     - name: Get version name
       id: version
