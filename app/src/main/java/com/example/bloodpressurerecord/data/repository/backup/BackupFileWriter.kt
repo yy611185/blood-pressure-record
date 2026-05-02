@@ -10,6 +10,8 @@ import org.apache.poi.xssf.usermodel.XSSFSheet
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 
 class BackupFileWriter {
+    private var templateLoadError: Throwable? = null
+
     fun writeXlsx(
         payload: BackupExportPayload,
         outputStream: OutputStream,
@@ -23,13 +25,19 @@ class BackupFileWriter {
             writeKeyValueSheet(workbook, "用户资料", headerStyle, payload.userProfile.map { it.key to it.value.orEmpty() })
             writeKeyValueSheet(workbook, "导出信息", headerStyle, payload.meta.map { it.key to it.value })
 
+            outputStream.flush()
             workbook.write(outputStream)
         }
     }
 
+    fun getTemplateLoadError(): Throwable? = templateLoadError
+
     private fun createWorkbook(templateInputStream: InputStream?): XSSFWorkbook {
+        templateLoadError = null
         return if (templateInputStream != null) {
-            runCatching { XSSFWorkbook(templateInputStream) }.getOrElse { XSSFWorkbook() }
+            runCatching { XSSFWorkbook(templateInputStream) }
+                .onFailure { templateLoadError = it }
+                .getOrElse { XSSFWorkbook() }
         } else {
             XSSFWorkbook()
         }
@@ -57,11 +65,19 @@ class BackupFileWriter {
         headerStyle: CellStyle,
         rows: List<Pair<String, String>>
     ) {
-        val sheet = workbook.getOrCreateClearedSheet("使用说明")
-        sheet.createRow(0).apply {
+        val sheet = workbook.getOrCreateClearedSheet("使用说明", keepHeaderRow = true)
+        
+        // 检查是否已有标题行
+        val headerRow = sheet.getRow(0) ?: sheet.createRow(0).apply {
             writeCell(0, "项目", headerStyle)
             writeCell(1, "说明", headerStyle)
         }
+        
+        if (headerRow.getCell(0) == null) {
+            headerRow.writeCell(0, "项目", headerStyle)
+            headerRow.writeCell(1, "说明", headerStyle)
+        }
+        
         rows.forEachIndexed { index, item ->
             sheet.createRow(index + 1).apply {
                 writeCell(0, item.first)
@@ -78,9 +94,16 @@ class BackupFileWriter {
         headerStyle: CellStyle,
         rows: List<BackupMeasurementRow>
     ) {
-        val sheet = workbook.getOrCreateClearedSheet("测量记录")
-        sheet.createRow(0).apply {
+        val sheet = workbook.getOrCreateClearedSheet("测量记录", keepHeaderRow = true)
+        
+        // 检查是否已有标题行，如果没有则创建
+        val headerRow = sheet.getRow(0) ?: sheet.createRow(0).apply {
             MEASUREMENT_COLUMNS.forEachIndexed { index, title -> writeCell(index, title, headerStyle) }
+        }
+        
+        // 如果标题行为空，填充标题
+        if (headerRow.getCell(0) == null) {
+            MEASUREMENT_COLUMNS.forEachIndexed { index, title -> headerRow.writeCell(index, title, headerStyle) }
         }
 
         rows.forEachIndexed { rowIndex, item ->
@@ -107,11 +130,19 @@ class BackupFileWriter {
         headerStyle: CellStyle,
         rows: List<Pair<String, String>>
     ) {
-        val sheet = workbook.getOrCreateClearedSheet(sheetName)
-        sheet.createRow(0).apply {
+        val sheet = workbook.getOrCreateClearedSheet(sheetName, keepHeaderRow = true)
+        
+        // 检查是否已有标题行
+        val headerRow = sheet.getRow(0) ?: sheet.createRow(0).apply {
             writeCell(0, "key", headerStyle)
             writeCell(1, "value", headerStyle)
         }
+        
+        if (headerRow.getCell(0) == null) {
+            headerRow.writeCell(0, "key", headerStyle)
+            headerRow.writeCell(1, "value", headerStyle)
+        }
+        
         rows.forEachIndexed { index, item ->
             sheet.createRow(index + 1).apply {
                 writeCell(0, item.first)
@@ -158,9 +189,10 @@ class BackupFileWriter {
         }
     }
 
-    private fun XSSFWorkbook.getOrCreateClearedSheet(sheetName: String): XSSFSheet {
+    private fun XSSFWorkbook.getOrCreateClearedSheet(sheetName: String, keepHeaderRow: Boolean = false): XSSFSheet {
         val sheet = getSheet(sheetName) ?: createSheet(sheetName)
-        for (index in sheet.lastRowNum downTo 0) {
+        val startRow = if (keepHeaderRow && sheet.lastRowNum >= 0) 1 else 0
+        for (index in sheet.lastRowNum downTo startRow) {
             sheet.getRow(index)?.let(sheet::removeRow)
         }
         return sheet
