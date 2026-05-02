@@ -24,10 +24,13 @@ android {
     signingConfigs {
         create("release") {
             // 使用 debug 签名配置（与之前版本保持一致）
-            storeFile = file("keystore/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            val keystoreFile = file("keystore/debug.keystore")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
@@ -35,7 +38,12 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            // 如果 release keystore 不存在，使用 debug 签名
+            signingConfig = if (file("keystore/debug.keystore").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
