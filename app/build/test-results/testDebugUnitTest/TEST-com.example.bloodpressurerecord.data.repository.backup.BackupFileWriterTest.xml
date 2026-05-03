@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.bloodpressurerecord.data.repository.backup.BackupFileWriterTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:29" hostname="DESKTOP-E0VN8TS" time="1.029">
+<testsuite name="com.example.bloodpressurerecord.data.repository.backup.BackupFileWriterTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-05-03T02:47:47" hostname="DESKTOP-E0VN8TS" time="0.869">
   <properties/>
-  <testcase name="writeXlsx_usesTemplateAndWritesHistoryRowsIntoIt" classname="com.example.bloodpressurerecord.data.repository.backup.BackupFileWriterTest" time="0.914"/>
-  <testcase name="writeXlsx_createsFourSheetsWithExpectedMeasurementColumns" classname="com.example.bloodpressurerecord.data.repository.backup.BackupFileWriterTest" time="0.115"/>
+  <testcase name="writeXlsx_usesTemplateAndWritesHistoryRowsIntoIt" classname="com.example.bloodpressurerecord.data.repository.backup.BackupFileWriterTest" time="0.775"/>
+  <testcase name="writeXlsx_createsFourSheetsWithExpectedMeasurementColumns" classname="com.example.bloodpressurerecord.data.repository.backup.BackupFileWriterTest" time="0.094"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[ERROR StatusLogger Log4j2 could not find a logging implementation. Please add log4j-core to the classpath. Using SimpleLogger to log to the console...
 ]]></system-err>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.bloodpressurerecord.domain.calculator.HistoryStatisticsCalculatorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:30" hostname="DESKTOP-E0VN8TS" time="0.012">
+<testsuite name="com.example.bloodpressurerecord.domain.calculator.HistoryStatisticsCalculatorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-05-03T02:47:48" hostname="DESKTOP-E0VN8TS" time="0.011">
   <properties/>
   <testcase name="能正确统计7天30天平均与次数" classname="com.example.bloodpressurerecord.domain.calculator.HistoryStatisticsCalculatorTest" time="0.011"/>
   <testcase name="趋势按日聚合" classname="com.example.bloodpressurerecord.domain.calculator.HistoryStatisticsCalculatorTest" time="0.0"/>

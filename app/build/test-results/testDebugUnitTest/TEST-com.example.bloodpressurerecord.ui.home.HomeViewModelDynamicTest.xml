@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:30" hostname="DESKTOP-E0VN8TS" time="0.202">
+<testsuite name="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-05-03T02:47:48" hostname="DESKTOP-E0VN8TS" time="0.162">
   <properties/>
-  <testcase name="dynamic_readings_are_saved" classname="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" time="0.192"/>
-  <testcase name="expand_third_group_initializes_dynamic_list" classname="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" time="0.006"/>
-  <testcase name="collapse_extra_readings_clears_extra_data" classname="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" time="0.004"/>
+  <testcase name="dynamic_readings_are_saved" classname="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" time="0.156"/>
+  <testcase name="expand_third_group_initializes_dynamic_list" classname="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" time="0.003"/>
+  <testcase name="collapse_extra_readings_clears_extra_data" classname="com.example.bloodpressurerecord.ui.home.HomeViewModelDynamicTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

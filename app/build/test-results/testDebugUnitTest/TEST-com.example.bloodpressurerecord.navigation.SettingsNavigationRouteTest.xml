@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.bloodpressurerecord.navigation.SettingsNavigationRouteTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:30" hostname="DESKTOP-E0VN8TS" time="0.039">
+<testsuite name="com.example.bloodpressurerecord.navigation.SettingsNavigationRouteTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-05-03T02:47:48" hostname="DESKTOP-E0VN8TS" time="0.035">
   <properties/>
-  <testcase name="settings_sub_routes_are_defined" classname="com.example.bloodpressurerecord.navigation.SettingsNavigationRouteTest" time="0.039"/>
+  <testcase name="settings_sub_routes_are_defined" classname="com.example.bloodpressurerecord.navigation.SettingsNavigationRouteTest" time="0.035"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

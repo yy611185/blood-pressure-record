@@ -25,8 +25,8 @@ class BackupFileWriter {
             writeKeyValueSheet(workbook, "用户资料", headerStyle, payload.userProfile.map { it.key to it.value.orEmpty() })
             writeKeyValueSheet(workbook, "导出信息", headerStyle, payload.meta.map { it.key to it.value })
 
-            outputStream.flush()
             workbook.write(outputStream)
+            outputStream.flush()
         }
     }
 
@@ -66,18 +66,10 @@ class BackupFileWriter {
         rows: List<Pair<String, String>>
     ) {
         val sheet = workbook.getOrCreateClearedSheet("使用说明", keepHeaderRow = true)
-        
-        // 检查是否已有标题行
-        val headerRow = sheet.getRow(0) ?: sheet.createRow(0).apply {
-            writeCell(0, "项目", headerStyle)
-            writeCell(1, "说明", headerStyle)
-        }
-        
-        if (headerRow.getCell(0) == null) {
-            headerRow.writeCell(0, "项目", headerStyle)
-            headerRow.writeCell(1, "说明", headerStyle)
-        }
-        
+        val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+        headerRow.writeCell(0, "项目", headerStyle)
+        headerRow.writeCell(1, "说明", headerStyle)
+
         rows.forEachIndexed { index, item ->
             sheet.createRow(index + 1).apply {
                 writeCell(0, item.first)
@@ -95,16 +87,8 @@ class BackupFileWriter {
         rows: List<BackupMeasurementRow>
     ) {
         val sheet = workbook.getOrCreateClearedSheet("测量记录", keepHeaderRow = true)
-        
-        // 检查是否已有标题行，如果没有则创建
-        val headerRow = sheet.getRow(0) ?: sheet.createRow(0).apply {
-            MEASUREMENT_COLUMNS.forEachIndexed { index, title -> writeCell(index, title, headerStyle) }
-        }
-        
-        // 如果标题行为空，填充标题
-        if (headerRow.getCell(0) == null) {
-            MEASUREMENT_COLUMNS.forEachIndexed { index, title -> headerRow.writeCell(index, title, headerStyle) }
-        }
+        val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+        MEASUREMENT_COLUMNS.forEachIndexed { index, title -> headerRow.writeCell(index, title, headerStyle) }
 
         rows.forEachIndexed { rowIndex, item ->
             val row = sheet.createRow(rowIndex + 1)
@@ -131,18 +115,10 @@ class BackupFileWriter {
         rows: List<Pair<String, String>>
     ) {
         val sheet = workbook.getOrCreateClearedSheet(sheetName, keepHeaderRow = true)
-        
-        // 检查是否已有标题行
-        val headerRow = sheet.getRow(0) ?: sheet.createRow(0).apply {
-            writeCell(0, "key", headerStyle)
-            writeCell(1, "value", headerStyle)
-        }
-        
-        if (headerRow.getCell(0) == null) {
-            headerRow.writeCell(0, "key", headerStyle)
-            headerRow.writeCell(1, "value", headerStyle)
-        }
-        
+        val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+        headerRow.writeCell(0, "key", headerStyle)
+        headerRow.writeCell(1, "value", headerStyle)
+
         rows.forEachIndexed { index, item ->
             sheet.createRow(index + 1).apply {
                 writeCell(0, item.first)
@@ -179,10 +155,10 @@ class BackupFileWriter {
     }
 
     private fun Row.writeCell(index: Int, value: Any?, style: CellStyle? = null) {
-        val cell = createCell(index)
+        val cell = getCell(index) ?: createCell(index)
         if (style != null) cell.cellStyle = style
         when (value) {
-            null -> Unit
+            null -> cell.setBlank()
             is Boolean -> cell.setCellValue(value)
             is Number -> cell.setCellValue(value.toDouble())
             else -> cell.setCellValue(value.toString())

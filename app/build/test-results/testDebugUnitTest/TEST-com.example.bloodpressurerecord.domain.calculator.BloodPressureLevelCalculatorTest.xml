@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.bloodpressurerecord.domain.calculator.BloodPressureLevelCalculatorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:30" hostname="DESKTOP-E0VN8TS" time="0.001">
+<testsuite name="com.example.bloodpressurerecord.domain.calculator.BloodPressureLevelCalculatorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-05-03T02:47:48" hostname="DESKTOP-E0VN8TS" time="0.001">
   <properties/>
-  <testcase name="三级偏高阈值返回三级文本" classname="com.example.bloodpressurerecord.domain.calculator.BloodPressureLevelCalculatorTest" time="0.001"/>
+  <testcase name="三级偏高阈值返回三级文本" classname="com.example.bloodpressurerecord.domain.calculator.BloodPressureLevelCalculatorTest" time="0.0"/>
   <testcase name="空值返回待判断" classname="com.example.bloodpressurerecord.domain.calculator.BloodPressureLevelCalculatorTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

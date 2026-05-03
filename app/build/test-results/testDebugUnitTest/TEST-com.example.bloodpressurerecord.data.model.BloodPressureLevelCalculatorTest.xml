@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.bloodpressurerecord.data.model.BloodPressureLevelCalculatorTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-04-25T08:16:29" hostname="DESKTOP-E0VN8TS" time="0.007">
+<testsuite name="com.example.bloodpressurerecord.data.model.BloodPressureLevelCalculatorTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-05-03T02:47:47" hostname="DESKTOP-E0VN8TS" time="0.007">
   <properties/>
-  <testcase name="正常高值区间返回正常高值" classname="com.example.bloodpressurerecord.data.model.BloodPressureLevelCalculatorTest" time="0.006"/>
+  <testcase name="正常高值区间返回正常高值" classname="com.example.bloodpressurerecord.data.model.BloodPressureLevelCalculatorTest" time="0.005"/>
   <testcase name="高压达到三级阈值时返回三级偏高" classname="com.example.bloodpressurerecord.data.model.BloodPressureLevelCalculatorTest" time="0.0"/>
   <testcase name="舒张压为空时返回待判断" classname="com.example.bloodpressurerecord.data.model.BloodPressureLevelCalculatorTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
