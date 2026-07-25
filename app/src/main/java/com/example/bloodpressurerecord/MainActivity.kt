@@ -7,6 +7,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bloodpressurerecord.ui.LocalAppFontScale
 import com.example.bloodpressurerecord.navigation.BloodPressureAppRoot
@@ -22,12 +24,18 @@ class MainActivity : ComponentActivity() {
                 factory = AppViewModelFactory(application)
             )
             val settingsUiState by settingsViewModel.uiState.collectAsState()
+            val currentDensity = LocalDensity.current
+            val appFontScale = if (settingsUiState.isLargeTextEnabled) 1.15f else 1f
 
             BloodPressureRecordTheme {
                 CompositionLocalProvider(
-                    LocalAppFontScale provides if (settingsUiState.isLargeTextEnabled) 1.12f else 1f
+                    LocalAppFontScale provides appFontScale,
+                    LocalDensity provides Density(
+                        density = currentDensity.density,
+                        fontScale = currentDensity.fontScale * appFontScale
+                    )
                 ) {
-                    BloodPressureAppRoot()
+                    BloodPressureAppRoot(showTrendChart = settingsUiState.showTrendChart)
                 }
             }
         }

@@ -22,8 +22,12 @@ class BackupFileWriter {
 
             writeInstructionsSheet(workbook, headerStyle, payload.instructions)
             writeMeasurementsSheet(workbook, headerStyle, payload.measurements)
+            writeReadingsSheet(workbook, headerStyle, payload.readings)
             writeKeyValueSheet(workbook, "用户资料", headerStyle, payload.userProfile.map { it.key to it.value.orEmpty() })
             writeKeyValueSheet(workbook, "导出信息", headerStyle, payload.meta.map { it.key to it.value })
+            REQUIRED_SHEET_NAMES.forEachIndexed { index, name ->
+                workbook.setSheetOrder(name, index)
+            }
 
             workbook.write(outputStream)
             outputStream.flush()
@@ -65,8 +69,8 @@ class BackupFileWriter {
         headerStyle: CellStyle,
         rows: List<Pair<String, String>>
     ) {
-        val sheet = workbook.getOrCreateClearedSheet("使用说明", keepHeaderRow = true)
-        val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+        val sheet = workbook.getOrCreateClearedSheet("使用说明")
+        val headerRow = sheet.createRow(0)
         headerRow.writeCell(0, "项目", headerStyle)
         headerRow.writeCell(1, "说明", headerStyle)
 
@@ -86,8 +90,8 @@ class BackupFileWriter {
         headerStyle: CellStyle,
         rows: List<BackupMeasurementRow>
     ) {
-        val sheet = workbook.getOrCreateClearedSheet("测量记录", keepHeaderRow = true)
-        val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+        val sheet = workbook.getOrCreateClearedSheet("测量记录")
+        val headerRow = sheet.createRow(0)
         MEASUREMENT_COLUMNS.forEachIndexed { index, title -> headerRow.writeCell(index, title, headerStyle) }
 
         rows.forEachIndexed { rowIndex, item ->
@@ -114,8 +118,8 @@ class BackupFileWriter {
         headerStyle: CellStyle,
         rows: List<Pair<String, String>>
     ) {
-        val sheet = workbook.getOrCreateClearedSheet(sheetName, keepHeaderRow = true)
-        val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+        val sheet = workbook.getOrCreateClearedSheet(sheetName)
+        val headerRow = sheet.createRow(0)
         headerRow.writeCell(0, "key", headerStyle)
         headerRow.writeCell(1, "value", headerStyle)
 
@@ -130,24 +134,42 @@ class BackupFileWriter {
         sheet.setColumnWidth(1, 34 * 256)
     }
 
-    private fun buildMeasurementCells(item: BackupMeasurementRow): List<Any?> {
-        val readingCells = (0 until BackupExportService.MAX_EXPORT_READING_GROUPS).flatMap { index ->
-            val reading = item.readings.getOrNull(index)
-            listOf(reading?.systolic, reading?.diastolic, reading?.pulse)
+    private fun writeReadingsSheet(
+        workbook: XSSFWorkbook,
+        headerStyle: CellStyle,
+        rows: List<BackupReadingRow>
+    ) {
+        val sheet = workbook.getOrCreateClearedSheet("原始读数")
+        val headerRow = sheet.createRow(0)
+        READING_COLUMNS.forEachIndexed { index, title -> headerRow.writeCell(index, title, headerStyle) }
+        rows.forEachIndexed { rowIndex, item ->
+            sheet.createRow(rowIndex + 1).apply {
+                writeCell(0, item.recordId)
+                writeCell(1, item.orderIndex)
+                writeCell(2, item.systolic)
+                writeCell(3, item.diastolic)
+                writeCell(4, item.pulse)
+            }
         }
+        sheet.createFreezePane(0, 1)
+        sheet.setColumnWidth(0, 38 * 256)
+        READING_COLUMNS.indices.drop(1).forEach { sheet.setColumnWidth(it, 14 * 256) }
+    }
 
+    private fun buildMeasurementCells(item: BackupMeasurementRow): List<Any?> {
         return listOf(
             item.recordId,
             item.measuredAt,
             item.date,
             item.time,
-            item.groupCount
-        ) + readingCells + listOf(
+            item.groupCount,
             item.avgSystolic,
             item.avgDiastolic,
             item.avgPulse,
             item.level,
             item.highAlert,
+            item.scene,
+            item.symptomsJson,
             item.note,
             item.createdAt,
             item.updatedAt
@@ -165,10 +187,9 @@ class BackupFileWriter {
         }
     }
 
-    private fun XSSFWorkbook.getOrCreateClearedSheet(sheetName: String, keepHeaderRow: Boolean = false): XSSFSheet {
+    private fun XSSFWorkbook.getOrCreateClearedSheet(sheetName: String): XSSFSheet {
         val sheet = getSheet(sheetName) ?: createSheet(sheetName)
-        val startRow = if (keepHeaderRow && sheet.lastRowNum >= 0) 1 else 0
-        for (index in sheet.lastRowNum downTo startRow) {
+        for (index in sheet.lastRowNum downTo 0) {
             sheet.getRow(index)?.let(sheet::removeRow)
         }
         return sheet
@@ -176,36 +197,30 @@ class BackupFileWriter {
 
     companion object {
         const val TEMPLATE_ASSET_NAME = "backup_template_v1.xlsx"
-        private val REQUIRED_SHEET_NAMES = listOf("使用说明", "测量记录", "用户资料", "导出信息")
+        private val REQUIRED_SHEET_NAMES = listOf("使用说明", "测量记录", "原始读数", "用户资料", "导出信息")
         val MEASUREMENT_COLUMNS = listOf(
             "record_id",
             "measured_at",
             "date",
             "time",
             "group_count",
-            "sys_1",
-            "dia_1",
-            "pulse_1",
-            "sys_2",
-            "dia_2",
-            "pulse_2",
-            "sys_3",
-            "dia_3",
-            "pulse_3",
-            "sys_4",
-            "dia_4",
-            "pulse_4",
-            "sys_5",
-            "dia_5",
-            "pulse_5",
             "avg_sys",
             "avg_dia",
             "avg_pulse",
             "level",
             "high_alert",
+            "scene",
+            "symptoms_json",
             "note",
             "created_at",
             "updated_at"
+        )
+        val READING_COLUMNS = listOf(
+            "record_id",
+            "order_index",
+            "systolic",
+            "diastolic",
+            "pulse"
         )
     }
 }

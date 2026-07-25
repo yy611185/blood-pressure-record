@@ -21,7 +21,7 @@ import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
         MeasurementReadingEntity::class,
         UserProfileEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,7 +35,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context,
                 AppDatabase::class.java,
                 "blood_pressure_record.db"
-            ).addMigrations(MIGRATION_1_2).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
         }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -88,6 +88,15 @@ abstract class AppDatabase : RoomDatabase() {
                         PRIMARY KEY(`id`)
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_measurement_sessions_measuredAt` " +
+                        "ON `measurement_sessions` (`measuredAt`)"
                 )
             }
         }

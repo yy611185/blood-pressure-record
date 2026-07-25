@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.bloodpressurerecord"
         minSdk = 26
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.4.4"
+        versionCode = 20
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -21,15 +21,23 @@ android {
         }
     }
 
-    signingConfigs {
-        create("release") {
-            // 使用 debug 签名配置（与之前版本保持一致）
-            val keystoreFile = file("keystore/debug.keystore")
-            if (keystoreFile.exists()) {
-                storeFile = keystoreFile
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+    val releaseStorePath = providers.environmentVariable("BP_RELEASE_STORE_FILE").orNull
+    val releaseStorePassword = providers.environmentVariable("BP_RELEASE_STORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("BP_RELEASE_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("BP_RELEASE_KEY_PASSWORD").orNull
+    if (listOf(
+            releaseStorePath,
+            releaseStorePassword,
+            releaseKeyAlias,
+            releaseKeyPassword
+        ).all { !it.isNullOrBlank() }
+    ) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(requireNotNull(releaseStorePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
             }
         }
     }
@@ -38,12 +46,8 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // 如果 release keystore 不存在，使用 debug 签名
-            signingConfig = if (file("keystore/debug.keystore").exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // 本地未配置签名环境变量时生成 unsigned Release，绝不回退到 Debug 签名。
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -75,6 +79,9 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
 }
 
 ksp {

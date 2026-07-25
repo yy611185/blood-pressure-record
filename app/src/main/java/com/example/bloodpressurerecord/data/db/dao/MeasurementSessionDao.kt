@@ -10,6 +10,15 @@ import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
 import kotlinx.coroutines.flow.Flow
 
+data class TrendPointRow(
+    val id: String,
+    val measuredAt: Long,
+    val avgSystolic: Int,
+    val avgDiastolic: Int,
+    val avgPulse: Int?,
+    val category: String
+)
+
 @Dao
 interface MeasurementSessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -42,6 +51,32 @@ interface MeasurementSessionDao {
     @Transaction
     @Query("SELECT * FROM measurement_sessions ORDER BY measuredAt DESC")
     suspend fun getAllSessionsWithReadings(): List<MeasurementSessionWithReadings>
+
+    @Query(
+        """
+        SELECT id, measuredAt, avgSystolic, avgDiastolic, avgPulse, category
+        FROM measurement_sessions
+        WHERE measuredAt >= :startInclusive AND measuredAt <= :endInclusive
+        ORDER BY measuredAt ASC
+        """
+    )
+    fun observeTrendPoints(
+        startInclusive: Long,
+        endInclusive: Long
+    ): Flow<List<TrendPointRow>>
+
+    @Query(
+        """
+        SELECT id, measuredAt, avgSystolic, avgDiastolic, avgPulse, category
+        FROM measurement_sessions
+        WHERE measuredAt >= :startInclusive AND measuredAt < :endExclusive
+        ORDER BY measuredAt ASC
+        """
+    )
+    suspend fun getTrendPoints(
+        startInclusive: Long,
+        endExclusive: Long
+    ): List<TrendPointRow>
 
     @Query("SELECT COUNT(*) FROM measurement_sessions")
     suspend fun countSessions(): Int

@@ -18,9 +18,19 @@ data class BackupMeasurementRow(
     val avgPulse: Int?,
     val level: String,
     val highAlert: Boolean,
+    val scene: String?,
+    val symptomsJson: String?,
     val note: String?,
     val createdAt: String?,
     val updatedAt: String?
+)
+
+data class BackupReadingRow(
+    val recordId: String,
+    val orderIndex: Int,
+    val systolic: Int,
+    val diastolic: Int,
+    val pulse: Int?
 )
 
 data class BackupUserProfileItem(
@@ -50,6 +60,7 @@ data class BackupExportDiagnostics(
 data class BackupExportPayload(
     val instructions: List<Pair<String, String>>,
     val measurements: List<BackupMeasurementRow>,
+    val readings: List<BackupReadingRow> = emptyList(),
     val userProfile: List<BackupUserProfileItem>,
     val meta: List<BackupMetaItem>,
     val diagnostics: BackupExportDiagnostics = BackupExportDiagnostics()

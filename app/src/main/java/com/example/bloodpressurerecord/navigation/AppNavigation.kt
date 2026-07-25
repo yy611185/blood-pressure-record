@@ -13,6 +13,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -26,14 +27,15 @@ import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.ui.history.EditSessionScreen
 import com.example.bloodpressurerecord.ui.history.EditSessionViewModel
 import com.example.bloodpressurerecord.ui.history.HistoryDetailViewModel
-import com.example.bloodpressurerecord.ui.history.HistoryScreenRevamp
-import com.example.bloodpressurerecord.ui.history.HistoryDetailScreenRevamp
+import com.example.bloodpressurerecord.ui.history.HistoryScreen
+import com.example.bloodpressurerecord.ui.history.HistoryDetailScreen
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
+import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardScreen
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.record.AddMeasurementScreen
-import com.example.bloodpressurerecord.ui.settings.SettingsScreenRevamp
-import com.example.bloodpressurerecord.ui.settings.SettingsDataManagementScreenRevamp
+import com.example.bloodpressurerecord.ui.settings.SettingsScreen
+import com.example.bloodpressurerecord.ui.settings.SettingsDataManagementScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsProfileScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsReminderScreen
@@ -45,15 +47,15 @@ import com.example.bloodpressurerecord.ui.settings.SettingsInfoReleaseNotesScree
 import com.example.bloodpressurerecord.ui.settings.SettingsDisclaimerScreen
 
 @Composable
-fun BloodPressureAppRoot() {
+fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     val navController = rememberNavController()
     val current = navController.currentBackStackEntryAsState().value?.destination?.route
     val application = LocalContext.current.applicationContext as BloodPressureApplication
     val factory = AppViewModelFactory(application)
-    val tabs = listOf(
+    val tabs = listOfNotNull(
         AppDestination.Measure,
         AppDestination.History,
-        AppDestination.Trend,
+        AppDestination.Trend.takeIf { showTrendChart },
         AppDestination.Settings
     )
     val topLevelRoutes = setOf(
@@ -63,6 +65,15 @@ fun BloodPressureAppRoot() {
         AppDestination.Settings.route
     )
     val showBottomBar = current in topLevelRoutes
+
+    LaunchedEffect(showTrendChart, current) {
+        if (!showTrendChart && current == AppDestination.Trend.route) {
+            navController.navigate(AppDestination.Measure.route) {
+                popUpTo(navController.graph.findStartDestination().id)
+                launchSingleTop = true
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -125,7 +136,7 @@ fun BloodPressureAppRoot() {
             }
             composable(AppDestination.History.route) {
                 val historyVm: HistoryViewModel = viewModel(factory = factory)
-                HistoryScreenRevamp(
+                HistoryScreen(
                     viewModel = historyVm,
                     onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
                     onOpenDetail = { sessionId ->
@@ -134,8 +145,8 @@ fun BloodPressureAppRoot() {
                 )
             }
             composable(AppDestination.Trend.route) {
-                val vm: HistoryViewModel = viewModel(factory = factory)
-                com.example.bloodpressurerecord.ui.history.DoubleLineChartScreenZh(
+                val vm: TrendViewModel = viewModel(factory = factory)
+                com.example.bloodpressurerecord.ui.history.TrendScreen(
                     viewModel = vm,
                     onBack = null
                 )
@@ -148,7 +159,7 @@ fun BloodPressureAppRoot() {
                         repository = application.appContainer.bloodPressureRepository
                     )
                 )
-                HistoryDetailScreenRevamp(
+                HistoryDetailScreen(
                     viewModel = vm,
                     sessionId = sessionId,
                     onBack = { navController.popBackStack() },
@@ -170,7 +181,7 @@ fun BloodPressureAppRoot() {
                 )
             }
             composable(AppDestination.Settings.route) {
-                SettingsScreenRevamp(
+                SettingsScreen(
                     onOpenProfile = { navController.navigate(AppDestination.SettingsProfile.route) },
                     onOpenReminder = { navController.navigate(AppDestination.SettingsReminder.route) },
                     onOpenDisplay = { navController.navigate(AppDestination.SettingsDisplay.route) },
@@ -192,7 +203,7 @@ fun BloodPressureAppRoot() {
             }
             composable(AppDestination.SettingsDataManagement.route) {
                 val vm: SettingsViewModel = viewModel(factory = factory)
-                SettingsDataManagementScreenRevamp(viewModel = vm, onBack = { navController.popBackStack() })
+                SettingsDataManagementScreen(viewModel = vm, onBack = { navController.popBackStack() })
             }
             composable(AppDestination.SettingsInfo.route) {
                 SettingsInfoScreen(
