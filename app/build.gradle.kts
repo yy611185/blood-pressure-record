@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    id("androidx.baselineprofile")
 }
 
 android {
@@ -12,8 +13,8 @@ android {
         applicationId = "com.example.bloodpressurerecord"
         minSdk = 26
         targetSdk = 34
-        versionCode = 20
-        versionName = "1.5.0"
+        versionCode = 23
+        versionName = "1.6.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -117,7 +118,9 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("org.apache.poi:poi-ooxml:5.2.5")
+    baselineProfile(project(":baselineprofile"))
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
@@ -126,4 +129,5 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.room:room-testing:2.6.1")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }

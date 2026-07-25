@@ -13,7 +13,8 @@ data class AppSettings(
     val morningReminderTime: String = "07:30",
     val eveningReminderEnabled: Boolean = false,
     val eveningReminderTime: String = "21:00",
-    val defaultScene: String = "居家安静"
+    val defaultScene: String = "居家安静",
+    val lastSuccessfulExportAt: Long? = null
 )
 
 class AppSettingsStore(
@@ -28,7 +29,8 @@ class AppSettingsStore(
             morningReminderTime = prefs[PreferenceKeys.MORNING_REMINDER_TIME] ?: "07:30",
             eveningReminderEnabled = prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] ?: false,
             eveningReminderTime = prefs[PreferenceKeys.EVENING_REMINDER_TIME] ?: "21:00",
-            defaultScene = prefs[PreferenceKeys.DEFAULT_SCENE] ?: "居家安静"
+            defaultScene = prefs[PreferenceKeys.DEFAULT_SCENE] ?: "居家安静",
+            lastSuccessfulExportAt = prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT]
         )
     }
 
@@ -77,6 +79,12 @@ class AppSettingsStore(
     suspend fun setDefaultScene(scene: String) {
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.DEFAULT_SCENE] = scene
+        }
+    }
+
+    suspend fun setLastSuccessfulExportAt(value: Long) {
+        context.appDataStore.edit { prefs ->
+            prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT] = value
         }
     }
 }

@@ -6,7 +6,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.*
 
@@ -17,12 +19,22 @@ fun HistoryDetailScreen(
     onBack: () -> Unit,
     onEdit: (String) -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val session = uiState.session
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.deleted) {
         if (uiState.deleted) {
-            onBack()
+            when (
+                snackbarHostState.showSnackbar(
+                    message = "记录已删除",
+                    actionLabel = "撤销",
+                    duration = SnackbarDuration.Long
+                )
+            ) {
+                SnackbarResult.ActionPerformed -> viewModel.undoDelete()
+                SnackbarResult.Dismissed -> onBack()
+            }
         }
     }
 
@@ -48,7 +60,7 @@ fun HistoryDetailScreen(
         )
     }
 
-    val isAbnormal = session.category.uppercase() != "NORMAL"
+    val isAbnormal = session.containsHighRiskReading || session.category.uppercase() != "NORMAL"
     val categoryText = when (session.category) {
         "NORMAL" -> "正常"
         "ELEVATED" -> "正常高值"
@@ -58,20 +70,22 @@ fun HistoryDetailScreen(
         else -> session.category
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        AppTopBar(title = "记录详情", onBack = onBack)
-
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxSize()
         ) {
+            AppTopBar(title = "记录详情", onBack = onBack)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("测量时间", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -100,6 +114,21 @@ fun HistoryDetailScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("分级结果", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         StatusChip(text = categoryText, isAbnormal = isAbnormal)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("高风险状态", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        StatusChip(
+                            text = if (session.containsHighRiskReading) "包含高风险读数" else "未检出",
+                            isAbnormal = session.containsHighRiskReading
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("测量场景", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(session.scene, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("伴随症状", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(uiState.symptomsText, style = MaterialTheme.typography.bodyLarge)
                     }
                     if (!session.note.isNullOrBlank()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -138,6 +167,11 @@ fun HistoryDetailScreen(
                 onClick = viewModel::requestDelete,
                 modifier = Modifier.fillMaxWidth()
             )
+            }
         }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }

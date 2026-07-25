@@ -27,7 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +39,7 @@ import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.ui.common.AppBackButton
+import com.example.bloodpressurerecord.ui.common.DataCard
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -49,7 +50,7 @@ fun TrendScreen(
     viewModel: TrendViewModel,
     onBack: (() -> Unit)? = null
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     uiState.dayDetails?.let { details ->
         TrendDayDetailsSheet(
@@ -81,6 +82,8 @@ fun TrendScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        TrendTextSummaryCard(uiState.summary)
+
         TrendCard(
             series = uiState.series,
             metric = uiState.metric,
@@ -94,6 +97,38 @@ fun TrendScreen(
         Spacer(Modifier.height(10.dp))
     }
 }
+
+@Composable
+private fun TrendTextSummaryCard(summary: TrendTextSummary) {
+    DataCard {
+        if (summary.recordCount == 0) {
+            Text("当前周期暂无足够数据生成文字摘要。")
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("趋势文字摘要", style = MaterialTheme.typography.titleMedium)
+                Text("测量次数：${summary.recordCount} 次")
+                Text("周期平均：${summary.averageSystolic} / ${summary.averageDiastolic} mmHg")
+                Text("最高值：${summary.highestSystolic} / ${summary.highestDiastolic} mmHg")
+                Text("最低值：${summary.lowestSystolic} / ${summary.lowestDiastolic} mmHg")
+                Text("高风险次数：${summary.highRiskCount} 次")
+                val changeText = if (summary.systolicChange == null || summary.diastolicChange == null) {
+                    "与上一周期相比：数据不足"
+                } else {
+                    "与上一周期平均相比：" +
+                        "${summary.systolicChange.withSign()} / ${summary.diastolicChange.withSign()} mmHg"
+                }
+                Text(changeText)
+                Text(
+                    "短期变化仅供记录观察，不代表医学结论。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+private fun Int.withSign(): String = if (this > 0) "+$this" else toString()
 
 @Composable
 private fun TrendCard(
@@ -111,8 +146,8 @@ private fun TrendCard(
             .fillMaxWidth()
             .shadow(1.dp, RoundedCornerShape(24.dp), clip = false),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFF8FAFC))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SegmentedControl(
@@ -131,7 +166,7 @@ private fun TrendCard(
                     Text(
                         "${series.rawRecordCount} 次测量",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF64748B)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -167,7 +202,7 @@ private fun TrendCard(
                 Text(
                     "样本区间：$first - $last",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF94A3B8)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -184,7 +219,7 @@ private fun <T> SegmentedControl(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0x80E2E8F0), RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -195,14 +230,21 @@ private fun <T> SegmentedControl(
                     .weight(1f)
                     .height(34.dp)
                     .shadow(if (isSelected) 2.dp else 0.dp, RoundedCornerShape(14.dp), clip = false)
-                    .background(if (isSelected) Color.White else Color.Transparent, RoundedCornerShape(14.dp))
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                        RoundedCornerShape(14.dp)
+                    )
                     .clickable { onSelected(item) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = label(item),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (isSelected) Color(0xFF0F172A) else Color(0xFF64748B),
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
                 )
             }
@@ -277,7 +319,7 @@ private fun TrendDayRecordRow(record: TrendRecord) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(formatSessionTime(record.measuredAt), fontWeight = FontWeight.SemiBold)
             Text(
-                record.category.toChineseCategory(),
+                if (record.containsHighRiskReading) "含高风险读数" else record.category.toChineseCategory(),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

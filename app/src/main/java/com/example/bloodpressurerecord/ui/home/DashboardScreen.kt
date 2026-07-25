@@ -8,69 +8,61 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import com.example.bloodpressurerecord.data.repository.SessionRecord
+import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.StatusChip
-import com.example.bloodpressurerecord.ui.history.HistoryViewModel
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
 fun DashboardScreen(
-    historyViewModel: HistoryViewModel,
-    onAddMeasurement: () -> Unit
+    viewModel: DashboardViewModel,
+    onAddMeasurement: () -> Unit,
+    onViewTodayRecords: () -> Unit
 ) {
-    val historyState by historyViewModel.uiState.collectAsState()
-    val allSessions = historyState.sessionsAll
-    val today = LocalDate.now()
-    val todaySessions = allSessions.filter {
-        Instant.ofEpochMilli(it.measuredAt).atZone(ZoneId.systemDefault()).toLocalDate() == today
-    }
-    val recentSession = allSessions.maxByOrNull { it.measuredAt }
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+            .padding(AppDimensions.pageHorizontalPadding),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
     ) {
         Column {
+            Text("血压记录", style = MaterialTheme.typography.headlineMedium)
             Text(
-                text = "血压记录",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "今天也记一下，方便长期观察",
+                "记录用于帮助观察变化，不替代医疗诊断。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        if (recentSession != null) {
-            RecentReadingCard(recentSession)
+        when {
+            state.loading -> DataCard { Text("正在读取最近记录…") }
+            state.latest == null -> FirstMeasurementCard(onAddMeasurement)
+            else -> RecentReadingCard(state.latest!!)
         }
 
         AppPrimaryButton(
@@ -80,17 +72,35 @@ fun DashboardScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
-        TodayOverviewCard(todaySessions)
+        TodayOverviewCard(
+            state = state,
+            onViewTodayRecords = onViewTodayRecords
+        )
+    }
+}
+@Composable
+private fun FirstMeasurementCard(onAdd: () -> Unit) {
+    DataCard {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
+            Text("还没有血压记录", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "完成第一次测量后，这里会优先显示最近血压和今天的测量情况。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = onAdd) { Text("开始第一次测量") }
+        }
     }
 }
 
 @Composable
-fun RecentReadingCard(session: SessionRecord) {
-    val isAbnormal = session.category != "NORMAL"
-    val categoryText = session.category.toChineseCategoryLabel()
-
+fun RecentReadingCard(session: LatestSessionSummary) {
+    val visualStatus = bloodPressureVisualStatus(
+        session.category,
+        session.containsHighRiskReading
+    )
     DataCard {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -98,78 +108,73 @@ fun RecentReadingCard(session: SessionRecord) {
             ) {
                 Text("最近一次血压", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = Instant.ofEpochMilli(session.measuredAt)
+                    Instant.ofEpochMilli(session.measuredAt)
                         .atZone(ZoneId.systemDefault())
-                        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm")),
+                        .format(DateTimeFormatter.ofPattern("M月d日 HH:mm")),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = "${session.avgSystolic} / ${session.avgDiastolic}",
+                    "${session.avgSystolic} / ${session.avgDiastolic}",
                     style = MaterialTheme.typography.displayMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "mmHg",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
+                Spacer(Modifier.width(AppSpacing.small))
+                Text("mmHg", style = MaterialTheme.typography.bodyLarge)
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                StatusChip(text = categoryText, isAbnormal = isAbnormal)
-                if (isAbnormal) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "偏高，请注意休息",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
+            StatusChip(
+                text = visualStatus.styleLabel(session.category),
+                isAbnormal = visualStatus.name != "NORMAL",
+                status = visualStatus
+            )
         }
     }
 }
 
 @Composable
-fun TodayOverviewCard(sessions: List<SessionRecord>) {
-    val count = sessions.size
-    val avgSys = if (count > 0) sessions.sumOf { it.avgSystolic } / count else 0
-    val avgDia = if (count > 0) sessions.sumOf { it.avgDiastolic } / count else 0
-
+private fun TodayOverviewCard(
+    state: DashboardUiState,
+    onViewTodayRecords: () -> Unit
+) {
     DataCard {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
             Text("今日概览", style = MaterialTheme.typography.titleMedium)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("测量次数", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("$count 次", fontWeight = FontWeight.SemiBold)
+            Text(
+                if (state.todayCount > 0) {
+                    "今天已测量 ${state.todayCount} 次"
+                } else {
+                    "今天还没有测量"
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+            if (state.todayAverageSystolic != null && state.todayAverageDiastolic != null) {
+                Text(
+                    "今日平均 ${state.todayAverageSystolic} / ${state.todayAverageDiastolic} mmHg",
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("平均血压", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(if (count > 0) "$avgSys / $avgDia mmHg" else "--", fontWeight = FontWeight.SemiBold)
+            TextButton(onClick = onViewTodayRecords) {
+                androidx.compose.material3.Icon(Icons.Default.CalendarToday, contentDescription = null)
+                Spacer(Modifier.width(AppSpacing.xSmall))
+                Text(if (state.todayCount > 0) "查看今天记录" else "查看本月日历")
             }
         }
     }
 }
 
-private fun String.toChineseCategoryLabel(): String = when (uppercase()) {
-    "NORMAL" -> "正常"
-    "ELEVATED" -> "偏高"
-    "STAGE1" -> "1期偏高"
-    "STAGE2" -> "2期偏高"
-    "SEVERE" -> "重度偏高"
-    else -> this
+private fun com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus.styleLabel(
+    category: String
+): String = when (this) {
+    com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus.NORMAL -> "正常"
+    com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus.ELEVATED -> "偏高"
+    com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus.HIGH ->
+        when (category.uppercase()) {
+            "STAGE1" -> "1级偏高"
+            "STAGE2" -> "2级偏高"
+            else -> "严重偏高"
+        }
+    com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus.HIGH_RISK -> "含高风险读数"
 }

@@ -21,7 +21,7 @@ import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
         MeasurementReadingEntity::class,
         UserProfileEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,10 +35,10 @@ abstract class AppDatabase : RoomDatabase() {
                 context,
                 AppDatabase::class.java,
                 "blood_pressure_record.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
         }
 
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
@@ -97,6 +97,34 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_measurement_sessions_measuredAt` " +
                         "ON `measurement_sessions` (`measuredAt`)"
+                )
+            }
+        }
+
+        /**
+         * 旧版本只按平均值写入 highRiskAlertTriggered。
+         * v4 保留物理列名，但把内容无损修正为“原始任一组或平均值为高风险”。
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    UPDATE measurement_sessions
+                    SET highRiskAlertTriggered =
+                        CASE
+                            WHEN avgSystolic > 180 OR avgDiastolic > 120 THEN 1
+                            WHEN EXISTS (
+                                SELECT 1
+                                FROM measurement_readings
+                                WHERE measurement_readings.sessionId = measurement_sessions.id
+                                  AND (
+                                      measurement_readings.systolic > 180
+                                      OR measurement_readings.diastolic > 120
+                                  )
+                            ) THEN 1
+                            ELSE 0
+                        END
+                    """.trimIndent()
                 )
             }
         }

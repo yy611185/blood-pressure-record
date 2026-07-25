@@ -18,6 +18,11 @@ captures/
 *.jks
 *.keystore
 *.p12
+*.pem
+*.key
+keystore_base64.txt
+*.env
+.env.*
 keystore/*
 !keystore/.gitignore
 

@@ -1,10 +1,9 @@
 package com.example.bloodpressurerecord.ui.common
 
 import com.example.bloodpressurerecord.data.repository.SessionReadingInput
-import com.example.bloodpressurerecord.domain.calculator.AverageCalculator
-import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
-import com.example.bloodpressurerecord.domain.calculator.HighRiskJudge
-import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
+import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.calculator.ReadingValidationError
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 
@@ -18,15 +17,23 @@ data class SessionDerivedResult(
     val avgSystolic: Int?,
     val avgDiastolic: Int?,
     val avgPulse: Int?,
-    val categoryLabel: String
+    val categoryLabel: String,
+    val containsHighRiskReading: Boolean = false
 )
 
 data class SessionValidationResult(
     val readings: List<SessionReadingInput> = emptyList(),
+    val containsHighRiskReading: Boolean = false,
     val error: String? = null
 )
 
 object SessionFormLogic {
+    const val UI_MAX_READING_COUNT = 10
+
+    fun saveDisabledReason(readings: List<SessionReadingInputUi>): String? {
+        return validateAndBuildReadings(readings, requiredCount = 2).error
+    }
+
     fun recomputeDerived(
         readings: List<SessionReadingInputUi>,
         requiredCount: Int = 2
@@ -34,22 +41,23 @@ object SessionFormLogic {
         val validReadings = readings.mapNotNull { ui ->
             val sys = ui.systolic.toIntOrNull()
             val dia = ui.diastolic.toIntOrNull()
-            if (sys != null && dia != null && sys > 0 && dia > 0 && dia <= sys) {
-                ReadingValue(sys, dia, ui.pulse.toIntOrNull()?.takeIf { it > 0 })
+            val value = if (sys != null && dia != null) {
+                ReadingValue(sys, dia, ui.pulse.toIntOrNull())
             } else {
                 null
             }
+            value?.takeIf { MeasurementInputRules.validateReading(it) == null }
         }
         if (validReadings.size < requiredCount) {
             return SessionDerivedResult(null, null, null, "待计算")
         }
-        val avg = AverageCalculator.calculate(validReadings)
-        val category = CategoryCalculator.calculate(avg.avgSystolic, avg.avgDiastolic)
+        val derived = MeasurementDerivation.derive(validReadings)
         return SessionDerivedResult(
-            avgSystolic = avg.avgSystolic,
-            avgDiastolic = avg.avgDiastolic,
-            avgPulse = avg.avgPulse,
-            categoryLabel = category.toChineseLabel()
+            avgSystolic = derived.average.avgSystolic,
+            avgDiastolic = derived.average.avgDiastolic,
+            avgPulse = derived.average.avgPulse,
+            categoryLabel = derived.category.toChineseLabel(),
+            containsHighRiskReading = derived.containsHighRiskReading
         )
     }
 
@@ -68,16 +76,16 @@ object SessionFormLogic {
         if (list.size < requiredCount) {
             return SessionValidationResult(error = "至少填写两组有效读数后才能保存。")
         }
-        return SessionValidationResult(readings = list)
-    }
-
-    fun containsHighRisk(readings: List<SessionReadingInput>): Boolean {
-        val byReading = readings.any {
-            BloodPressureRules.isHighRisk(it.systolic, it.diastolic)
+        if (list.size > UI_MAX_READING_COUNT) {
+            return SessionValidationResult(
+                error = "每次测量最多填写 $UI_MAX_READING_COUNT 组读数。"
+            )
         }
-        if (byReading) return true
-        val avg = AverageCalculator.calculate(readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) })
-        return HighRiskJudge.shouldTrigger(avg.avgSystolic, avg.avgDiastolic)
+        val values = list.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
+        return SessionValidationResult(
+            readings = list,
+            containsHighRiskReading = MeasurementDerivation.derive(values).containsHighRiskReading
+        )
     }
 
     fun buildAbnormalMessage(readings: List<SessionReadingInput>): String? {
@@ -111,24 +119,37 @@ object SessionFormLogic {
 
         val sys = sysRaw.toIntOrNull()
         val dia = diaRaw.toIntOrNull()
-        if (sys == null || dia == null || sys <= 0 || dia <= 0) {
-            return ParsedReading(error = "$groupName：收缩压和舒张压必须为正整数。")
-        }
-        if (dia > sys) {
-            return ParsedReading(error = "$groupName：舒张压不能大于收缩压。")
+        if (sys == null || dia == null) {
+            return ParsedReading(error = "$groupName：收缩压和舒张压必须为整数。")
         }
 
         val pulse = if (pulseRaw.isBlank()) {
             null
         } else {
             val parsed = pulseRaw.toIntOrNull()
-            if (parsed == null || parsed <= 0) {
-                return ParsedReading(error = "$groupName：脉搏填写时必须为正整数。")
+            if (parsed == null) {
+                return ParsedReading(error = "$groupName：脉搏填写时必须为整数。")
             }
             parsed
         }
 
+        val value = ReadingValue(sys, dia, pulse)
+        val validationError = MeasurementInputRules.validateReading(value)
+        if (validationError != null) {
+            return ParsedReading(error = "$groupName：${validationError.toUserMessage()}")
+        }
         return ParsedReading(reading = SessionReadingInput(sys, dia, pulse))
+    }
+
+    private fun ReadingValidationError.toUserMessage(): String = when (this) {
+        ReadingValidationError.SYSTOLIC_OUT_OF_RANGE ->
+            "收缩压须在 ${MeasurementInputRules.SYSTOLIC_RANGE.first}–${MeasurementInputRules.SYSTOLIC_RANGE.last} 之间。"
+        ReadingValidationError.DIASTOLIC_OUT_OF_RANGE ->
+            "舒张压须在 ${MeasurementInputRules.DIASTOLIC_RANGE.first}–${MeasurementInputRules.DIASTOLIC_RANGE.last} 之间。"
+        ReadingValidationError.DIASTOLIC_NOT_LOWER_THAN_SYSTOLIC ->
+            "舒张压必须低于收缩压。"
+        ReadingValidationError.PULSE_OUT_OF_RANGE ->
+            "脉搏须在 ${MeasurementInputRules.PULSE_RANGE.first}–${MeasurementInputRules.PULSE_RANGE.last} 之间。"
     }
 
     private fun BloodPressureCategory.toChineseLabel(): String = when (this) {

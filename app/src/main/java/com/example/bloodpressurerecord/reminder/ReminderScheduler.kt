@@ -1,12 +1,16 @@
 package com.example.bloodpressurerecord.reminder
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.example.bloodpressurerecord.data.datastore.AppSettings
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -35,6 +39,10 @@ class ReminderScheduler(
 
     fun apply(settings: AppSettings) {
         ReminderNotifications.ensureChannel(context)
+        if (ReminderAuthorization.status(context) != ReminderAuthorizationStatus.GRANTED) {
+            cancelAll()
+            return
+        }
         scheduleOrCancel(
             type = ReminderType.MORNING,
             enabled = settings.morningReminderEnabled,
@@ -45,6 +53,12 @@ class ReminderScheduler(
             enabled = settings.eveningReminderEnabled,
             timeText = settings.eveningReminderTime
         )
+    }
+
+    fun cancelAll() {
+        ReminderType.entries.forEach { type ->
+            alarmManager.cancel(pendingIntent(type))
+        }
     }
 
     private fun scheduleOrCancel(type: ReminderType, enabled: Boolean, timeText: String) {
@@ -72,6 +86,39 @@ class ReminderScheduler(
     }
 }
 
+enum class ReminderAuthorizationStatus {
+    GRANTED,
+    RUNTIME_PERMISSION_REQUIRED,
+    SYSTEM_DISABLED
+}
+
+object ReminderAuthorization {
+    fun status(context: Context): ReminderAuthorizationStatus {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return ReminderAuthorizationStatus.RUNTIME_PERMISSION_REQUIRED
+        }
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            return ReminderAuthorizationStatus.SYSTEM_DISABLED
+        }
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channel = manager.getNotificationChannel(ReminderNotifications.CHANNEL_ID)
+        if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
+            return ReminderAuthorizationStatus.SYSTEM_DISABLED
+        }
+        return ReminderAuthorizationStatus.GRANTED
+    }
+
+    fun settingsIntent(context: Context): Intent {
+        return Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+    }
+}
+
 object ReminderTimeCalculator {
     fun nextTriggerMillis(
         timeText: String,
@@ -89,7 +136,6 @@ object ReminderNotifications {
     const val CHANNEL_ID = "blood_pressure_reminders"
 
     fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(

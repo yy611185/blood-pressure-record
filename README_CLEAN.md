@@ -5,9 +5,10 @@
 - 主数据使用 Room
 - 设置项使用 DataStore
 - 无登录、无服务器、无云同步
+- Android 系统自动备份已关闭；卸载前需由用户主动导出 Excel 备份
 
 ## 当前版本
-- `versionName`: `1.1.4`
+- `versionName`: `1.6.0`
 - UI 已按 Stitch 方案做增量落地（不改核心业务逻辑）
 
 ## 技术栈

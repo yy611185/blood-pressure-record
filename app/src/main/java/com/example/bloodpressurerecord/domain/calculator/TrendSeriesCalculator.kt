@@ -6,6 +6,7 @@ import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
+import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.ceil
@@ -113,6 +114,7 @@ object TrendSeriesCalculator {
             diastolic = diastolic,
             pulse = pulse,
             category = category,
+            containsHighRiskReading = containsHighRiskReading,
             recordCount = 1,
             aggregation = TrendAggregation.RAW
         )
@@ -122,20 +124,20 @@ object TrendSeriesCalculator {
         return groupBy {
             Instant.ofEpochMilli(it.measuredAt).atZone(zoneId).toLocalDate()
         }.toSortedMap().map { (date, dayRecords) ->
-            val start = date.atStartOfDay(zoneId).toInstant().toEpochMilli()
-            val end = date.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            val range = date.toEpochMillisRange(zoneId)
             val systolic = dayRecords.map { it.systolic }.average().roundToInt()
             val diastolic = dayRecords.map { it.diastolic }.average().roundToInt()
             val pulseValues = dayRecords.mapNotNull { it.pulse }
             TrendPoint(
                 id = "day:$date",
-                timestamp = start,
-                intervalStart = start,
-                intervalEndExclusive = end,
+                timestamp = range.startInclusive,
+                intervalStart = range.startInclusive,
+                intervalEndExclusive = range.endExclusive,
                 systolic = systolic,
                 diastolic = diastolic,
                 pulse = pulseValues.takeIf { it.isNotEmpty() }?.average()?.roundToInt(),
                 category = CategoryCalculator.calculate(systolic, diastolic).name,
+                containsHighRiskReading = dayRecords.any { it.containsHighRiskReading },
                 recordCount = dayRecords.size,
                 aggregation = TrendAggregation.DAILY
             )

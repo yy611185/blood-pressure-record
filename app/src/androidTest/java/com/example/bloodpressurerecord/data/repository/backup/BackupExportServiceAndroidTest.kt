@@ -13,6 +13,9 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
@@ -56,7 +59,7 @@ class BackupExportServiceAndroidTest {
                 avgDiastolic = 80,
                 avgPulse = 72,
                 category = "NORMAL",
-                highRiskAlertTriggered = false,
+                containsHighRiskReading = false,
                 createdAt = 1_774_406_601_000L,
                 updatedAt = 1_774_406_601_000L
             ),
@@ -108,7 +111,7 @@ class BackupExportServiceAndroidTest {
                 avgDiastolic = 84,
                 avgPulse = 75,
                 category = "STAGE1",
-                highRiskAlertTriggered = false,
+                containsHighRiskReading = false,
                 createdAt = 1_774_406_601_000L,
                 updatedAt = 1_774_406_601_000L
             ),
@@ -141,10 +144,328 @@ class BackupExportServiceAndroidTest {
             .importXlsx(ByteArrayInputStream(bytes))
         val restored = database.measurementSessionDao().getSessionWithReadings(sessionId)
 
-        assertEquals(1, result.sessionCount)
+        assertEquals(1, result.insertedCount)
+        assertEquals(0, result.replacedCount)
         assertEquals(8, result.readingCount)
         assertEquals("运动后", restored?.session?.scene)
         assertEquals("[\"心悸\"]", restored?.session?.symptomsJson)
         assertEquals(8, restored?.readings?.size)
+    }
+
+    @Test
+    fun import_recalculatesTamperedAverageAndRiskFromRawReadings() = runTest {
+        val sessionId = "tampered-derived"
+        val bytes = exportSingleSession(
+            sessionId,
+            listOf(
+                Triple(190, 90, 70),
+                Triple(110, 70, 72)
+            )
+        )
+        val tampered = mutateWorkbook(bytes) { workbook ->
+            workbook.getSheet("测量记录").getRow(1).apply {
+                getCell(5).setCellValue(999.0)
+                getCell(6).setCellValue(199.0)
+                getCell(8).setCellValue("NORMAL")
+                getCell(9).setCellValue(false)
+            }
+        }
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+
+        val result = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        ).importXlsx(ByteArrayInputStream(tampered))
+        val restored = database.measurementSessionDao().getSessionWithReadings(sessionId)
+
+        assertEquals(1, result.correctedCount)
+        assertEquals(150, restored?.session?.avgSystolic)
+        assertEquals(80, restored?.session?.avgDiastolic)
+        assertTrue(restored?.session?.containsHighRiskReading == true)
+    }
+
+    @Test
+    fun import_skipsRecordWhenDiastolicIsNotLowerThanSystolic() = runTest {
+        val bytes = exportSingleSession(
+            "invalid-relation",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        val tampered = mutateWorkbook(bytes) { workbook ->
+            workbook.getSheet("原始读数").getRow(1).apply {
+                getCell(3).setCellValue(getCell(2).numericCellValue)
+            }
+        }
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+
+        val result = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        ).importXlsx(ByteArrayInputStream(tampered))
+
+        assertEquals(1, result.skippedCount)
+        assertEquals(1, result.errorCount)
+        assertEquals(0, database.measurementSessionDao().countSessions())
+    }
+
+    @Test
+    fun import_skipsRecordWithFewerThanTwoReadings() = runTest {
+        val bytes = exportSingleSession(
+            "too-few",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        val tampered = mutateWorkbook(bytes) { workbook ->
+            val sheet = workbook.getSheet("原始读数")
+            sheet.removeRow(sheet.getRow(2))
+        }
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+
+        val result = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        ).importXlsx(ByteArrayInputStream(tampered))
+
+        assertEquals(1, result.skippedCount)
+        assertEquals(BackupImportErrorCode.INVALID_READING_COUNT, result.errors.single().code)
+    }
+
+    @Test
+    fun importingSameBackupTwiceIsIdempotent() = runTest {
+        val bytes = exportSingleSession(
+            "idempotent",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+        val service = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        )
+
+        val first = service.importXlsx(ByteArrayInputStream(bytes))
+        val second = service.importXlsx(ByteArrayInputStream(bytes))
+
+        assertEquals(1, first.insertedCount)
+        assertEquals(1, second.replacedCount)
+        assertEquals(1, database.measurementSessionDao().countSessions())
+        assertEquals(2, database.measurementSessionDao().countReadings())
+    }
+
+    @Test
+    fun duplicateRecordIdRejectsWholeFileBeforeWriting() = runTest {
+        val bytes = exportSingleSession(
+            "duplicate",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        val duplicated = mutateWorkbook(bytes) { workbook ->
+            val sheet = workbook.getSheet("测量记录")
+            val source = sheet.getRow(1)
+            val target = sheet.createRow(2)
+            val dataFormatter = org.apache.poi.ss.usermodel.DataFormatter()
+            for (index in 0 until source.lastCellNum) {
+                target.createCell(index).setCellValue(
+                    dataFormatter.formatCellValue(source.getCell(index))
+                )
+            }
+        }
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+
+        try {
+            BackupImportService(
+                database,
+                AppSettingsStore(ApplicationProvider.getApplicationContext())
+            ).importXlsx(ByteArrayInputStream(duplicated))
+            fail("duplicate record_id should fail")
+        } catch (expected: BackupFormatException) {
+            assertTrue(expected.message.orEmpty().contains("重复"))
+        }
+        assertEquals(0, database.measurementSessionDao().countSessions())
+    }
+
+    @Test
+    fun emptyAndCorruptFilesFailWithoutWriting() = runTest {
+        val service = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        )
+        listOf(byteArrayOf(), "not-xlsx".toByteArray()).forEach { bytes ->
+            try {
+                service.importXlsx(ByteArrayInputStream(bytes))
+                fail("invalid file should fail")
+            } catch (_: BackupFormatException) {
+                // expected
+            }
+        }
+        assertEquals(0, database.measurementSessionDao().countSessions())
+    }
+
+    @Test
+    fun exceptionDuringImportRollsBackWholeRoomTransaction() = runTest {
+        val bytes = exportTwoSessions()
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+        val service = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext()),
+            beforeRecordWrite = { index -> if (index == 1) error("injected failure") }
+        )
+
+        try {
+            service.importXlsx(ByteArrayInputStream(bytes))
+            fail("injected failure should escape")
+        } catch (_: IllegalStateException) {
+            // expected
+        }
+
+        assertEquals(0, database.measurementSessionDao().countSessions())
+        assertEquals(0, database.measurementSessionDao().countReadings())
+    }
+
+    @Test
+    fun importsOneThousandAndFiveThousandRecordsInBatches() = runTest {
+        listOf(1_000, 5_000).forEach { count ->
+            val bytes = buildLargeBackup(count)
+            database.measurementSessionDao().deleteAllReadings()
+            database.measurementSessionDao().deleteAllSessions()
+
+            val result = BackupImportService(
+                database,
+                AppSettingsStore(ApplicationProvider.getApplicationContext())
+            ).importXlsx(ByteArrayInputStream(bytes))
+
+            assertEquals(count, result.insertedCount)
+            assertEquals(count, database.measurementSessionDao().countSessions())
+            assertEquals(count * 2, database.measurementSessionDao().countReadings())
+            database.measurementSessionDao().deleteAllReadings()
+            database.measurementSessionDao().deleteAllSessions()
+        }
+    }
+
+    private suspend fun exportSingleSession(
+        sessionId: String,
+        values: List<Triple<Int, Int, Int>>
+    ): ByteArray {
+        val averages = com.example.bloodpressurerecord.domain.calculator.AverageCalculator.calculate(
+            values.map {
+                com.example.bloodpressurerecord.domain.model.ReadingValue(it.first, it.second, it.third)
+            }
+        )
+        database.measurementSessionDao().insertSessionWithReadings(
+            MeasurementSessionEntity(
+                id = sessionId,
+                measuredAt = 1_774_406_600_000L,
+                scene = "晨起",
+                note = null,
+                symptomsJson = null,
+                avgSystolic = averages.avgSystolic,
+                avgDiastolic = averages.avgDiastolic,
+                avgPulse = averages.avgPulse,
+                category = com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
+                    .calculate(averages.avgSystolic, averages.avgDiastolic).name,
+                containsHighRiskReading = false,
+                createdAt = 1_774_406_600_000L,
+                updatedAt = 1_774_406_600_000L
+            ),
+            values.mapIndexed { index, value ->
+                MeasurementReadingEntity(
+                    id = "$sessionId-$index",
+                    sessionId = sessionId,
+                    orderIndex = index + 1,
+                    systolic = value.first,
+                    diastolic = value.second,
+                    pulse = value.third
+                )
+            }
+        )
+        return exportCurrentDatabase()
+    }
+
+    private suspend fun exportTwoSessions(): ByteArray {
+        exportSingleSession(
+            "rollback-1",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        exportSingleSession(
+            "rollback-2",
+            listOf(Triple(124, 84, 74), Triple(126, 86, 76))
+        )
+        return exportCurrentDatabase()
+    }
+
+    private suspend fun buildLargeBackup(count: Int): ByteArray {
+        val dao = database.measurementSessionDao()
+        (0 until count).chunked(250).forEach { indexes ->
+            dao.insertSessions(
+                indexes.map { index ->
+                    MeasurementSessionEntity(
+                        id = "bulk-$index",
+                        measuredAt = 1_700_000_000_000L + index * 60_000L,
+                        scene = "批量测试",
+                        note = "record-$index",
+                        symptomsJson = null,
+                        avgSystolic = 121,
+                        avgDiastolic = 81,
+                        avgPulse = 71,
+                        category = "NORMAL",
+                        containsHighRiskReading = false,
+                        createdAt = 1_700_000_000_000L + index * 60_000L,
+                        updatedAt = 1_700_000_000_000L + index * 60_000L
+                    )
+                }
+            )
+            dao.insertReadings(
+                indexes.flatMap { index ->
+                    listOf(
+                        MeasurementReadingEntity(
+                            id = "bulk-$index-1",
+                            sessionId = "bulk-$index",
+                            orderIndex = 1,
+                            systolic = 120,
+                            diastolic = 80,
+                            pulse = 70
+                        ),
+                        MeasurementReadingEntity(
+                            id = "bulk-$index-2",
+                            sessionId = "bulk-$index",
+                            orderIndex = 2,
+                            systolic = 122,
+                            diastolic = 82,
+                            pulse = 72
+                        )
+                    )
+                }
+            )
+        }
+        return exportCurrentDatabase()
+    }
+
+    private suspend fun exportCurrentDatabase(): ByteArray {
+        val settingsStore = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val payload = BackupExportService(
+            sessionDao = database.measurementSessionDao(),
+            measurementDao = database.measurementDao(),
+            userProfileDao = database.userProfileDao(),
+            appSettingsStore = settingsStore
+        ).buildPayload("家庭血压记录", "test")
+        return ByteArrayOutputStream().use { output ->
+            BackupFileWriter().writeXlsx(payload, output)
+            output.toByteArray()
+        }
+    }
+
+    private fun mutateWorkbook(
+        source: ByteArray,
+        block: (XSSFWorkbook) -> Unit
+    ): ByteArray {
+        return XSSFWorkbook(ByteArrayInputStream(source)).use { workbook ->
+            block(workbook)
+            ByteArrayOutputStream().use { output ->
+                workbook.write(output)
+                output.toByteArray()
+            }
+        }
     }
 }

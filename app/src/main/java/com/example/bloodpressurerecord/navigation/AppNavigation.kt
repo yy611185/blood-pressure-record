@@ -32,6 +32,7 @@ import com.example.bloodpressurerecord.ui.history.HistoryDetailScreen
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
 import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardScreen
+import com.example.bloodpressurerecord.ui.home.DashboardViewModel
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.record.AddMeasurementScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsScreen
@@ -45,6 +46,7 @@ import com.example.bloodpressurerecord.ui.settings.SettingsInfoScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoMeasurementTipsScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoReleaseNotesScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsDisclaimerScreen
+import java.time.LocalDate
 
 @Composable
 fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
@@ -120,10 +122,21 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
             }
         ) {
             composable(AppDestination.Measure.route) {
-                val historyVm: HistoryViewModel = viewModel(factory = factory)
+                val dashboardVm: DashboardViewModel = viewModel(factory = factory)
                 DashboardScreen(
-                    historyViewModel = historyVm,
-                    onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) }
+                    viewModel = dashboardVm,
+                    onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
+                    onViewTodayRecords = {
+                        navController.navigate(AppDestination.History.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                        navController.currentBackStackEntry?.savedStateHandle?.set(
+                            "history_open_date",
+                            LocalDate.now().toString()
+                        )
+                    }
                 )
             }
             composable(AppDestination.AddMeasurement.route) {
@@ -134,8 +147,16 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     onSaved = { navController.popBackStack() }
                 )
             }
-            composable(AppDestination.History.route) {
+            composable(AppDestination.History.route) { backStack ->
                 val historyVm: HistoryViewModel = viewModel(factory = factory)
+                val requestedDate = backStack.savedStateHandle.get<String>("history_open_date")
+                LaunchedEffect(requestedDate) {
+                    requestedDate?.let {
+                        runCatching { LocalDate.parse(it) }.getOrNull()
+                            ?.let(historyVm::openDateWhenAvailable)
+                        backStack.savedStateHandle.remove<String>("history_open_date")
+                    }
+                }
                 HistoryScreen(
                     viewModel = historyVm,
                     onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },

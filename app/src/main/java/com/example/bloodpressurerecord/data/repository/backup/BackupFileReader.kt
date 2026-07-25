@@ -1,23 +1,37 @@
 package com.example.bloodpressurerecord.data.repository.backup
 
 import java.io.InputStream
+import java.math.BigDecimal
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
 import org.apache.poi.ss.usermodel.Sheet
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 
+data class BackupImportReading(
+    val sourceRowNumber: Int,
+    val orderIndex: Int?,
+    val systolic: Int?,
+    val diastolic: Int?,
+    val pulse: Int?,
+    val pulseWasInvalid: Boolean
+)
+
 data class BackupImportMeasurement(
+    val sourceRowNumber: Int,
     val recordId: String,
     val measuredAt: String,
-    val avgSystolic: Int,
-    val avgDiastolic: Int,
-    val avgPulse: Int?,
+    val backupGroupCount: Int?,
+    val backupAvgSystolic: Int?,
+    val backupAvgDiastolic: Int?,
+    val backupAvgPulse: Int?,
+    val backupLevel: String?,
+    val backupHighAlert: Boolean?,
     val scene: String?,
     val symptomsJson: String?,
     val note: String?,
     val createdAt: String?,
     val updatedAt: String?,
-    val readings: List<BackupReadingValue>
+    val readings: List<BackupImportReading>
 )
 
 data class BackupImportDocument(
@@ -26,112 +40,152 @@ data class BackupImportDocument(
     val meta: Map<String, String>
 )
 
+class BackupFormatException(message: String, cause: Throwable? = null) :
+    IllegalArgumentException(message, cause)
+
 class BackupFileReader {
     private val formatter = DataFormatter()
 
     fun readXlsx(inputStream: InputStream): BackupImportDocument {
-        return XSSFWorkbook(inputStream).use { workbook ->
-            val measurementSheet = workbook.getSheet("测量记录")
-                ?: error("不是受支持的备份文件：缺少“测量记录”工作表")
-            val readingRows = workbook.getSheet("原始读数")
-                ?.let(::readReadingRows)
-                .orEmpty()
-                .groupBy { it.first }
+        val workbook = try {
+            XSSFWorkbook(inputStream)
+        } catch (throwable: Exception) {
+            throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", throwable)
+        }
 
-            val measurements = readMeasurements(measurementSheet, readingRows)
-            if (measurements.isEmpty()) {
-                error("备份文件中没有可导入的测量记录")
+        return workbook.use {
+            val metaSheet = workbook.getSheet(SHEET_META)
+                ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
+            val meta = metaSheet.readKeyValues()
+            val version = meta["export_format_version"]?.toIntOrNull()
+                ?: throw BackupFormatException("缺少或无法识别备份格式版本")
+            if (version !in SUPPORTED_FORMAT_VERSIONS) {
+                throw BackupFormatException("不支持的备份格式版本：$version")
             }
+
+            val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
+                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
+            val readingsSheet = workbook.getSheet(SHEET_READINGS)
+                ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
+
+            val readingRows = readReadingRows(readingsSheet)
+            if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
+                throw BackupFormatException("原始读数总数超过允许上限")
+            }
+            val measurements = readMeasurements(
+                measurementSheet,
+                readingRows.groupBy { it.recordId }
+            )
+            if (measurements.isEmpty()) {
+                throw BackupFormatException("备份文件中没有可导入的测量记录")
+            }
+            if (measurements.size > BackupImportLimits.MAX_RECORDS) {
+                throw BackupFormatException("测量记录总数超过允许上限")
+            }
+            val duplicateIds = measurements.groupingBy { it.recordId }
+                .eachCount()
+                .filterValues { it > 1 }
+            if (duplicateIds.isNotEmpty()) {
+                throw BackupFormatException("备份中存在重复 record_id，未执行导入")
+            }
+            val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
+            if (readingRows.any { it.recordId !in knownIds }) {
+                throw BackupFormatException("原始读数引用了不存在的测量记录")
+            }
+
             BackupImportDocument(
                 measurements = measurements,
-                userProfile = workbook.getSheet("用户资料")?.readKeyValues().orEmpty(),
-                meta = workbook.getSheet("导出信息")?.readKeyValues().orEmpty()
+                userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
+                meta = meta
             )
         }
     }
 
     private fun readMeasurements(
         sheet: Sheet,
-        readingRows: Map<String, List<Pair<String, BackupReadingValue>>>
+        readingRows: Map<String, List<RawReadingRow>>
     ): List<BackupImportMeasurement> {
         val columns = sheet.headerColumns()
-        requireColumns(columns, "record_id", "measured_at", "avg_sys", "avg_dia")
+        requireColumns(
+            columns,
+            "record_id",
+            "measured_at",
+            "group_count",
+            "avg_sys",
+            "avg_dia",
+            "avg_pulse",
+            "level",
+            "high_alert"
+        )
         return (1..sheet.lastRowNum).mapNotNull { rowIndex ->
             val row = sheet.getRow(rowIndex) ?: return@mapNotNull null
+            if (row.isEffectivelyBlank()) return@mapNotNull null
             val recordId = row.text(columns, "record_id").trim()
-            if (recordId.isBlank()) return@mapNotNull null
-            val avgSystolic = row.int(columns, "avg_sys")
-                ?: error("测量记录第 ${rowIndex + 1} 行缺少 avg_sys")
-            val avgDiastolic = row.int(columns, "avg_dia")
-                ?: error("测量记录第 ${rowIndex + 1} 行缺少 avg_dia")
-
-            val readings = readingRows[recordId]
-                ?.map { it.second }
-                ?.takeIf { it.isNotEmpty() }
-                ?: readLegacyInlineReadings(row, columns)
-                    .takeIf { it.isNotEmpty() }
-                ?: listOf(
-                    BackupReadingValue(
-                        systolic = avgSystolic,
-                        diastolic = avgDiastolic,
-                        pulse = row.int(columns, "avg_pulse")
-                    )
-                )
+            if (recordId.isBlank()) {
+                throw BackupFormatException("测量记录第 ${rowIndex + 1} 行缺少 record_id")
+            }
+            if (recordId.length > BackupImportLimits.MAX_RECORD_ID_LENGTH) {
+                throw BackupFormatException("测量记录第 ${rowIndex + 1} 行的 record_id 过长")
+            }
 
             BackupImportMeasurement(
+                sourceRowNumber = rowIndex + 1,
                 recordId = recordId,
-                measuredAt = row.text(columns, "measured_at"),
-                avgSystolic = avgSystolic,
-                avgDiastolic = avgDiastolic,
-                avgPulse = row.int(columns, "avg_pulse"),
+                measuredAt = row.text(columns, "measured_at").trim(),
+                backupGroupCount = row.strictInt(columns, "group_count"),
+                backupAvgSystolic = row.strictInt(columns, "avg_sys"),
+                backupAvgDiastolic = row.strictInt(columns, "avg_dia"),
+                backupAvgPulse = row.strictInt(columns, "avg_pulse"),
+                backupLevel = row.optionalText(columns, "level"),
+                backupHighAlert = row.strictBoolean(columns, "high_alert"),
                 scene = row.optionalText(columns, "scene"),
                 symptomsJson = row.optionalText(columns, "symptoms_json"),
                 note = row.optionalText(columns, "note"),
                 createdAt = row.optionalText(columns, "created_at"),
                 updatedAt = row.optionalText(columns, "updated_at"),
-                readings = readings
+                readings = readingRows[recordId].orEmpty()
+                    .sortedWith(compareBy<RawReadingRow> { it.orderIndex ?: Int.MAX_VALUE }.thenBy { it.sourceRowNumber })
+                    .map { raw ->
+                        BackupImportReading(
+                            sourceRowNumber = raw.sourceRowNumber,
+                            orderIndex = raw.orderIndex,
+                            systolic = raw.systolic,
+                            diastolic = raw.diastolic,
+                            pulse = raw.pulse,
+                            pulseWasInvalid = raw.pulseWasInvalid
+                        )
+                    }
             )
         }
     }
 
-    private fun readReadingRows(sheet: Sheet): List<Pair<String, BackupReadingValue>> {
+    private fun readReadingRows(sheet: Sheet): List<RawReadingRow> {
         val columns = sheet.headerColumns()
-        requireColumns(columns, "record_id", "order_index", "systolic", "diastolic")
+        requireColumns(columns, "record_id", "order_index", "systolic", "diastolic", "pulse")
         return (1..sheet.lastRowNum).mapNotNull { rowIndex ->
             val row = sheet.getRow(rowIndex) ?: return@mapNotNull null
+            if (row.isEffectivelyBlank()) return@mapNotNull null
             val recordId = row.text(columns, "record_id").trim()
-            if (recordId.isBlank()) return@mapNotNull null
-            val order = row.int(columns, "order_index") ?: rowIndex
-            val systolic = row.int(columns, "systolic")
-                ?: error("原始读数第 ${rowIndex + 1} 行缺少 systolic")
-            val diastolic = row.int(columns, "diastolic")
-                ?: error("原始读数第 ${rowIndex + 1} 行缺少 diastolic")
-            Triple(
-                recordId,
-                order,
-                BackupReadingValue(systolic, diastolic, row.int(columns, "pulse"))
-            )
-        }.sortedWith(compareBy<Triple<String, Int, BackupReadingValue>> { it.first }.thenBy { it.second })
-            .map { it.first to it.third }
-    }
-
-    private fun readLegacyInlineReadings(
-        row: Row,
-        columns: Map<String, Int>
-    ): List<BackupReadingValue> {
-        return generateSequence(1) { it + 1 }
-            .takeWhile { columns.containsKey("sys_$it") || columns.containsKey("dia_$it") }
-            .mapNotNull { index ->
-                val systolic = row.int(columns, "sys_$index")
-                val diastolic = row.int(columns, "dia_$index")
-                if (systolic == null || diastolic == null) null
-                else BackupReadingValue(systolic, diastolic, row.int(columns, "pulse_$index"))
+            if (recordId.isBlank()) {
+                throw BackupFormatException("原始读数第 ${rowIndex + 1} 行缺少 record_id")
             }
-            .toList()
+            val pulseRaw = row.text(columns, "pulse").trim()
+            val pulse = pulseRaw.toStrictIntOrNull()
+            RawReadingRow(
+                recordId = recordId,
+                sourceRowNumber = rowIndex + 1,
+                orderIndex = row.strictInt(columns, "order_index"),
+                systolic = row.strictInt(columns, "systolic"),
+                diastolic = row.strictInt(columns, "diastolic"),
+                pulse = pulse,
+                pulseWasInvalid = pulseRaw.isNotEmpty() && pulse == null
+            )
+        }
     }
 
     private fun Sheet.headerColumns(): Map<String, Int> {
-        val header = getRow(0) ?: error("工作表“$sheetName”缺少表头")
+        val header = getRow(0) ?: throw BackupFormatException("工作表“$sheetName”缺少表头")
+        if (header.lastCellNum < 0) throw BackupFormatException("工作表“$sheetName”表头为空")
         return (header.firstCellNum.toInt().coerceAtLeast(0) until header.lastCellNum.toInt())
             .mapNotNull { index ->
                 formatter.formatCellValue(header.getCell(index)).trim()
@@ -149,6 +203,12 @@ class BackupFileReader {
         }.toMap()
     }
 
+    private fun Row.isEffectivelyBlank(): Boolean {
+        if (lastCellNum < 0) return true
+        return (firstCellNum.toInt().coerceAtLeast(0) until lastCellNum.toInt())
+            .all { formatter.formatCellValue(getCell(it)).isBlank() }
+    }
+
     private fun Row.text(columns: Map<String, Int>, name: String): String {
         val index = columns[name] ?: return ""
         return formatter.formatCellValue(getCell(index))
@@ -158,13 +218,49 @@ class BackupFileReader {
         return text(columns, name).trim().takeIf { it.isNotEmpty() }
     }
 
-    private fun Row.int(columns: Map<String, Int>, name: String): Int? {
-        val raw = text(columns, name).trim()
-        return raw.toIntOrNull() ?: raw.toDoubleOrNull()?.toInt()
+    private fun Row.strictInt(columns: Map<String, Int>, name: String): Int? {
+        return text(columns, name).trim().toStrictIntOrNull()
+    }
+
+    private fun Row.strictBoolean(columns: Map<String, Int>, name: String): Boolean? {
+        return when (text(columns, name).trim().lowercase()) {
+            "true", "1" -> true
+            "false", "0" -> false
+            else -> null
+        }
+    }
+
+    private fun String.toStrictIntOrNull(): Int? {
+        if (isBlank()) return null
+        return runCatching {
+            BigDecimal(this).stripTrailingZeros().let { number ->
+                if (number.scale() > 0) null else number.intValueExact()
+            }
+        }.getOrNull()
     }
 
     private fun requireColumns(columns: Map<String, Int>, vararg names: String) {
         val missing = names.filterNot(columns::containsKey)
-        require(missing.isEmpty()) { "备份文件缺少必要列：${missing.joinToString()}" }
+        if (missing.isNotEmpty()) {
+            throw BackupFormatException("备份文件缺少必要列：${missing.joinToString()}")
+        }
+    }
+
+    private data class RawReadingRow(
+        val recordId: String,
+        val sourceRowNumber: Int,
+        val orderIndex: Int?,
+        val systolic: Int?,
+        val diastolic: Int?,
+        val pulse: Int?,
+        val pulseWasInvalid: Boolean
+    )
+
+    companion object {
+        private const val SHEET_MEASUREMENTS = "测量记录"
+        private const val SHEET_READINGS = "原始读数"
+        private const val SHEET_PROFILE = "用户资料"
+        private const val SHEET_META = "导出信息"
+        private val SUPPORTED_FORMAT_VERSIONS = setOf(2)
     }
 }

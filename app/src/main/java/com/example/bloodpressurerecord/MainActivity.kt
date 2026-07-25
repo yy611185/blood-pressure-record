@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
             val settingsViewModel: SettingsViewModel = viewModel(
                 factory = AppViewModelFactory(application)
             )
-            val settingsUiState by settingsViewModel.uiState.collectAsState()
+            val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
             val currentDensity = LocalDensity.current
             val appFontScale = if (settingsUiState.isLargeTextEnabled) 1.15f else 1f
 

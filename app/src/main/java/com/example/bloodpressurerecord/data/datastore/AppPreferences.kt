@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.data.datastore
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 
 val Context.appDataStore by preferencesDataStore(name = "app_preferences")
@@ -16,4 +17,5 @@ object PreferenceKeys {
     val EVENING_REMINDER_ENABLED = booleanPreferencesKey("evening_reminder_enabled")
     val EVENING_REMINDER_TIME = stringPreferencesKey("evening_reminder_time")
     val DEFAULT_SCENE = stringPreferencesKey("default_scene")
+    val LAST_SUCCESSFUL_EXPORT_AT = longPreferencesKey("last_successful_export_at")
 }

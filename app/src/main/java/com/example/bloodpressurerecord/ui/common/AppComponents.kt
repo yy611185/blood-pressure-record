@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material3.Button
@@ -26,34 +25,40 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.bloodpressurerecord.R
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
+import com.example.bloodpressurerecord.ui.theme.style
 
 @Composable
 fun AppPrimaryButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    enabled: Boolean = true
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(56.dp),
+        enabled = enabled,
+        modifier = modifier.height(AppDimensions.primaryButtonHeight),
         shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary
         ),
-        contentPadding = PaddingValues(horizontal = 24.dp)
+        contentPadding = PaddingValues(horizontal = AppSpacing.xLarge)
     ) {
         if (icon != null) {
-            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.width(8.dp))
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(AppSpacing.xLarge))
+            Spacer(modifier = Modifier.width(AppSpacing.small))
         }
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -65,7 +70,7 @@ fun AppSecondaryButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(56.dp),
+        modifier = modifier.height(AppDimensions.primaryButtonHeight),
         shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -73,7 +78,7 @@ fun AppSecondaryButton(
         ),
         elevation = ButtonDefaults.buttonElevation(0.dp)
     ) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -85,7 +90,7 @@ fun AppDangerButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(56.dp),
+        modifier = modifier.height(AppDimensions.primaryButtonHeight),
         shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -93,7 +98,7 @@ fun AppDangerButton(
         ),
         elevation = ButtonDefaults.buttonElevation(0.dp)
     ) {
-        Text(text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -114,7 +119,7 @@ fun DataCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Box(modifier = Modifier.padding(16.dp)) {
+        Box(modifier = Modifier.padding(AppSpacing.large)) {
             content()
         }
     }
@@ -124,17 +129,36 @@ fun DataCard(
 fun StatusChip(
     text: String,
     isAbnormal: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    status: BloodPressureVisualStatus? = null
 ) {
-    val containerColor = if (isAbnormal) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer
-    val contentColor = if (isAbnormal) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+    val resolved = status?.style(MaterialTheme.colorScheme)
+    val containerColor = resolved?.containerColor ?: if (isAbnormal) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = resolved?.contentColor ?: if (isAbnormal) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
 
-    Box(
+    Row(
         modifier = modifier
-            .background(color = containerColor, shape = RoundedCornerShape(percent = 50))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        contentAlignment = Alignment.Center
+            .background(color = containerColor, shape = MaterialTheme.shapes.large)
+            .padding(horizontal = AppSpacing.medium, vertical = AppSpacing.xSmall),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        resolved?.let {
+            Icon(
+                imageVector = it.icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(AppSpacing.large)
+            )
+            Spacer(Modifier.width(AppSpacing.xSmall))
+        }
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
@@ -153,25 +177,24 @@ fun AppTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .background(Color.Transparent)
-            .padding(horizontal = 16.dp),
+            .height(AppDimensions.primaryButtonHeight + AppSpacing.small)
+            .padding(horizontal = AppDimensions.pageHorizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBack != null) {
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(40.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                    .size(AppDimensions.minimumTouchTarget)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
             ) {
                 Icon(
                     imageVector = Icons.Default.ChevronLeft,
-                    contentDescription = "Back",
+                    contentDescription = stringResource(R.string.back),
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(AppSpacing.large))
         }
         
         Text(

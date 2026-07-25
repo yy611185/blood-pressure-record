@@ -29,7 +29,11 @@ data class SettingsUiState(
     val showClearConfirm: Boolean = false,
     val showBackupExportConfirm: Boolean = false,
     val showBackupImportConfirm: Boolean = false,
-    val isDataActionRunning: Boolean = false
+    val isDataActionRunning: Boolean = false,
+    val lastSuccessfulExportAt: Long? = null,
+    val ageError: String? = null,
+    val targetSystolicError: String? = null,
+    val targetDiastolicError: String? = null
 )
 
 class SettingsViewModel(
@@ -60,7 +64,8 @@ class SettingsViewModel(
                         ageText = profileAge,
                         gender = profileGender,
                         targetSystolicText = profileTargetSys,
-                        targetDiastolicText = profileTargetDia
+                        targetDiastolicText = profileTargetDia,
+                        lastSuccessfulExportAt = bundle.appSettings.lastSuccessfulExportAt
                     )
                 }
             }
@@ -80,11 +85,29 @@ class SettingsViewModel(
     }
 
     fun setMorningReminderEnabled(enabled: Boolean) {
-        viewModelScope.launch { repository.setMorningReminderEnabled(enabled) }
+        viewModelScope.launch {
+            repository.setMorningReminderEnabled(enabled)
+            _uiState.update {
+                it.copy(message = if (enabled) "晨间提醒已启用。" else "晨间提醒已关闭。")
+            }
+        }
     }
 
     fun setEveningReminderEnabled(enabled: Boolean) {
-        viewModelScope.launch { repository.setEveningReminderEnabled(enabled) }
+        viewModelScope.launch {
+            repository.setEveningReminderEnabled(enabled)
+            _uiState.update {
+                it.copy(message = if (enabled) "晚间提醒已启用。" else "晚间提醒已关闭。")
+            }
+        }
+    }
+
+    fun showReminderAuthorizationRequired(message: String) {
+        _uiState.update { it.copy(message = message) }
+    }
+
+    fun refreshReminders() {
+        viewModelScope.launch { repository.refreshReminders() }
     }
 
     fun updateMorningTime(value: String) {
@@ -115,7 +138,7 @@ class SettingsViewModel(
 
     fun updateAgeText(value: String) {
         isProfileDirty = true
-        _uiState.update { it.copy(ageText = value) }
+        _uiState.update { it.copy(ageText = value, ageError = null) }
     }
 
     fun updateGender(value: String) {
@@ -125,12 +148,12 @@ class SettingsViewModel(
 
     fun updateTargetSystolicText(value: String) {
         isProfileDirty = true
-        _uiState.update { it.copy(targetSystolicText = value) }
+        _uiState.update { it.copy(targetSystolicText = value, targetSystolicError = null) }
     }
 
     fun updateTargetDiastolicText(value: String) {
         isProfileDirty = true
-        _uiState.update { it.copy(targetDiastolicText = value) }
+        _uiState.update { it.copy(targetDiastolicText = value, targetDiastolicError = null) }
     }
 
     fun saveUserProfile() {
@@ -140,15 +163,36 @@ class SettingsViewModel(
         val targetDia = state.targetDiastolicText.toIntOrNull()
 
         if (state.ageText.isNotBlank() && age == null) {
-            _uiState.update { it.copy(message = "年龄应为整数。") }
+            _uiState.update { it.copy(ageError = "年龄应为整数。", message = "请检查用户资料。") }
+            return
+        }
+        if (age != null && age !in 1..120) {
+            _uiState.update { it.copy(ageError = "年龄须在 1–120 岁之间。", message = "请检查用户资料。") }
             return
         }
         if (state.targetSystolicText.isNotBlank() && targetSys == null) {
-            _uiState.update { it.copy(message = "目标收缩压应为整数。") }
+            _uiState.update { it.copy(targetSystolicError = "请输入有效整数。", message = "请检查用户资料。") }
             return
         }
         if (state.targetDiastolicText.isNotBlank() && targetDia == null) {
-            _uiState.update { it.copy(message = "目标舒张压应为整数。") }
+            _uiState.update { it.copy(targetDiastolicError = "请输入有效整数。", message = "请检查用户资料。") }
+            return
+        }
+        if (targetSys != null && targetSys !in 40..300) {
+            _uiState.update { it.copy(targetSystolicError = "数值须在 40–300 之间。", message = "请检查用户资料。") }
+            return
+        }
+        if (targetDia != null && targetDia !in 20..200) {
+            _uiState.update { it.copy(targetDiastolicError = "数值须在 20–200 之间。", message = "请检查用户资料。") }
+            return
+        }
+        if (targetSys != null && targetDia != null && targetDia >= targetSys) {
+            _uiState.update {
+                it.copy(
+                    targetDiastolicError = "目标舒张压必须低于目标收缩压。",
+                    message = "请检查用户资料。"
+                )
+            }
             return
         }
 
@@ -163,7 +207,14 @@ class SettingsViewModel(
                 )
             )
             isProfileDirty = false
-            _uiState.update { it.copy(message = "用户资料已保存。") }
+            _uiState.update {
+                it.copy(
+                    message = "用户资料已保存。",
+                    ageError = null,
+                    targetSystolicError = null,
+                    targetDiastolicError = null
+                )
+            }
         }
     }
 

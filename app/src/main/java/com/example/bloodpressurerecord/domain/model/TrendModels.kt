@@ -17,7 +17,8 @@ data class TrendRecord(
     val systolic: Int,
     val diastolic: Int,
     val pulse: Int?,
-    val category: String
+    val category: String,
+    val containsHighRiskReading: Boolean = false
 )
 
 data class TrendPoint(
@@ -29,6 +30,7 @@ data class TrendPoint(
     val diastolic: Int,
     val pulse: Int?,
     val category: String,
+    val containsHighRiskReading: Boolean,
     val recordCount: Int,
     val aggregation: TrendAggregation
 )

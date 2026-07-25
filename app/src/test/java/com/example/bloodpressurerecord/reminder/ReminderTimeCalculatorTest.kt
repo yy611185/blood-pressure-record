@@ -48,4 +48,25 @@ class ReminderTimeCalculatorTest {
             )
         )
     }
+
+    @Test
+    fun daylightSavingStartUsesZoneRules() {
+        val newYork = ZoneId.of("America/New_York")
+        val result = ReminderTimeCalculator.nextTriggerMillis(
+            "07:30",
+            LocalDateTime.of(2026, 3, 7, 8, 0),
+            newYork
+        )
+
+        assertEquals(Instant.parse("2026-03-08T11:30:00Z").toEpochMilli(), result)
+    }
+
+    @Test
+    fun changedTimezoneProducesTriggerForNewZone() {
+        val current = LocalDateTime.of(2026, 7, 25, 6, 0)
+        val taipei = ReminderTimeCalculator.nextTriggerMillis("07:30", current, ZoneId.of("Asia/Taipei"))
+        val tokyo = ReminderTimeCalculator.nextTriggerMillis("07:30", current, ZoneId.of("Asia/Tokyo"))
+
+        assertEquals(60L * 60 * 1_000, taipei!! - tokyo!!)
+    }
 }

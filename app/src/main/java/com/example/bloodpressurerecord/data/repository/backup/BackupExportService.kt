@@ -10,6 +10,8 @@ import com.example.bloodpressurerecord.data.db.dao.UserProfileDao
 import com.example.bloodpressurerecord.data.db.entity.BloodPressureMeasurementEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
+import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.model.ReadingValue
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -104,6 +106,11 @@ class BackupExportService(
                     pulse = reading.pulse
                 )
             }
+        val readingValues = sortedReadings.map {
+            ReadingValue(it.systolic, it.diastolic, it.pulse)
+        }
+        val recomputed = readingValues.takeIf { it.isNotEmpty() }
+            ?.let(MeasurementDerivation::derive)
 
         return BackupMeasurementRow(
             recordId = session.id,
@@ -112,11 +119,11 @@ class BackupExportService(
             time = formatTime(session.measuredAt),
             groupCount = sortedReadings.size,
             readings = sortedReadings,
-            avgSystolic = session.avgSystolic,
-            avgDiastolic = session.avgDiastolic,
-            avgPulse = session.avgPulse,
-            level = session.category,
-            highAlert = session.highRiskAlertTriggered,
+            avgSystolic = recomputed?.average?.avgSystolic ?: session.avgSystolic,
+            avgDiastolic = recomputed?.average?.avgDiastolic ?: session.avgDiastolic,
+            avgPulse = recomputed?.average?.avgPulse ?: session.avgPulse,
+            level = recomputed?.category?.name ?: session.category,
+            highAlert = recomputed?.containsHighRiskReading ?: session.containsHighRiskReading,
             scene = session.scene,
             symptomsJson = session.symptomsJson,
             note = session.note,
@@ -137,8 +144,9 @@ class BackupExportService(
             avgDiastolic = item.diastolic,
             avgPulse = item.pulse,
             level = item.level,
-            highAlert = com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
-                .isHighRisk(item.systolic, item.diastolic),
+            highAlert = MeasurementDerivation.derive(
+                listOf(ReadingValue(item.systolic, item.diastolic, item.pulse))
+            ).containsHighRiskReading,
             scene = "旧版导入",
             symptomsJson = null,
             note = "兼容旧版单次记录；成员：${item.memberName}",
@@ -159,8 +167,9 @@ class BackupExportService(
             avgDiastolic = item.diastolic,
             avgPulse = item.pulse,
             level = item.level.orEmpty(),
-            highAlert = com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
-                .isHighRisk(item.systolic, item.diastolic),
+            highAlert = MeasurementDerivation.derive(
+                listOf(ReadingValue(item.systolic, item.diastolic, item.pulse))
+            ).containsHighRiskReading,
             scene = "旧版导入",
             symptomsJson = null,
             note = item.remark.orEmpty().ifBlank { "兼容旧版单次记录；成员：${item.memberName.orEmpty()}" },
@@ -173,7 +182,8 @@ class BackupExportService(
         "文件用途" to "用于家庭血压记录的本地备份与换机迁移。",
         "数据来源" to "数据仅来自本机本地数据库，不包含云端或服务器数据。",
         "注意事项" to "请尽量不要修改工作表名称和列名，以便未来版本稳定导回。",
-        "隐私说明" to "导出文件只会保存到你选择的位置，不会上传服务器。",
+        "隐私说明" to "导出文件只会保存到你选择的位置，不会上传服务器；Android 系统自动备份已关闭。",
+        "备份责任" to "卸载前请主动导出备份；未导出的本地数据可能丢失，应用无法保证数据永不丢失。",
         "医疗声明" to "本文件仅供健康记录参考，不替代专业医疗诊断或治疗建议。"
     )
 
