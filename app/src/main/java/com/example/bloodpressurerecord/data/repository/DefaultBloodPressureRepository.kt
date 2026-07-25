@@ -4,9 +4,8 @@ import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
 import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
-import com.example.bloodpressurerecord.domain.calculator.AverageCalculator
-import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
-import com.example.bloodpressurerecord.domain.calculator.HighRiskJudge
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
+import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -18,7 +17,7 @@ class DefaultBloodPressureRepository(
 ) : BloodPressureRepository {
 
     override fun observeSessionCount(): Flow<Int> {
-        return sessionDao.observeSessionsWithReadings().map { it.size }
+        return sessionDao.observeSessionCount()
     }
 
     override fun observeSessions(): Flow<List<SessionRecord>> {
@@ -27,6 +26,74 @@ class DefaultBloodPressureRepository(
 
     override fun observeSession(sessionId: String): Flow<SessionRecord?> {
         return sessionDao.observeSessionWithReadings(sessionId).map { it?.toRecord() }
+    }
+
+    override fun observeLatestSession(): Flow<SessionRecord?> {
+        return sessionDao.observeLatestSessionWithReadings().map { it?.toRecord() }
+    }
+
+    override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> {
+        return sessionDao.observeLatestSessionSummary().map { row ->
+            row?.let {
+                LatestSessionSummary(
+                    id = it.id,
+                    measuredAt = it.measuredAt,
+                    avgSystolic = it.avgSystolic,
+                    avgDiastolic = it.avgDiastolic,
+                    category = it.category,
+                    containsHighRiskReading = it.containsHighRiskReading
+                )
+            }
+        }
+    }
+
+    override fun observeCalendarSessionSummaries(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<CalendarSessionSummary>> {
+        return sessionDao.observeCalendarSessionSummaries(startInclusive, endExclusive).map { rows ->
+            rows.map {
+                CalendarSessionSummary(
+                    measuredAt = it.measuredAt,
+                    containsHighRiskReading = it.containsHighRiskReading
+                )
+            }
+        }
+    }
+
+    override fun observeSessionsInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<SessionRecord>> {
+        return sessionDao.observeSessionsWithReadingsInRange(startInclusive, endExclusive)
+            .map { rows -> rows.map { it.toRecord() } }
+    }
+
+    override fun observeSessionSummariesInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<SessionSummary>> {
+        return sessionDao.observeSessionSummariesInRange(startInclusive, endExclusive)
+            .map { rows -> rows.map(::toSummary) }
+    }
+
+    override fun observePeriodStatistics(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<PeriodStatistics> {
+        return sessionDao.observePeriodStatistics(startInclusive, endExclusive).map { row ->
+            PeriodStatistics(
+                recordCount = row.recordCount,
+                averageSystolic = row.averageSystolic,
+                averageDiastolic = row.averageDiastolic,
+                averagePulse = row.averagePulse,
+                highestSystolic = row.highestSystolic,
+                highestDiastolic = row.highestDiastolic,
+                lowestSystolic = row.lowestSystolic,
+                lowestDiastolic = row.lowestDiastolic,
+                highRiskCount = row.highRiskCount
+            )
+        }
     }
 
     override suspend fun saveSession(input: SaveSessionInput): Result<String> = runCatching {
@@ -61,17 +128,52 @@ class DefaultBloodPressureRepository(
         sessionDao.deleteSessionById(sessionId)
     }
 
+    override suspend fun restoreSession(session: SessionRecord): Result<Unit> = runCatching {
+        val input = SaveSessionInput(
+            measuredAt = session.measuredAt,
+            scene = session.scene,
+            note = session.note,
+            symptoms = session.symptoms,
+            readings = session.readings.sortedBy { it.orderIndex }.map {
+                SessionReadingInput(it.systolic, it.diastolic, it.pulse)
+            }
+        )
+        val entity = buildSessionEntity(
+            sessionId = session.id,
+            input = input,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        val readings = session.readings.sortedBy { it.orderIndex }.mapIndexed { index, reading ->
+            MeasurementReadingEntity(
+                id = reading.id,
+                sessionId = session.id,
+                orderIndex = index + 1,
+                systolic = reading.systolic,
+                diastolic = reading.diastolic,
+                pulse = reading.pulse
+            )
+        }
+        sessionDao.insertSessionWithReadings(entity, readings)
+    }
+
     private fun buildSessionEntity(
         sessionId: String,
         input: SaveSessionInput,
         createdAt: Long,
         updatedAt: Long
     ): MeasurementSessionEntity {
-        val average = AverageCalculator.calculate(
-            input.readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
-        )
-        val category = CategoryCalculator.calculate(average.avgSystolic, average.avgDiastolic)
-        val highRisk = HighRiskJudge.shouldTrigger(average.avgSystolic, average.avgDiastolic)
+        val readingValues = input.readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
+        require(MeasurementInputRules.validateReadings(readingValues) == null) {
+            "每次测量必须包含 ${MeasurementInputRules.MIN_READING_COUNT} 至 " +
+                "${MeasurementInputRules.MAX_READING_COUNT} 组读数"
+        }
+        readingValues.forEachIndexed { index, reading ->
+            require(MeasurementInputRules.validateReading(reading) == null) {
+                "第 ${index + 1} 组读数不符合统一输入规则"
+            }
+        }
+        val derived = MeasurementDerivation.derive(readingValues)
         val symptomsJson = if (input.symptoms.isEmpty()) null else JSONArray(input.symptoms).toString()
         return MeasurementSessionEntity(
             id = sessionId,
@@ -79,11 +181,11 @@ class DefaultBloodPressureRepository(
             scene = input.scene,
             note = input.note?.takeIf { it.isNotBlank() },
             symptomsJson = symptomsJson,
-            avgSystolic = average.avgSystolic,
-            avgDiastolic = average.avgDiastolic,
-            avgPulse = average.avgPulse,
-            category = category.name,
-            highRiskAlertTriggered = highRisk,
+            avgSystolic = derived.average.avgSystolic,
+            avgDiastolic = derived.average.avgDiastolic,
+            avgPulse = derived.average.avgPulse,
+            category = derived.category.name,
+            containsHighRiskReading = derived.containsHighRiskReading,
             createdAt = createdAt,
             updatedAt = updatedAt
         )
@@ -117,7 +219,7 @@ class DefaultBloodPressureRepository(
             avgDiastolic = session.avgDiastolic,
             avgPulse = session.avgPulse,
             category = session.category,
-            highRiskAlertTriggered = session.highRiskAlertTriggered,
+            containsHighRiskReading = session.containsHighRiskReading,
             readings = readings.sortedBy { it.orderIndex }.map {
                 SessionReading(
                     id = it.id,
@@ -127,6 +229,22 @@ class DefaultBloodPressureRepository(
                     pulse = it.pulse
                 )
             }
+        )
+    }
+
+    private fun toSummary(
+        row: com.example.bloodpressurerecord.data.db.dao.SessionSummaryRow
+    ): SessionSummary {
+        return SessionSummary(
+            id = row.id,
+            measuredAt = row.measuredAt,
+            avgSystolic = row.avgSystolic,
+            avgDiastolic = row.avgDiastolic,
+            avgPulse = row.avgPulse,
+            category = row.category,
+            scene = row.scene,
+            noteSummary = row.noteSummary,
+            containsHighRiskReading = row.containsHighRiskReading
         )
     }
 

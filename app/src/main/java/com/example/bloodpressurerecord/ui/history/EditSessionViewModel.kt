@@ -1,12 +1,17 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.ui.common.SessionFormLogic
+import com.example.bloodpressurerecord.ui.common.SessionDraftStore
+import com.example.bloodpressurerecord.ui.common.SessionFormDraft
 import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,23 +38,35 @@ data class EditSessionUiState(
     val showHighRiskDialog: Boolean = false,
     val showAbnormalConfirmDialog: Boolean = false,
     val abnormalConfirmMessage: String = "",
-    val saved: Boolean = false
+    val saved: Boolean = false,
+    val isSaving: Boolean = false,
+    val canSave: Boolean = false,
+    val saveDisabledReason: String = "至少填写两组有效读数后才能保存。",
+    val isDirty: Boolean = false
 )
 
 class EditSessionViewModel(
     private val sessionId: String,
-    private val repository: BloodPressureRepository
+    private val repository: BloodPressureRepository,
+    savedStateHandle: SavedStateHandle = SavedStateHandle()
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(EditSessionUiState())
     val uiState: StateFlow<EditSessionUiState> = _uiState.asStateFlow()
+    private val draftStore = SessionDraftStore(savedStateHandle, "edit_session.$sessionId")
+    private val restoredDraft = draftStore.restore()
     private var hasInitFromData = false
     private var pendingSaveInput: SaveSessionInput? = null
+    private var pendingSaveContainsHighRisk: Boolean = false
 
     init {
         viewModelScope.launch {
             repository.observeSession(sessionId).collectLatest { session ->
                 if (!hasInitFromData && session != null) {
                     hasInitFromData = true
+                    if (restoredDraft != null) {
+                        _uiState.value = restoredDraft.toEditUiState()
+                        return@collectLatest
+                    }
                     val sortedReadings = session.readings.sortedBy { it.orderIndex }
                     val reading1 = sortedReadings.getOrNull(0)?.toInputUi() ?: SessionReadingInputUi()
                     val reading2 = sortedReadings.getOrNull(1)?.toInputUi() ?: SessionReadingInputUi()
@@ -71,6 +88,12 @@ class EditSessionViewModel(
                         avgDiastolic = derived.avgDiastolic,
                         avgPulse = derived.avgPulse,
                         categoryLabel = derived.categoryLabel,
+                        canSave = SessionFormLogic.saveDisabledReason(
+                            listOf(reading1, reading2) + extras
+                        ) == null,
+                        saveDisabledReason = SessionFormLogic.saveDisabledReason(
+                            listOf(reading1, reading2) + extras
+                        ).orEmpty(),
                         loading = false
                     )
                 } else if (!hasInitFromData && session == null) {
@@ -80,8 +103,8 @@ class EditSessionViewModel(
         }
     }
 
-    fun updateMeasuredAtText(value: String) = _uiState.update { it.copy(measuredAtText = value) }
-    fun updateScene(value: String) = _uiState.update { it.copy(scene = value) }
+    fun updateMeasuredAtText(value: String) = updateForm { it.copy(measuredAtText = value) }
+    fun updateScene(value: String) = updateForm { it.copy(scene = value) }
     fun toggleThirdReading(show: Boolean) = updateReading {
         val nextExtras = if (show) {
             if (it.extraReadings.isEmpty()) listOf(SessionReadingInputUi()) else it.extraReadings
@@ -92,6 +115,11 @@ class EditSessionViewModel(
     }
 
     fun addNextReadingGroup() = updateReading {
+        if (allReadings(it).size >= SessionFormLogic.UI_MAX_READING_COUNT) {
+            return@updateReading it.copy(
+                message = "每次测量最多 ${SessionFormLogic.UI_MAX_READING_COUNT} 组读数。"
+            )
+        }
         it.copy(showExtraReadings = true, extraReadings = it.extraReadings + SessionReadingInputUi())
     }
 
@@ -113,14 +141,30 @@ class EditSessionViewModel(
         state.copy(extraReadings = state.extraReadings.updateAt(index) { it.copy(pulse = value) })
     }
 
-    fun updateNote(value: String) = _uiState.update { it.copy(note = value) }
+    fun removeExtraReading(index: Int) = updateReading { state ->
+        state.copy(
+            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index },
+            showExtraReadings = state.extraReadings.size > 1
+        )
+    }
+
+    fun updateNote(value: String) = updateForm { it.copy(note = value) }
 
     fun toggleSymptom(symptom: String) {
         _uiState.update { state ->
             val set = state.selectedSymptoms.toMutableSet()
-            if (!set.add(symptom)) set.remove(symptom)
-            state.copy(selectedSymptoms = set)
+            if (symptom == "无症状") {
+                if (symptom in set) set.clear() else {
+                    set.clear()
+                    set += symptom
+                }
+            } else {
+                set.remove("无症状")
+                if (!set.add(symptom)) set.remove(symptom)
+            }
+            state.copy(selectedSymptoms = set, isDirty = true)
         }
+        persistDraft()
     }
 
     fun onSaveClicked() {
@@ -146,12 +190,13 @@ class EditSessionViewModel(
             readings = validate.readings
         )
         pendingSaveInput = input
+        pendingSaveContainsHighRisk = validate.containsHighRiskReading
         val abnormal = SessionFormLogic.buildAbnormalMessage(validate.readings)
         if (abnormal != null) {
             _uiState.update { it.copy(showAbnormalConfirmDialog = true, abnormalConfirmMessage = abnormal) }
             return
         }
-        if (SessionFormLogic.containsHighRisk(validate.readings)) {
+        if (pendingSaveContainsHighRisk) {
             _uiState.update { it.copy(showHighRiskDialog = true) }
             return
         }
@@ -160,8 +205,8 @@ class EditSessionViewModel(
 
     fun confirmAbnormalAndContinue() {
         _uiState.update { it.copy(showAbnormalConfirmDialog = false, abnormalConfirmMessage = "") }
-        val pending = pendingSaveInput ?: return
-        if (SessionFormLogic.containsHighRisk(pending.readings)) {
+        if (pendingSaveInput == null) return
+        if (pendingSaveContainsHighRisk) {
             _uiState.update { it.copy(showHighRiskDialog = true) }
             return
         }
@@ -170,6 +215,7 @@ class EditSessionViewModel(
 
     fun dismissAbnormalDialog() {
         pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
         _uiState.update { it.copy(showAbnormalConfirmDialog = false, abnormalConfirmMessage = "") }
     }
 
@@ -180,11 +226,14 @@ class EditSessionViewModel(
 
     fun dismissHighRiskDialog() {
         pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
         _uiState.update { it.copy(showHighRiskDialog = false) }
     }
 
     private fun savePending() {
         val input = pendingSaveInput ?: return
+        if (_uiState.value.isSaving) return
+        _uiState.update { it.copy(isSaving = true, message = "正在保存…") }
         viewModelScope.launch {
             repository.updateSession(sessionId, input)
                 .onSuccess {
@@ -192,16 +241,20 @@ class EditSessionViewModel(
                         it.copy(
                             saved = true,
                             message = "编辑已保存。",
+                            isSaving = false,
                             showAbnormalConfirmDialog = false,
                             showHighRiskDialog = false
                         )
                     }
+                    draftStore.clear()
                     pendingSaveInput = null
+                    pendingSaveContainsHighRisk = false
                 }
                 .onFailure { throwable ->
                     _uiState.update {
                         it.copy(
                             message = "保存失败：${throwable.message ?: "请稍后重试"}",
+                            isSaving = false,
                             showAbnormalConfirmDialog = false,
                             showHighRiskDialog = false
                         )
@@ -221,9 +274,37 @@ class EditSessionViewModel(
                 avgSystolic = derived.avgSystolic,
                 avgDiastolic = derived.avgDiastolic,
                 avgPulse = derived.avgPulse,
-                categoryLabel = derived.categoryLabel
+                categoryLabel = derived.categoryLabel,
+                canSave = SessionFormLogic.saveDisabledReason(allReadings(next)) == null,
+                saveDisabledReason = SessionFormLogic.saveDisabledReason(allReadings(next)).orEmpty(),
+                isDirty = true
             )
         }
+        persistDraft()
+    }
+
+    private fun updateForm(transform: (EditSessionUiState) -> EditSessionUiState) {
+        _uiState.update { transform(it).copy(isDirty = true) }
+        persistDraft()
+    }
+
+    private fun persistDraft() {
+        val state = _uiState.value
+        draftStore.save(
+            SessionFormDraft(
+                measuredAtText = state.measuredAtText,
+                scene = state.scene,
+                readings = allReadings(state),
+                note = state.note,
+                symptoms = state.selectedSymptoms
+            )
+        )
+    }
+
+    fun discardDraft() {
+        draftStore.clear()
+        pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
     }
 
     private fun allReadings(state: EditSessionUiState): List<SessionReadingInputUi> {
@@ -236,6 +317,34 @@ class EditSessionViewModel(
     ): List<SessionReadingInputUi> {
         if (index !in indices) return this
         return mapIndexed { i, item -> if (i == index) transform(item) else item }
+    }
+
+    private fun SessionFormDraft.toEditUiState(): EditSessionUiState {
+        val first = readings.getOrNull(0) ?: SessionReadingInputUi()
+        val second = readings.getOrNull(1) ?: SessionReadingInputUi()
+        val extras = readings.drop(2)
+        val base = EditSessionUiState(
+            measuredAtText = measuredAtText,
+            scene = scene,
+            reading1 = first,
+            reading2 = second,
+            extraReadings = extras,
+            showExtraReadings = extras.isNotEmpty(),
+            note = note,
+            selectedSymptoms = symptoms,
+            message = "已恢复未保存的编辑草稿。",
+            loading = false,
+            isDirty = true
+        )
+        val derived = SessionFormLogic.recomputeDerived(allReadings(base))
+        return base.copy(
+            avgSystolic = derived.avgSystolic,
+            avgDiastolic = derived.avgDiastolic,
+            avgPulse = derived.avgPulse,
+            categoryLabel = derived.categoryLabel,
+            canSave = SessionFormLogic.saveDisabledReason(allReadings(base)) == null,
+            saveDisabledReason = SessionFormLogic.saveDisabledReason(allReadings(base)).orEmpty()
+        )
     }
 
     private fun com.example.bloodpressurerecord.data.repository.SessionReading.toInputUi(): SessionReadingInputUi {
@@ -252,6 +361,18 @@ class EditSessionViewModel(
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     return EditSessionViewModel(sessionId, repository) as T
+                }
+
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(
+                    modelClass: Class<T>,
+                    extras: androidx.lifecycle.viewmodel.CreationExtras
+                ): T {
+                    return EditSessionViewModel(
+                        sessionId,
+                        repository,
+                        extras.createSavedStateHandle()
+                    ) as T
                 }
             }
         }

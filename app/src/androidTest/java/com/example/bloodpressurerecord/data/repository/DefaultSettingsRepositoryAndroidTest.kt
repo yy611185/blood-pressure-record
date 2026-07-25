@@ -51,7 +51,7 @@ class DefaultSettingsRepositoryAndroidTest {
                 avgDiastolic = 80,
                 avgPulse = 70,
                 category = "NORMAL",
-                highRiskAlertTriggered = false,
+                containsHighRiskReading = false,
                 createdAt = 1_000L,
                 updatedAt = 1_000L
             )

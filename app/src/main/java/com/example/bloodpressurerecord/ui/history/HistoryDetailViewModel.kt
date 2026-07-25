@@ -22,6 +22,7 @@ data class HistoryDetailUiState(
     val symptomsText: String = "无",
     val showDeleteConfirm: Boolean = false,
     val deleted: Boolean = false,
+    val deletedSnapshot: SessionRecord? = null,
     val message: String = ""
 )
 
@@ -36,13 +37,17 @@ class HistoryDetailViewModel(
         localState
     ) { session, local ->
         if (session == null) {
-            local.copy(session = null, measuredAtText = "", symptomsText = "无")
+            val snapshot = local.deletedSnapshot
+            local.copy(
+                session = snapshot,
+                measuredAtText = snapshot?.let(::formatMeasuredAt).orEmpty(),
+                symptomsText = snapshot?.symptoms?.takeIf { it.isNotEmpty() }
+                    ?.joinToString("、") ?: "无"
+            )
         } else {
             local.copy(
                 session = session,
-                measuredAtText = Instant.ofEpochMilli(session.measuredAt)
-                    .atZone(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")),
+                measuredAtText = formatMeasuredAt(session),
                 symptomsText = if (session.symptoms.isEmpty()) "无" else session.symptoms.joinToString("、")
             )
         }
@@ -57,10 +62,18 @@ class HistoryDetailViewModel(
     }
 
     fun confirmDelete() {
+        val snapshot = uiState.value.session ?: return
         viewModelScope.launch {
             repository.deleteSession(sessionId)
                 .onSuccess {
-                    localState.update { it.copy(showDeleteConfirm = false, deleted = true, message = "删除成功。") }
+                    localState.update {
+                        it.copy(
+                            showDeleteConfirm = false,
+                            deleted = true,
+                            deletedSnapshot = snapshot,
+                            message = "记录已删除。"
+                        )
+                    }
                 }
                 .onFailure { throwable ->
                     localState.update {
@@ -71,6 +84,33 @@ class HistoryDetailViewModel(
                     }
                 }
         }
+    }
+
+    fun undoDelete() {
+        val snapshot = localState.value.deletedSnapshot ?: return
+        viewModelScope.launch {
+            repository.restoreSession(snapshot)
+                .onSuccess {
+                    localState.update {
+                        it.copy(
+                            deleted = false,
+                            deletedSnapshot = null,
+                            message = "已恢复完整记录。"
+                        )
+                    }
+                }
+                .onFailure {
+                    localState.update {
+                        it.copy(message = "恢复失败，请返回历史页确认记录状态。")
+                    }
+                }
+        }
+    }
+
+    private fun formatMeasuredAt(session: SessionRecord): String {
+        return Instant.ofEpochMilli(session.measuredAt)
+            .atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm"))
     }
 
     companion object {

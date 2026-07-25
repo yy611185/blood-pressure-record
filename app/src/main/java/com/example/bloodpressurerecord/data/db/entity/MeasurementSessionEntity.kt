@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.data.db.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -18,7 +19,12 @@ data class MeasurementSessionEntity(
     val avgDiastolic: Int,
     val avgPulse: Int?,
     val category: String,
-    val highRiskAlertTriggered: Boolean,
+    /**
+     * 是否包含高风险原始读数或高风险平均值。
+     * 数据库沿用旧列名以保持无损兼容。
+     */
+    @ColumnInfo(name = "highRiskAlertTriggered")
+    val containsHighRiskReading: Boolean,
     val createdAt: Long,
     val updatedAt: Long
 )

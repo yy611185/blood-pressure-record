@@ -1,54 +1,44 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
-import com.example.bloodpressurerecord.data.repository.SessionRecord
-import com.example.bloodpressurerecord.data.repository.SettingsRepository
-import com.example.bloodpressurerecord.domain.calculator.HistoryStatisticsCalculator
-import com.example.bloodpressurerecord.domain.model.SessionStatPoint
-import com.example.bloodpressurerecord.domain.model.TrendDayPoint
+import com.example.bloodpressurerecord.data.repository.SessionSummary
+import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
+import com.example.bloodpressurerecord.domain.time.toLocalDate
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.WeekFields
-import java.util.Locale
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 
 data class HistoryUiState(
-    val periodType: HistoryPeriodType = HistoryPeriodType.WEEK,
-    val trendMetric: TrendMetricType = TrendMetricType.BOTH,
-    val groups: List<HistoryDateGroupUi> = emptyList(),
-    val totalCountInPeriod: Int = 0,
-    val avg7dSystolic: String = "--",
-    val avg7dDiastolic: String = "--",
-    val avg30dSystolic: String = "--",
-    val avg30dDiastolic: String = "--",
-    val weekRecordCount: Int = 0,
-    val highRiskCount30d: Int = 0,
-    val showTrendChart: Boolean = true,
-    val trend7d: List<TrendDayPoint> = emptyList(),
-    val trend30d: List<TrendDayPoint> = emptyList(),
-    val sessions7d: List<SessionRecord> = emptyList(),
-    val sessions30d: List<SessionRecord> = emptyList(),
-    val sessions90d: List<SessionRecord> = emptyList(),
-    val sessionsAll: List<SessionRecord> = emptyList(),
-    val targetSystolic: Int? = null,
-    val targetDiastolic: Int? = null
-)
-
-enum class HistoryPeriodType { DAY, WEEK, MONTH, ALL }
-enum class TrendMetricType { SYSTOLIC, DIASTOLIC, BOTH }
-
-data class HistoryDateGroupUi(
-    val dateLabel: String,
-    val sessions: List<HistorySessionItemUi>
-)
+    val displayedMonth: YearMonth = YearMonth.now(),
+    val selectedDate: LocalDate? = null,
+    val monthState: CalendarLoadingState = CalendarLoadingState.LOADING,
+    val dayState: CalendarLoadingState = CalendarLoadingState.CONTENT,
+    val daySummaries: Map<LocalDate, CalendarDaySummary> = emptyMap(),
+    val selectedDayRecords: List<HistorySessionItemUi> = emptyList(),
+    val selectedDayAverageSystolic: Int? = null,
+    val selectedDayAverageDiastolic: Int? = null,
+    val monthError: String? = null,
+    val dayError: String? = null
+) {
+    val monthHasRecords: Boolean get() = daySummaries.isNotEmpty()
+}
 
 data class HistorySessionItemUi(
     val id: String,
@@ -57,123 +47,191 @@ data class HistorySessionItemUi(
     val avgPulseText: String,
     val scene: String,
     val categoryText: String,
-    val noteSummary: String
+    val noteSummary: String,
+    val containsHighRiskReading: Boolean
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModel(
-    repository: BloodPressureRepository,
-    settingsRepository: SettingsRepository
+    private val repository: BloodPressureRepository,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+    private val todayProvider: () -> LocalDate = { LocalDate.now(zoneId) }
 ) : ViewModel() {
-    private val periodType = MutableStateFlow(HistoryPeriodType.WEEK)
-    private val trendMetricType = MutableStateFlow(TrendMetricType.BOTH)
+    private val displayedMonth = MutableStateFlow(
+        savedStateHandle.get<String>(KEY_MONTH)?.let(YearMonth::parse)
+            ?: YearMonth.from(todayProvider())
+    )
+    private val selectedDate = MutableStateFlow(
+        savedStateHandle.get<String>(KEY_SELECTED_DATE)?.let(LocalDate::parse)
+    )
+    private val monthRefresh = MutableStateFlow(0)
+    private val dayRefresh = MutableStateFlow(0)
+    private var pendingRequestedDate: LocalDate? = null
 
-    val uiState: StateFlow<HistoryUiState> = combine(
-        repository.observeSessions(),
-        periodType,
-        trendMetricType,
-        settingsRepository.observeSettings()
-    ) { sessions, currentPeriod, metricType, settingsBundle ->
-        buildUiState(
-            sessions = sessions,
-            period = currentPeriod,
-            metricType = metricType,
-            showTrendChart = settingsBundle.appSettings.showTrendChart,
-            targetSystolic = settingsBundle.userProfile.targetSystolic,
-            targetDiastolic = settingsBundle.userProfile.targetDiastolic
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState())
-
-    fun setPeriodType(type: HistoryPeriodType) {
-        periodType.value = type
-    }
-
-    fun setTrendMetric(type: TrendMetricType) {
-        trendMetricType.value = type
-    }
-
-    private fun buildUiState(
-        sessions: List<SessionRecord>,
-        period: HistoryPeriodType,
-        metricType: TrendMetricType,
-        showTrendChart: Boolean,
-        targetSystolic: Int?,
-        targetDiastolic: Int?
-    ): HistoryUiState {
-        val today = LocalDate.now()
-        val statPoints = sessions.map {
-            SessionStatPoint(
-                measuredAt = it.measuredAt,
-                avgSystolic = it.avgSystolic,
-                avgDiastolic = it.avgDiastolic,
-                highRisk = it.highRiskAlertTriggered
-            )
-        }
-        val statistics = HistoryStatisticsCalculator.calculate(statPoints)
-        val filteredSessions = filterSessionsForPeriod(sessions, period, today)
-
-        val groups = filteredSessions
-            .groupBy { toLocalDate(it.measuredAt) }
-            .toSortedMap(compareByDescending { it })
-            .map { (date, list) ->
-                HistoryDateGroupUi(
-                    dateLabel = date.format(DateTimeFormatter.ofPattern("yyyy年M月d日")),
-                    sessions = list.sortedByDescending { it.measuredAt }.map { record ->
-                        HistorySessionItemUi(
-                            id = record.id,
-                            measuredAtText = Instant.ofEpochMilli(record.measuredAt)
-                                .atZone(ZoneId.systemDefault())
-                                .format(DateTimeFormatter.ofPattern("HH:mm")),
-                            avgBloodPressureText = "${record.avgSystolic}/${record.avgDiastolic}",
-                            avgPulseText = record.avgPulse?.toString() ?: "--",
-                            scene = record.scene,
-                            categoryText = record.category.toChineseCategory(),
-                            noteSummary = record.note?.takeIf { it.isNotBlank() }?.take(24) ?: NO_NOTE_TEXT
+    private val monthResult: Flow<MonthResult> = combine(
+        displayedMonth,
+        monthRefresh
+    ) { month, _ -> month }.flatMapLatest { month ->
+        val range = month.toEpochMillisRange(zoneId)
+        repository.observeCalendarSessionSummaries(range.startInclusive, range.endExclusive)
+            .map { rows ->
+                val summaries = rows.groupBy { it.measuredAt.toLocalDate(zoneId) }
+                    .mapValues { (date, values) ->
+                        CalendarDaySummary(
+                            date = date,
+                            recordCount = values.size,
+                            containsHighRisk = values.any { it.containsHighRiskReading }
                         )
                     }
-                )
+                MonthResult(month = month, summaries = summaries)
             }
-
-        return HistoryUiState(
-            periodType = period,
-            trendMetric = metricType,
-            groups = groups,
-            totalCountInPeriod = filteredSessions.size,
-            avg7dSystolic = statistics.average7d.avgSystolic?.toString() ?: "--",
-            avg7dDiastolic = statistics.average7d.avgDiastolic?.toString() ?: "--",
-            avg30dSystolic = statistics.average30d.avgSystolic?.toString() ?: "--",
-            avg30dDiastolic = statistics.average30d.avgDiastolic?.toString() ?: "--",
-            weekRecordCount = statistics.weekRecordCount,
-            highRiskCount30d = statistics.highRiskCount30d,
-            showTrendChart = showTrendChart,
-            trend7d = statistics.trend7d,
-            trend30d = statistics.trend30d,
-            sessions7d = sessions.filter { !toLocalDate(it.measuredAt).isBefore(today.minusDays(6)) },
-            sessions30d = sessions.filter { !toLocalDate(it.measuredAt).isBefore(today.minusDays(29)) },
-            sessions90d = sessions.filter { !toLocalDate(it.measuredAt).isBefore(today.minusDays(89)) },
-            sessionsAll = sessions,
-            targetSystolic = targetSystolic,
-            targetDiastolic = targetDiastolic
-        )
+            .catch {
+                emit(MonthResult(month = month, error = "无法加载本月记录，请重试。"))
+            }
     }
 
-    private fun filterSessionsForPeriod(
-        sessions: List<SessionRecord>,
-        period: HistoryPeriodType,
-        today: LocalDate
-    ): List<SessionRecord> {
-        return sessions.filter { record ->
-            val localDate = toLocalDate(record.measuredAt)
-            when (period) {
-                HistoryPeriodType.DAY -> localDate == today
-                HistoryPeriodType.WEEK -> {
-                    val firstDayOfWeek = today.with(WeekFields.of(Locale.getDefault()).dayOfWeek(), 1)
-                    val lastDayOfWeek = firstDayOfWeek.plusDays(6)
-                    !localDate.isBefore(firstDayOfWeek) && !localDate.isAfter(lastDayOfWeek)
+    private val dayResult: Flow<DayResult> = combine(
+        selectedDate,
+        dayRefresh
+    ) { date, _ -> date }.flatMapLatest { date ->
+        if (date == null) {
+            flowOf(DayResult(date = null))
+        } else {
+            val range = date.toEpochMillisRange(zoneId)
+            repository.observeSessionSummariesInRange(range.startInclusive, range.endExclusive)
+                .map { records ->
+                    DayResult(
+                        date = date,
+                        records = records.sortedWith(
+                            compareBy<SessionSummary> { it.measuredAt }.thenBy { it.id }
+                        )
+                    )
                 }
-                HistoryPeriodType.MONTH -> localDate.year == today.year && localDate.month == today.month
-                HistoryPeriodType.ALL -> true
-            }
+                .catch {
+                    emit(DayResult(date = date, error = "无法加载当天记录，请重试。"))
+                }
         }
+    }
+
+    val uiState: StateFlow<HistoryUiState> = combine(
+        displayedMonth,
+        selectedDate,
+        monthResult,
+        dayResult
+    ) { month, selected, monthData, dayData ->
+        val monthMatches = monthData.month == month
+        val dayMatches = dayData.date == selected
+        val records = if (dayMatches) dayData.records.map(::toItem) else emptyList()
+        HistoryUiState(
+            displayedMonth = month,
+            selectedDate = selected,
+            monthState = if (!monthMatches) {
+                CalendarLoadingState.LOADING
+            } else if (monthData.error == null) {
+                CalendarLoadingState.CONTENT
+            } else {
+                CalendarLoadingState.ERROR
+            },
+            dayState = if (!dayMatches) {
+                CalendarLoadingState.LOADING
+            } else if (dayData.error == null) {
+                CalendarLoadingState.CONTENT
+            } else {
+                CalendarLoadingState.ERROR
+            },
+            daySummaries = if (monthMatches) monthData.summaries else emptyMap(),
+            selectedDayRecords = records,
+            selectedDayAverageSystolic = dayData.records.takeIf { dayMatches && it.isNotEmpty() }
+                ?.map { it.avgSystolic }?.average()?.toInt(),
+            selectedDayAverageDiastolic = dayData.records.takeIf { dayMatches && it.isNotEmpty() }
+                ?.map { it.avgDiastolic }?.average()?.toInt(),
+            monthError = monthData.error,
+            dayError = dayData.error
+        )
+    }.onEach { state ->
+        if (state.monthState != CalendarLoadingState.CONTENT) return@onEach
+        pendingRequestedDate?.let { requested ->
+            pendingRequestedDate = null
+            if (requested in state.daySummaries) {
+                setSelectedDate(requested)
+            } else {
+                setSelectedDate(null)
+            }
+            return@onEach
+        }
+        if (state.selectedDate != null && state.selectedDate !in state.daySummaries) {
+            setSelectedDate(null)
+        }
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        HistoryUiState(displayedMonth = displayedMonth.value, selectedDate = selectedDate.value)
+    )
+
+    fun showPreviousMonth() = showMonth(displayedMonth.value.minusMonths(1))
+
+    fun showNextMonth() = showMonth(displayedMonth.value.plusMonths(1))
+
+    fun showMonth(month: YearMonth) {
+        displayedMonth.value = month
+        savedStateHandle[KEY_MONTH] = month.toString()
+        val selected = selectedDate.value
+        if (selected != null && YearMonth.from(selected) != month) {
+            selectDate(null)
+        }
+    }
+
+    fun showToday(selectWhenRecorded: Boolean = true) {
+        val today = todayProvider()
+        if (selectWhenRecorded) openDateWhenAvailable(today) else showMonth(YearMonth.from(today))
+    }
+
+    fun openDateWhenAvailable(date: LocalDate) {
+        pendingRequestedDate = date
+        showMonth(YearMonth.from(date))
+        if (uiState.value.displayedMonth == YearMonth.from(date) &&
+            uiState.value.daySummaries.containsKey(date)
+        ) {
+            pendingRequestedDate = null
+            selectDate(date)
+        }
+    }
+
+    fun selectDate(date: LocalDate?) {
+        if (date != null) {
+            if (YearMonth.from(date) != displayedMonth.value) return
+            if (!uiState.value.daySummaries.containsKey(date)) return
+        }
+        setSelectedDate(date)
+    }
+
+    fun retryMonth() {
+        monthRefresh.value += 1
+    }
+
+    fun retryDay() {
+        dayRefresh.value += 1
+    }
+
+    private fun setSelectedDate(date: LocalDate?) {
+        selectedDate.value = date
+        savedStateHandle[KEY_SELECTED_DATE] = date?.toString()
+    }
+
+    private fun toItem(record: SessionSummary): HistorySessionItemUi {
+        return HistorySessionItemUi(
+            id = record.id,
+            measuredAtText = Instant.ofEpochMilli(record.measuredAt)
+                .atZone(zoneId)
+                .format(DateTimeFormatter.ofPattern("HH:mm")),
+            avgBloodPressureText = "${record.avgSystolic}/${record.avgDiastolic}",
+            avgPulseText = record.avgPulse?.toString() ?: "--",
+            scene = record.scene,
+            categoryText = record.category.toChineseCategory(),
+            noteSummary = record.noteSummary?.takeIf { it.isNotBlank() } ?: NO_NOTE_TEXT,
+            containsHighRiskReading = record.containsHighRiskReading
+        )
     }
 
     private fun String.toChineseCategory(): String = when (uppercase()) {
@@ -185,11 +243,23 @@ class HistoryViewModel(
         else -> this
     }
 
-    private fun toLocalDate(millis: Long): LocalDate {
-        return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
-    }
+    private data class MonthResult(
+        val month: YearMonth? = null,
+        val summaries: Map<LocalDate, CalendarDaySummary> = emptyMap(),
+        val error: String? = null
+    )
+
+    private data class DayResult(
+        val date: LocalDate? = null,
+        val records: List<SessionSummary> = emptyList(),
+        val error: String? = null
+    )
 
     companion object {
         const val NO_NOTE_TEXT = "无备注"
+        private const val KEY_MONTH = "history.displayedMonth"
+        private const val KEY_SELECTED_DATE = "history.selectedDate"
     }
 }
+
+enum class TrendMetricType { SYSTOLIC, DIASTOLIC, BOTH }

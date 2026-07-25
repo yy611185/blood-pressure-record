@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.ui.history
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
+import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.TrendRepository
 import com.example.bloodpressurerecord.domain.calculator.TrendSeriesCalculator
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
@@ -12,7 +13,9 @@ import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import java.time.ZoneId
+import java.time.Instant
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -45,9 +48,24 @@ data class TrendUiState(
     ),
     val targetSystolic: Int? = null,
     val targetDiastolic: Int? = null,
-    val dayDetails: TrendDayDetails? = null
+    val dayDetails: TrendDayDetails? = null,
+    val summary: TrendTextSummary = TrendTextSummary()
 )
 
+data class TrendTextSummary(
+    val recordCount: Int = 0,
+    val averageSystolic: Int? = null,
+    val averageDiastolic: Int? = null,
+    val highestSystolic: Int? = null,
+    val highestDiastolic: Int? = null,
+    val lowestSystolic: Int? = null,
+    val lowestDiastolic: Int? = null,
+    val systolicChange: Int? = null,
+    val diastolicChange: Int? = null,
+    val highRiskCount: Int = 0
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
 class TrendViewModel(
     private val trendRepository: TrendRepository,
     settingsRepository: SettingsRepository,
@@ -61,10 +79,17 @@ class TrendViewModel(
     private val seriesState = selectedRange.flatMapLatest { range ->
         val queryStartedAt = clockMillis()
         val start = TrendSeriesCalculator.rangeStart(range, queryStartedAt, zoneId)
+        val previousStart = previousRangeStart(range, start)
         combine(
-            trendRepository.observeRecords(start, Long.MAX_VALUE),
+            trendRepository.observeRecords(start, queryStartedAt + 1),
+            trendRepository.observeStatistics(start, queryStartedAt + 1),
+            if (previousStart == null) {
+                kotlinx.coroutines.flow.flowOf(PeriodStatistics())
+            } else {
+                trendRepository.observeStatistics(previousStart, start)
+            },
             settingsRepository.observeSettings()
-        ) { records, settings ->
+        ) { records, statistics, previousStatistics, settings ->
             val now = clockMillis()
             val targetSystolic = settings.userProfile.targetSystolic
             val targetDiastolic = settings.userProfile.targetDiastolic
@@ -77,6 +102,8 @@ class TrendViewModel(
                     targetSystolic = targetSystolic,
                     targetDiastolic = targetDiastolic
                 ),
+                statistics = statistics,
+                previousStatistics = previousStatistics,
                 targetSystolic = targetSystolic,
                 targetDiastolic = targetDiastolic
             )
@@ -95,7 +122,8 @@ class TrendViewModel(
             series = seriesState.series,
             targetSystolic = seriesState.targetSystolic,
             targetDiastolic = seriesState.targetDiastolic,
-            dayDetails = dayDetails
+            dayDetails = dayDetails,
+            summary = buildSummary(seriesState.statistics, seriesState.previousStatistics)
         )
     }.stateIn(
         scope = viewModelScope,
@@ -143,7 +171,43 @@ class TrendViewModel(
 
     private data class TrendSeriesState(
         val series: TrendSeries,
+        val statistics: PeriodStatistics,
+        val previousStatistics: PeriodStatistics,
         val targetSystolic: Int?,
         val targetDiastolic: Int?
     )
+
+    private fun previousRangeStart(range: TrendRange, currentStart: Long): Long? {
+        val days = when (range) {
+            TrendRange.DAYS_7 -> 7L
+            TrendRange.DAYS_30 -> 30L
+            TrendRange.ALL -> return null
+        }
+        return Instant.ofEpochMilli(currentStart).atZone(zoneId)
+            .toLocalDate().minusDays(days).atStartOfDay(zoneId)
+            .toInstant().toEpochMilli()
+    }
+
+    private fun buildSummary(
+        statistics: PeriodStatistics,
+        previousStatistics: PeriodStatistics
+    ): TrendTextSummary {
+        if (statistics.recordCount == 0) return TrendTextSummary()
+        val avgSys = statistics.averageSystolic?.toInt()
+        val avgDia = statistics.averageDiastolic?.toInt()
+        val previousAvgSys = previousStatistics.averageSystolic?.toInt()
+        val previousAvgDia = previousStatistics.averageDiastolic?.toInt()
+        return TrendTextSummary(
+            recordCount = statistics.recordCount,
+            averageSystolic = avgSys,
+            averageDiastolic = avgDia,
+            highestSystolic = statistics.highestSystolic,
+            highestDiastolic = statistics.highestDiastolic,
+            lowestSystolic = statistics.lowestSystolic,
+            lowestDiastolic = statistics.lowestDiastolic,
+            systolicChange = previousAvgSys?.let { previous -> avgSys?.minus(previous) },
+            diastolicChange = previousAvgDia?.let { previous -> avgDia?.minus(previous) },
+            highRiskCount = statistics.highRiskCount
+        )
+    }
 }

@@ -10,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -59,7 +60,7 @@ class DefaultBloodPressureRepositoryTest {
         assertEquals(83, loaded?.avgDiastolic)
         assertEquals(73, loaded?.avgPulse)
         assertEquals("STAGE1", loaded?.category)
-        assertFalse(loaded?.highRiskAlertTriggered ?: true)
+        assertFalse(loaded?.containsHighRiskReading ?: true)
         assertEquals(2, loaded?.readings?.size)
     }
 
@@ -88,5 +89,69 @@ class DefaultBloodPressureRepositoryTest {
         assertEquals(5, loaded?.readings?.size)
         assertEquals(126, loaded?.avgSystolic)
         assertEquals(83, loaded?.avgDiastolic)
+    }
+
+    @Test
+    fun edit_recalculates_normal_record_to_high_risk_from_raw_reading() = runBlocking {
+        val sessionId = repository.saveSession(
+            SaveSessionInput(
+                measuredAt = 1_700_000_200_000L,
+                scene = "晨起",
+                note = null,
+                symptoms = emptyList(),
+                readings = listOf(
+                    SessionReadingInput(120, 80, 70),
+                    SessionReadingInput(122, 82, 72)
+                )
+            )
+        ).getOrThrow()
+
+        repository.updateSession(
+            sessionId,
+            SaveSessionInput(
+                measuredAt = 1_700_000_200_000L,
+                scene = "晨起",
+                note = null,
+                symptoms = emptyList(),
+                readings = listOf(
+                    SessionReadingInput(190, 90, 70),
+                    SessionReadingInput(110, 70, 72)
+                )
+            )
+        ).getOrThrow()
+
+        assertTrue(repository.observeSession(sessionId).first()!!.containsHighRiskReading)
+    }
+
+    @Test
+    fun edit_recalculates_high_risk_record_to_normal() = runBlocking {
+        val sessionId = repository.saveSession(
+            SaveSessionInput(
+                measuredAt = 1_700_000_300_000L,
+                scene = "晨起",
+                note = null,
+                symptoms = emptyList(),
+                readings = listOf(
+                    SessionReadingInput(190, 90, 70),
+                    SessionReadingInput(110, 70, 72)
+                )
+            )
+        ).getOrThrow()
+
+        repository.updateSession(
+            sessionId,
+            SaveSessionInput(
+                measuredAt = 1_700_000_300_000L,
+                scene = "晨起",
+                note = null,
+                symptoms = emptyList(),
+                readings = listOf(
+                    SessionReadingInput(118, 76, 68),
+                    SessionReadingInput(122, 78, 70)
+                )
+            )
+        ).getOrThrow()
+
+        assertFalse(repository.observeSession(sessionId).first()!!.containsHighRiskReading)
     }
 }

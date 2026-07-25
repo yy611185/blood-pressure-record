@@ -1,6 +1,8 @@
 package com.example.bloodpressurerecord.domain.calculator
 
+import com.example.bloodpressurerecord.domain.model.AverageResult
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
+import com.example.bloodpressurerecord.domain.model.ReadingValue
 
 /**
  * 血压分级与风险阈值的唯一来源。
@@ -24,5 +26,18 @@ object BloodPressureRules {
     fun isHighRisk(systolic: Int, diastolic: Int): Boolean {
         return systolic > HIGH_RISK_SYSTOLIC_EXCLUSIVE ||
             diastolic > HIGH_RISK_DIASTOLIC_EXCLUSIVE
+    }
+
+    /**
+     * 一次测量是否包含高风险读数的唯一判断入口。
+     *
+     * 原始任一组或最终平均值达到高风险标准都返回 true。
+     */
+    fun containsHighRiskReading(
+        readings: List<ReadingValue>,
+        average: AverageResult
+    ): Boolean {
+        return readings.any { isHighRisk(it.systolic, it.diastolic) } ||
+            isHighRisk(average.avgSystolic, average.avgDiastolic)
     }
 }

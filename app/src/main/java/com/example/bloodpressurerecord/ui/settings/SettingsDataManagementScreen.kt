@@ -20,11 +20,12 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,8 @@ import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppDangerButton
 import java.time.LocalDateTime
+import java.time.Instant
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
@@ -45,7 +48,7 @@ fun SettingsDataManagementScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var pendingExportFileName by remember { mutableStateOf(defaultBackupFileName()) }
     val backupExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(
@@ -163,15 +166,33 @@ fun SettingsDataManagementScreen(
                         Text("本地备份与导出", style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        text = "• 数据仅保存在您的手机本机\n• 不会上传任何服务器\n• 导出的 Excel 文件可用于本地备份、换机迁移或家人查看",
+                        text = "• 数据保存在本机，应用不主动上传\n" +
+                            "• Android 系统自动备份已关闭\n" +
+                            "• 卸载前请主动导出 Excel 备份\n" +
+                            "• 应用不提供医学诊断",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
+                    )
+                    Text(
+                        text = uiState.lastSuccessfulExportAt?.let {
+                            "上次成功导出：" + Instant.ofEpochMilli(it)
+                                .atZone(ZoneId.systemDefault())
+                                .format(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm"))
+                        } ?: "上次成功导出：尚未导出",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (uiState.isDataActionRunning) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             AppPrimaryButton(
                 text = if (uiState.isDataActionRunning) "正在处理..." else "导出为 Excel (.xlsx)",

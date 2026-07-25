@@ -124,6 +124,7 @@ class TrendChartMathTest {
             diastolic = diastolic,
             pulse = null,
             category = "NORMAL",
+            containsHighRiskReading = false,
             recordCount = 1,
             aggregation = TrendAggregation.RAW
         )

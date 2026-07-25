@@ -34,6 +34,8 @@ interface SettingsRepository {
 
     suspend fun setEveningReminderTime(value: String)
 
+    suspend fun refreshReminders()
+
     suspend fun saveUserProfile(profile: UserProfile)
 
     suspend fun clearAllData(): Result<Unit>

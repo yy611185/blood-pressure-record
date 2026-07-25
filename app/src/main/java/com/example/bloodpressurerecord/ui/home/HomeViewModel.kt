@@ -1,11 +1,15 @@
 package com.example.bloodpressurerecord.ui.home
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.ui.common.SessionFormLogic
+import com.example.bloodpressurerecord.ui.common.SessionDraftStore
+import com.example.bloodpressurerecord.ui.common.SessionFormDraft
 import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
@@ -34,15 +38,24 @@ data class HomeUiState(
     val showHighRiskDialog: Boolean = false,
     val showAbnormalConfirmDialog: Boolean = false,
     val abnormalConfirmMessage: String = "",
-    val isSaving: Boolean = false
+    val isSaving: Boolean = false,
+    val canSave: Boolean = false,
+    val saveDisabledReason: String = "至少填写两组有效读数后才能保存。",
+    val isDirty: Boolean = false
 )
 
 class HomeViewModel(
     private val repository: BloodPressureRepository,
-    highRiskAlertEnabled: Flow<Boolean> = flowOf(true)
+    highRiskAlertEnabled: Flow<Boolean> = flowOf(true),
+    savedStateHandle: SavedStateHandle = SavedStateHandle()
 ) : ViewModel() {
-    private val localState = MutableStateFlow(HomeUiState())
+    private val draftStore = SessionDraftStore(savedStateHandle, "add_session")
+    private val restoredDraft = draftStore.restore()
+    private val localState = MutableStateFlow(
+        restoredDraft?.toHomeUiState() ?: HomeUiState()
+    )
     private var pendingSaveInput: SaveSessionInput? = null
+    private var pendingSaveContainsHighRisk: Boolean = false
 
     val uiState: StateFlow<HomeUiState> = localState.asStateFlow()
     val measurementCount: StateFlow<Int> = repository.observeSessionCount().stateIn(
@@ -56,8 +69,8 @@ class HomeViewModel(
         initialValue = true
     )
 
-    fun updateMeasuredAtText(value: String) = localState.update { it.copy(measuredAtText = value) }
-    fun updateScene(value: String) = localState.update { it.copy(scene = value) }
+    fun updateMeasuredAtText(value: String) = updateForm { it.copy(measuredAtText = value) }
+    fun updateScene(value: String) = updateForm { it.copy(scene = value) }
 
     fun toggleThirdReading(show: Boolean) {
         localState.update { state ->
@@ -68,9 +81,15 @@ class HomeViewModel(
             }
             recomputeDerived(state.copy(showExtraReadings = show, extraReadings = nextExtras))
         }
+        persistDraft()
     }
 
     fun addNextReadingGroup() = updateReading { state ->
+        if (allReadings(state).size >= SessionFormLogic.UI_MAX_READING_COUNT) {
+            return@updateReading state.copy(
+                formMessage = "每次测量最多 ${SessionFormLogic.UI_MAX_READING_COUNT} 组读数。"
+            )
+        }
         state.copy(
             showExtraReadings = true,
             extraReadings = state.extraReadings + SessionReadingInputUi()
@@ -95,7 +114,14 @@ class HomeViewModel(
         state.copy(extraReadings = state.extraReadings.updateAt(index) { it.copy(pulse = value) })
     }
 
-    fun updateNote(value: String) = localState.update { it.copy(note = value) }
+    fun removeExtraReading(index: Int) = updateReading { state ->
+        state.copy(
+            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index },
+            showExtraReadings = state.extraReadings.size > 1
+        )
+    }
+
+    fun updateNote(value: String) = updateForm { it.copy(note = value) }
 
     fun toggleSymptom(symptom: String) {
         localState.update { state ->
@@ -109,8 +135,9 @@ class HomeViewModel(
                 next.remove("无症状")
                 if (!next.add(symptom)) next.remove(symptom)
             }
-            state.copy(selectedSymptoms = next)
+            state.copy(selectedSymptoms = next, isDirty = true)
         }
+        persistDraft()
     }
 
     fun onSaveClicked() {
@@ -137,11 +164,12 @@ class HomeViewModel(
             readings = validate.readings
         )
         pendingSaveInput = input
+        pendingSaveContainsHighRisk = validate.containsHighRiskReading
         SessionFormLogic.buildAbnormalMessage(validate.readings)?.let { abnormal ->
             localState.update { it.copy(showAbnormalConfirmDialog = true, abnormalConfirmMessage = abnormal) }
             return
         }
-        if (highRiskAlertsEnabled.value && SessionFormLogic.containsHighRisk(validate.readings)) {
+        if (highRiskAlertsEnabled.value && pendingSaveContainsHighRisk) {
             localState.update { it.copy(showHighRiskDialog = true) }
             return
         }
@@ -150,8 +178,8 @@ class HomeViewModel(
 
     fun confirmAbnormalAndContinue() {
         localState.update { it.copy(showAbnormalConfirmDialog = false, abnormalConfirmMessage = "") }
-        val pending = pendingSaveInput ?: return
-        if (highRiskAlertsEnabled.value && SessionFormLogic.containsHighRisk(pending.readings)) {
+        if (pendingSaveInput == null) return
+        if (highRiskAlertsEnabled.value && pendingSaveContainsHighRisk) {
             localState.update { it.copy(showHighRiskDialog = true) }
             return
         }
@@ -160,6 +188,7 @@ class HomeViewModel(
 
     fun dismissAbnormalDialog() {
         pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
         localState.update { it.copy(showAbnormalConfirmDialog = false, abnormalConfirmMessage = "") }
     }
 
@@ -170,16 +199,25 @@ class HomeViewModel(
 
     fun dismissHighRiskDialog() {
         pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
         localState.update { it.copy(showHighRiskDialog = false) }
     }
 
     fun clearForm() {
+        draftStore.clear()
         localState.value = HomeUiState(
             measuredAtText = DateTimeInputFormatter.nowText(),
             scene = localState.value.scene,
             formMessage = "表单已清空。"
         )
         pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
+    }
+
+    fun discardDraft() {
+        draftStore.clear()
+        pendingSaveInput = null
+        pendingSaveContainsHighRisk = false
     }
 
     private fun savePendingInput() {
@@ -200,7 +238,9 @@ class HomeViewModel(
                         scene = keptScene,
                         formMessage = "保存成功。"
                     )
+                    draftStore.clear()
                     pendingSaveInput = null
+                    pendingSaveContainsHighRisk = false
                 }
                 .onFailure { throwable ->
                     localState.update {
@@ -216,7 +256,26 @@ class HomeViewModel(
     }
 
     private fun updateReading(transform: (HomeUiState) -> HomeUiState) {
-        localState.update { state -> recomputeDerived(transform(state)) }
+        localState.update { state -> recomputeDerived(transform(state).copy(isDirty = true)) }
+        persistDraft()
+    }
+
+    private fun updateForm(transform: (HomeUiState) -> HomeUiState) {
+        localState.update { transform(it).copy(isDirty = true) }
+        persistDraft()
+    }
+
+    private fun persistDraft() {
+        val state = localState.value
+        draftStore.save(
+            SessionFormDraft(
+                measuredAtText = state.measuredAtText,
+                scene = state.scene,
+                readings = allReadings(state),
+                note = state.note,
+                symptoms = state.selectedSymptoms
+            )
+        )
     }
 
     private fun recomputeDerived(state: HomeUiState): HomeUiState {
@@ -228,7 +287,9 @@ class HomeViewModel(
             avgSystolic = derived.avgSystolic,
             avgDiastolic = derived.avgDiastolic,
             avgPulse = derived.avgPulse,
-            categoryLabel = derived.categoryLabel
+            categoryLabel = derived.categoryLabel,
+            canSave = SessionFormLogic.saveDisabledReason(allReadings(state)) == null,
+            saveDisabledReason = SessionFormLogic.saveDisabledReason(allReadings(state)).orEmpty()
         )
     }
 
@@ -242,5 +303,25 @@ class HomeViewModel(
     ): List<SessionReadingInputUi> {
         if (index !in indices) return this
         return mapIndexed { i, item -> if (i == index) transform(item) else item }
+    }
+
+    private fun SessionFormDraft.toHomeUiState(): HomeUiState {
+        val first = readings.getOrNull(0) ?: SessionReadingInputUi()
+        val second = readings.getOrNull(1) ?: SessionReadingInputUi()
+        val extras = readings.drop(2)
+        return recomputeDerived(
+            HomeUiState(
+                measuredAtText = measuredAtText,
+                scene = scene,
+                reading1 = first,
+                reading2 = second,
+                extraReadings = extras,
+                showExtraReadings = extras.isNotEmpty(),
+                note = note,
+                selectedSymptoms = symptoms,
+                formMessage = "已恢复未保存的测量草稿。",
+                isDirty = true
+            )
+        )
     }
 }

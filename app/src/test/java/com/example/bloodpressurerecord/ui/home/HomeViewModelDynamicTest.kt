@@ -1,8 +1,12 @@
 package com.example.bloodpressurerecord.ui.home
 
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
+import com.example.bloodpressurerecord.data.repository.CalendarSessionSummary
+import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
+import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.data.repository.SessionRecord
+import com.example.bloodpressurerecord.data.repository.SessionSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,6 +105,18 @@ class HomeViewModelDynamicTest {
         assertEquals("保存成功。", vm.uiState.value.formMessage)
     }
 
+    @Test
+    fun extra_reading_can_be_removed_but_required_two_remain() = runTest {
+        val vm = HomeViewModel(FakeRepository())
+        vm.addNextReadingGroup()
+        assertEquals(1, vm.uiState.value.extraReadings.size)
+
+        vm.removeExtraReading(0)
+
+        assertEquals(0, vm.uiState.value.extraReadings.size)
+        assertTrue(!vm.uiState.value.canSave)
+    }
+
     private class FakeRepository : BloodPressureRepository {
         private val count = MutableStateFlow(0)
         var savedCount: Int = 0
@@ -113,6 +129,24 @@ class HomeViewModelDynamicTest {
         override fun observeSessions(): Flow<List<SessionRecord>> = count.map { emptyList() }
 
         override fun observeSession(sessionId: String): Flow<SessionRecord?> = count.map { null }
+        override fun observeLatestSession(): Flow<SessionRecord?> = flowOf(null)
+        override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = flowOf(null)
+        override fun observeCalendarSessionSummaries(
+            startInclusive: Long,
+            endExclusive: Long
+        ): Flow<List<CalendarSessionSummary>> = flowOf(emptyList())
+        override fun observeSessionSummariesInRange(
+            startInclusive: Long,
+            endExclusive: Long
+        ): Flow<List<SessionSummary>> = flowOf(emptyList())
+        override fun observePeriodStatistics(
+            startInclusive: Long,
+            endExclusive: Long
+        ): Flow<PeriodStatistics> = flowOf(PeriodStatistics())
+        override fun observeSessionsInRange(
+            startInclusive: Long,
+            endExclusive: Long
+        ): Flow<List<SessionRecord>> = flowOf(emptyList())
 
         override suspend fun saveSession(input: SaveSessionInput): Result<String> {
             savedCount += 1
@@ -124,5 +158,6 @@ class HomeViewModelDynamicTest {
         override suspend fun updateSession(sessionId: String, input: SaveSessionInput): Result<Unit> = Result.success(Unit)
 
         override suspend fun deleteSession(sessionId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun restoreSession(session: SessionRecord): Result<Unit> = Result.success(Unit)
     }
 }

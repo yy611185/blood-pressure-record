@@ -7,12 +7,12 @@ import org.junit.Test
 class HighRiskJudgeTest {
     @Test
     fun `超过阈值触发高风险`() {
-        assertTrue(HighRiskJudge.shouldTrigger(182, 100))
-        assertTrue(HighRiskJudge.shouldTrigger(150, 121))
+        assertTrue(BloodPressureRules.isHighRisk(182, 100))
+        assertTrue(BloodPressureRules.isHighRisk(150, 121))
     }
 
     @Test
     fun `未超过阈值不触发高风险`() {
-        assertFalse(HighRiskJudge.shouldTrigger(180, 120))
+        assertFalse(BloodPressureRules.isHighRisk(180, 120))
     }
 }
