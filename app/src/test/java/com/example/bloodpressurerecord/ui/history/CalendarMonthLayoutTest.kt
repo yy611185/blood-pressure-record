@@ -2,6 +2,8 @@ package com.example.bloodpressurerecord.ui.history
 
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
+import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -42,7 +44,35 @@ class CalendarMonthLayoutTest {
         assertTrue(!first.isInDisplayedMonth)
     }
 
+    @Test
+    fun `本周固定从周一开始且使用半开区间`() {
+        val zone = ZoneId.of("Asia/Taipei")
+        val range = HistoryDateRanges.recent(
+            RecentPeriod.THIS_WEEK,
+            LocalDate.of(2026, 7, 26),
+            zone
+        )
+
+        assertEquals(LocalDate.of(2026, 7, 20), localDate(range.startInclusive, zone))
+        assertEquals(LocalDate.of(2026, 7, 27), localDate(range.endExclusive, zone))
+    }
+
+    @Test
+    fun `本月跨年到下一年且尊重本地时区`() {
+        val zone = ZoneId.of("America/New_York")
+        val range = HistoryDateRanges.recent(
+            RecentPeriod.THIS_MONTH,
+            LocalDate.of(2026, 12, 31),
+            zone
+        )
+
+        assertEquals(LocalDate.of(2026, 12, 1), localDate(range.startInclusive, zone))
+        assertEquals(LocalDate.of(2027, 1, 1), localDate(range.endExclusive, zone))
+    }
+
     private fun dates(month: YearMonth): List<LocalDate> =
         CalendarMonthLayout.cells(month).mapNotNull { it.date }
-}
 
+    private fun localDate(epochMillis: Long, zoneId: ZoneId): LocalDate =
+        Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate()
+}

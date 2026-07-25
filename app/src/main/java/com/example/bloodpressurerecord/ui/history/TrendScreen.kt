@@ -33,6 +33,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.domain.model.TrendRange
@@ -228,12 +232,16 @@ private fun <T> SegmentedControl(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(34.dp)
+                    .heightIn(min = 48.dp)
                     .shadow(if (isSelected) 2.dp else 0.dp, RoundedCornerShape(14.dp), clip = false)
                     .background(
                         if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
                         RoundedCornerShape(14.dp)
                     )
+                    .semantics {
+                        role = Role.RadioButton
+                        this.selected = isSelected
+                    }
                     .clickable { onSelected(item) },
                 contentAlignment = Alignment.Center
             ) {

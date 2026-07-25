@@ -2,6 +2,10 @@
     <string name="app_name">家庭血压记录</string>
     <string name="back">返回</string>
     <string name="history_title">历史记录</string>
+    <string name="history_mode_calendar">日历</string>
+    <string name="history_mode_recent">近期</string>
+    <string name="history_period_week">本周</string>
+    <string name="history_period_month">本月</string>
     <string name="previous_month">上一个月</string>
     <string name="next_month">下一个月</string>
     <string name="choose_year_month">选择年月</string>

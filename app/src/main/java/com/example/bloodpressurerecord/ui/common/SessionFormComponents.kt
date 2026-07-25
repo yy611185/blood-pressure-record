@@ -26,7 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -98,35 +100,24 @@ fun MeasurementDateTimePicker(
     }
 
     if (showTimePicker) {
-        val timeState = rememberTimePickerState(
+        DigitalTimeInputDialog(
+            title = "选择测量时间",
             initialHour = localDateTime.hour,
             initialMinute = localDateTime.minute,
-            is24Hour = true
-        )
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            title = { Text("选择测量时间") },
-            text = { TimePicker(state = timeState) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val time = LocalTime.of(timeState.hour, timeState.minute)
-                        val text = localDateTime.toLocalDate()
-                            .format(DateTimeFormatter.ISO_LOCAL_DATE) +
-                            " " + time.format(DateTimeFormatter.ofPattern("HH:mm"))
-                        val next = DateTimeInputFormatter.parse(text, zoneId)
-                        if (next == null) {
-                            dateTimeError = "所选本地时间无效，请重新选择。"
-                        } else {
-                            dateTimeError = null
-                            onMeasuredAtChange(DateTimeInputFormatter.format(next, zoneId))
-                        }
-                        showTimePicker = false
-                    }
-                ) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("取消") }
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute ->
+                val time = LocalTime.of(hour, minute)
+                val text = localDateTime.toLocalDate()
+                    .format(DateTimeFormatter.ISO_LOCAL_DATE) +
+                    " " + time.format(DateTimeFormatter.ofPattern("HH:mm"))
+                val next = DateTimeInputFormatter.parse(text, zoneId)
+                if (next == null) {
+                    dateTimeError = "所选本地时间无效，请重新选择。"
+                } else {
+                    dateTimeError = null
+                    onMeasuredAtChange(DateTimeInputFormatter.format(next, zoneId))
+                }
+                showTimePicker = false
             }
         )
     }
@@ -159,6 +150,44 @@ fun MeasurementDateTimePicker(
             style = MaterialTheme.typography.bodySmall
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DigitalTimeInputDialog(
+    title: String,
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (hour: Int, minute: Int) -> Unit
+) {
+    val timeState = rememberTimePickerState(
+        initialHour = initialHour.coerceIn(0, 23),
+        initialMinute = initialMinute.coerceIn(0, 59),
+        is24Hour = true
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            TimeInput(
+                state = timeState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = "24小时制时间输入，小时和分钟"
+                    }
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(timeState.hour, timeState.minute) }
+            ) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable

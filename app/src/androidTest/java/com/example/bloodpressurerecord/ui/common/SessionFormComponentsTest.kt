@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -43,6 +44,46 @@ class SessionFormComponentsTest {
 
         composeRule.onNodeWithText("09:30").performClick()
         composeRule.onNodeWithText("选择测量时间").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("24小时制时间输入，小时和分钟")
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun digital_time_cancel_does_not_submit() {
+        var submitted = false
+        composeRule.setContent {
+            BloodPressureRecordTheme {
+                DigitalTimeInputDialog(
+                    title = "选择时间",
+                    initialHour = 0,
+                    initialMinute = 0,
+                    onDismiss = {},
+                    onConfirm = { _, _ -> submitted = true }
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("取消").performClick()
+        assertTrue(!submitted)
+    }
+
+    @Test
+    fun digital_time_confirm_submits_initial_24_hour_value_once() {
+        var submitted: Pair<Int, Int>? = null
+        composeRule.setContent {
+            BloodPressureRecordTheme {
+                DigitalTimeInputDialog(
+                    title = "选择时间",
+                    initialHour = 23,
+                    initialMinute = 59,
+                    onDismiss = {},
+                    onConfirm = { hour, minute -> submitted = hour to minute }
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("确定").performClick()
+        assertEquals(23 to 59, submitted)
     }
 
     @Test
@@ -84,4 +125,3 @@ class SessionFormComponentsTest {
         composeRule.onNodeWithText("至少填写两组有效读数后才能保存。").assertIsDisplayed()
     }
 }
-

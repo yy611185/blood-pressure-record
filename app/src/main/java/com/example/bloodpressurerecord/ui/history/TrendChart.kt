@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -85,6 +85,7 @@ fun SessionTimeSeriesDualLineChart(
     }
 
     val density = LocalDensity.current
+    val nodeBackgroundColor = MaterialTheme.colorScheme.surface
     val zoneId = remember { ZoneId.systemDefault() }
     val textMeasurer = rememberTextMeasurer()
     val viewport = remember(series.range, series.rangeStart, series.rangeEnd) {
@@ -102,29 +103,27 @@ fun SessionTimeSeriesDualLineChart(
         isInteracting = false
     }
 
-    val visiblePoints by remember(points) {
-        derivedStateOf {
-            TrendChartMath.visiblePoints(points, viewport.startMillis, viewport.endMillis)
-        }
+    val viewportStart = viewport.startMillis
+    val viewportEnd = viewport.endMillis
+    val visiblePoints = remember(points, viewportStart, viewportEnd) {
+        TrendChartMath.visiblePoints(points, viewportStart, viewportEnd)
     }
-    val maxDrawPoints by remember {
-        derivedStateOf {
-            (canvasSize.width / 2).coerceIn(MIN_DRAW_POINTS, MAX_DRAW_POINTS)
-        }
+    val maxDrawPoints = remember(canvasSize.width) {
+        (canvasSize.width / 2).coerceIn(MIN_DRAW_POINTS, MAX_DRAW_POINTS)
     }
-    val drawnPoints by remember {
-        derivedStateOf {
-            TrendChartMath.sampleShared(visiblePoints, maxDrawPoints)
-        }
+    val renderPoints = remember(visiblePoints, maxDrawPoints) {
+        TrendChartMath.sampleShared(visiblePoints, maxDrawPoints)
     }
-    val axisTicks by remember {
-        derivedStateOf {
-            TrendChartMath.timeTicks(
-                startMillis = viewport.startMillis,
-                endMillis = viewport.endMillis,
-                zoneId = zoneId
-            )
-        }
+    val maxTicks = remember(canvasSize.width) {
+        TrendChartMath.maxTickCount(canvasSize.width)
+    }
+    val axisTicks = remember(viewportStart, viewportEnd, canvasSize.width, zoneId) {
+        TrendChartMath.timeTicks(
+            startMillis = viewportStart,
+            endMillis = viewportEnd,
+            zoneId = zoneId,
+            maxTicks = maxTicks
+        )
     }
     val geometry = remember(canvasSize, density) {
         ChartGeometry.create(canvasSize, density.density)
@@ -151,36 +150,51 @@ fun SessionTimeSeriesDualLineChart(
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(
-                "$averageLabel 收缩压 ${series.averageSystolic ?: "--"} mmHg",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                "$averageLabel 舒张压 ${series.averageDiastolic ?: "--"} mmHg",
-                style = MaterialTheme.typography.bodySmall
-            )
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            if (maxWidth < 360.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AverageSummary("$averageLabel 收缩压", series.averageSystolic)
+                    AverageSummary("$averageLabel 舒张压", series.averageDiastolic)
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    AverageSummary(
+                        "$averageLabel 收缩压",
+                        series.averageSystolic,
+                        Modifier.weight(1f)
+                    )
+                    AverageSummary(
+                        "$averageLabel 舒张压",
+                        series.averageDiastolic,
+                        Modifier.weight(1f)
+                    )
+                }
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
             LegendItem("收缩压", SYS_COLOR)
             LegendItem("舒张压", DIA_COLOR)
-            Text(
-                text = if (series.range == com.example.bloodpressurerecord.domain.model.TrendRange.ALL) {
+        }
+        Text(
+            text = "数据处理方式：" +
+                if (series.range == com.example.bloodpressurerecord.domain.model.TrendRange.ALL) {
                     "每日平均"
                 } else {
                     "每次测量"
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF64748B)
-            )
-        }
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(CHART_HEIGHT)
-                .background(Color.White, RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp))
                 .onSizeChanged { canvasSize = it }
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -317,16 +331,16 @@ fun SessionTimeSeriesDualLineChart(
                 }
 
                 if (showSystolic) {
-                    drawSeriesLine(drawnPoints, scaler, SYS_COLOR, systolic = true, path = sysPath)
+                    drawSeriesLine(renderPoints, scaler, SYS_COLOR, systolic = true, path = sysPath)
                 }
                 if (showDiastolic) {
-                    drawSeriesLine(drawnPoints, scaler, DIA_COLOR, systolic = false, path = diaPath)
+                    drawSeriesLine(renderPoints, scaler, DIA_COLOR, systolic = false, path = diaPath)
                 }
 
                 val pointSpacing = (currentGeometry.right - currentGeometry.left) /
-                    visiblePoints.size.coerceAtLeast(1)
+                    renderPoints.size.coerceAtLeast(1)
                 if (!isInteracting && pointSpacing >= MIN_NODE_SPACING_PX) {
-                    visiblePoints.forEach { point ->
+                    renderPoints.forEach { point ->
                         val x = scaler.xOf(point.timestamp)
                         val isSelected = selected?.point?.id == point.id
                         if (showSystolic) {
@@ -334,6 +348,7 @@ fun SessionTimeSeriesDualLineChart(
                                 x = x,
                                 y = scaler.yOf(point.systolic),
                                 color = valueColor(point.systolic, SYS_COLOR),
+                                backgroundColor = nodeBackgroundColor,
                                 selected = isSelected && selected?.systolicSelected == true
                             )
                         }
@@ -342,6 +357,7 @@ fun SessionTimeSeriesDualLineChart(
                                 x = x,
                                 y = scaler.yOf(point.diastolic),
                                 color = valueColor(point.diastolic, DIA_COLOR),
+                                backgroundColor = nodeBackgroundColor,
                                 selected = isSelected && selected?.systolicSelected == false
                             )
                         }
@@ -359,6 +375,7 @@ fun SessionTimeSeriesDualLineChart(
                             } else {
                                 valueColor(point.diastolic, DIA_COLOR)
                             },
+                            backgroundColor = nodeBackgroundColor,
                             selected = true
                         )
                     }
@@ -449,24 +466,40 @@ private fun ChartTooltip(
             )
         },
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(formatFullDate(point.timestamp), fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
+            Text(
+                formatFullDate(point.timestamp),
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
             if (point.aggregation == TrendAggregation.RAW) {
-                Text(formatFullTime(point.timestamp), style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
+                Text(
+                    formatFullTime(point.timestamp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             } else {
                 Text(
                     "当日 ${point.recordCount} 次测量平均",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF64748B)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             TooltipValue("收缩压", "${point.systolic} mmHg", valueColor(point.systolic, SYS_COLOR))
             TooltipValue("舒张压", "${point.diastolic} mmHg", valueColor(point.diastolic, DIA_COLOR))
-            Text("脉搏 ${point.pulse?.toString() ?: "--"} bpm", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
-            Text("分级 ${point.category.toChineseCategoryLabel()}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
+            Text(
+                "脉搏 ${point.pulse?.toString() ?: "--"} bpm",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "分级 ${point.category.toChineseCategoryLabel()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -477,7 +510,11 @@ private fun TooltipValue(label: String, value: String, color: Color) {
         Canvas(modifier = Modifier.size(7.dp)) {
             drawCircle(color = color, radius = size.minDimension / 2f)
         }
-        Text("$label $value", style = MaterialTheme.typography.bodySmall, color = Color(0xFF0F172A))
+        Text(
+            "$label $value",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -494,12 +531,36 @@ private const val MAX_DRAW_POINTS = 900
 private const val MIN_NODE_SPACING_PX = 12f
 
 @Composable
+private fun AverageSummary(
+    label: String,
+    value: Int?,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "${value ?: "--"} mmHg",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
 private fun LegendItem(text: String, color: Color) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         Canvas(modifier = Modifier.size(8.dp)) {
             drawCircle(color = color, radius = size.minDimension / 2f)
         }
-        Text(text, color = Color(0xFF334155), style = MaterialTheme.typography.bodySmall)
+        Text(
+            text,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -508,12 +569,16 @@ private fun TrendEmptyState(title: String, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("保持每天固定时间记录，积累记录后即可查看趋势。", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF64748B))
+            Text(
+                "保持每天固定时间记录，积累记录后即可查看趋势。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -647,8 +712,8 @@ private fun DrawScope.drawSeriesLine(
     systolic: Boolean,
     path: Path
 ) {
-    if (points.isEmpty()) return
     path.reset()
+    if (points.size < 2) return
     points.forEachIndexed { index, point ->
         val offset = Offset(
             scaler.xOf(point.timestamp),
@@ -669,14 +734,29 @@ private fun DrawScope.drawTimeAxisLabels(
     geometry: ChartGeometry,
     textMeasurer: androidx.compose.ui.text.TextMeasurer
 ) {
-    ticks.forEach { tick ->
-        val x = scaler.xOf(tick.timestamp)
-        val primaryStyle = TextStyle(color = AXIS_COLOR, fontSize = 10.sp)
-        val primaryLayout = textMeasurer.measure(tick.primary, primaryStyle)
+    val primaryStyle = TextStyle(color = AXIS_COLOR, fontSize = 10.sp)
+    val layouts = ticks.map { textMeasurer.measure(it.primary, primaryStyle) }
+    val centers = ticks.map { scaler.xOf(it.timestamp) }
+    val visibleIndices = TrendChartMath.nonOverlappingTickIndices(
+        centers = centers,
+        widths = layouts.map { it.size.width.toFloat() },
+        left = geometry.left,
+        right = geometry.right,
+        minimumGap = 8f
+    )
+    visibleIndices.forEach { index ->
+        val tick = ticks[index]
+        val primaryLayout = layouts[index]
+        val centerX = centers[index]
+        val labelX = (centerX - primaryLayout.size.width / 2f)
+            .coerceIn(
+                geometry.left,
+                (geometry.right - primaryLayout.size.width).coerceAtLeast(geometry.left)
+            )
         drawText(
             textMeasurer = textMeasurer,
             text = tick.primary,
-            topLeft = Offset(x - primaryLayout.size.width / 2f, geometry.bottom + 10f),
+            topLeft = Offset(labelX, geometry.bottom + 10f),
             style = primaryStyle
         )
         tick.secondary?.let { secondary ->
@@ -685,7 +765,13 @@ private fun DrawScope.drawTimeAxisLabels(
             drawText(
                 textMeasurer = textMeasurer,
                 text = secondary,
-                topLeft = Offset(x - secondaryLayout.size.width / 2f, geometry.bottom + 23f),
+                topLeft = Offset(
+                    (centerX - secondaryLayout.size.width / 2f).coerceIn(
+                        geometry.left,
+                        (geometry.right - secondaryLayout.size.width).coerceAtLeast(geometry.left)
+                    ),
+                    geometry.bottom + 23f
+                ),
                 style = secondaryStyle
             )
         }
@@ -696,10 +782,11 @@ private fun DrawScope.drawPointNode(
     x: Float,
     y: Float,
     color: Color,
+    backgroundColor: Color,
     selected: Boolean
 ) {
     val radius = if (selected) 6.6f else 4.8f
-    drawCircle(color = Color.White, radius = radius, center = Offset(x, y))
+    drawCircle(color = backgroundColor, radius = radius, center = Offset(x, y))
     drawCircle(
         color = color,
         radius = radius,
