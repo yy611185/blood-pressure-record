@@ -45,6 +45,28 @@ class TrendChartMathTest {
     }
 
     @Test
+    fun visiblePoints_sortsUnorderedInputBeforeBinarySearchAndRendering() {
+        val points = listOf(
+            point(timestamp = 3_000L),
+            point(timestamp = 1_000L),
+            point(timestamp = 2_000L)
+        )
+
+        val visible = TrendChartMath.visiblePoints(points, 1_000L, 3_000L)
+
+        assertEquals(listOf(1_000L, 2_000L, 3_000L), visible.map { it.timestamp })
+    }
+
+    @Test
+    fun sharedSampling_keepsOneAndTwoSparsePointsUnchanged() {
+        val one = listOf(point(timestamp = 1_000L))
+        val two = one + point(timestamp = 2_000L)
+
+        assertEquals(one, TrendChartMath.sampleShared(one, maxPoints = 60))
+        assertEquals(two, TrendChartMath.sampleShared(two, maxPoints = 60))
+    }
+
+    @Test
     fun sharedSampling_preservesFirstLastAndBoundedPointCount() {
         val points = (0 until 10_000).map { index ->
             point(
@@ -107,6 +129,26 @@ class TrendChartMathTest {
         assertTrue(ticks.isNotEmpty())
         assertTrue(ticks.all { it.timestamp in start..end })
         assertTrue(ticks.zipWithNext().all { (a, b) -> a.timestamp < b.timestamp })
+    }
+
+    @Test
+    fun tickCount_isDynamicAndBoundedByCanvasWidth() {
+        assertEquals(2, TrendChartMath.maxTickCount(120))
+        assertEquals(4, TrendChartMath.maxTickCount(400))
+        assertEquals(6, TrendChartMath.maxTickCount(2_000))
+    }
+
+    @Test
+    fun tickCollisionFilter_keepsLabelsInsideBoundsAndSeparated() {
+        val selected = TrendChartMath.nonOverlappingTickIndices(
+            centers = listOf(0f, 25f, 50f, 75f, 100f),
+            widths = listOf(30f, 30f, 30f, 30f, 30f),
+            left = 0f,
+            right = 100f,
+            minimumGap = 4f
+        )
+
+        assertEquals(listOf(0, 2, 4), selected)
     }
 
     private fun point(

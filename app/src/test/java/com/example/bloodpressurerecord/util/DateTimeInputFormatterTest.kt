@@ -8,6 +8,17 @@ import org.junit.Test
 
 class DateTimeInputFormatterTest {
     @Test
+    fun `24小时数字时间边界可往返`() {
+        val zone = ZoneId.of("Asia/Taipei")
+        listOf("00:00", "09:05", "16:47", "23:59").forEach { time ->
+            val text = "2026-07-25 $time"
+            val parsed = DateTimeInputFormatter.parse(text, zone)
+            assertNotNull(parsed)
+            assertEquals(text, DateTimeInputFormatter.format(parsed!!, zone))
+        }
+    }
+
+    @Test
     fun `拒绝不存在的夏令时本地时间`() {
         assertNull(
             DateTimeInputFormatter.parse(
@@ -30,4 +41,3 @@ class DateTimeInputFormatterTest {
         assertNull(DateTimeInputFormatter.parse("2025-02-29 12:00"))
     }
 }
-

@@ -126,6 +126,14 @@ fun HistoryScreen(
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
             item {
+                HistoryModeSelector(
+                    selected = uiState.viewMode,
+                    onSelected = viewModel::setViewMode
+                )
+            }
+
+            if (uiState.viewMode == HistoryViewMode.CALENDAR) {
+                item {
                 DataCard {
                     CalendarMonth(
                         month = uiState.displayedMonth,
@@ -140,48 +148,232 @@ fun HistoryScreen(
                 }
             }
 
-            when (uiState.monthState) {
-                CalendarLoadingState.LOADING -> item {
-                    CalendarMessage("正在加载本月记录…")
-                }
-                CalendarLoadingState.ERROR -> item {
-                    ErrorState(
-                        message = uiState.monthError ?: "无法加载本月记录。",
-                        onRetry = viewModel::retryMonth
-                    )
-                }
-                CalendarLoadingState.CONTENT -> {
-                    when {
-                        !uiState.monthHasRecords -> item {
-                            EmptyMonthState(onAddMeasurement)
-                        }
-                        uiState.selectedDate == null -> item {
-                            CalendarMessage(stringResource(R.string.calendar_select_recorded_day))
-                        }
-                        uiState.dayState == CalendarLoadingState.ERROR -> item {
-                            ErrorState(
-                                message = uiState.dayError ?: "无法加载当天记录。",
-                                onRetry = viewModel::retryDay
-                            )
-                        }
-                        else -> {
-                            item {
-                                SelectedDaySummary(uiState)
+                when (uiState.monthState) {
+                    CalendarLoadingState.LOADING -> item {
+                        CalendarMessage("正在加载本月记录…")
+                    }
+                    CalendarLoadingState.ERROR -> item {
+                        ErrorState(
+                            message = uiState.monthError ?: "无法加载本月记录。",
+                            onRetry = viewModel::retryMonth
+                        )
+                    }
+                    CalendarLoadingState.CONTENT -> {
+                        when {
+                            !uiState.monthHasRecords -> item {
+                                EmptyMonthState(onAddMeasurement)
                             }
-                            items(
-                                items = uiState.selectedDayRecords,
-                                key = { it.id }
-                            ) { session ->
-                                HistorySessionCard(
-                                    session = session,
-                                    onClick = { onOpenDetail(session.id) }
+                            uiState.selectedDate == null -> item {
+                                CalendarMessage(stringResource(R.string.calendar_select_recorded_day))
+                            }
+                            uiState.dayState == CalendarLoadingState.ERROR -> item {
+                                ErrorState(
+                                    message = uiState.dayError ?: "无法加载当天记录。",
+                                    onRetry = viewModel::retryDay
                                 )
                             }
+                            else -> {
+                                item {
+                                    SelectedDaySummary(uiState)
+                                }
+                                items(
+                                    items = uiState.selectedDayRecords,
+                                    key = { it.id }
+                                ) { session ->
+                                    HistorySessionCard(
+                                        session = session,
+                                        onClick = { onOpenDetail(session.id) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    RecentPeriodSelector(
+                        selected = uiState.recentPeriod,
+                        onSelected = viewModel::setRecentPeriod
+                    )
+                }
+                when (uiState.recentState) {
+                    CalendarLoadingState.LOADING -> item {
+                        CalendarMessage("正在加载近期记录…")
+                    }
+                    CalendarLoadingState.ERROR -> item {
+                        ErrorState(
+                            message = uiState.recentError ?: "无法加载近期记录。",
+                            onRetry = viewModel::retryRecent
+                        )
+                    }
+                    CalendarLoadingState.CONTENT -> {
+                        item {
+                            RecentSummaryCard(
+                                period = uiState.recentPeriod,
+                                summary = uiState.recentSummary
+                            )
+                        }
+                        if (uiState.recentRecords.isEmpty()) {
+                            item { EmptyRecentState(onAddMeasurement) }
+                        } else {
+                            uiState.recentRecords
+                                .groupBy { it.measuredDate }
+                                .forEach { (date, records) ->
+                                    item(key = "date-$date") {
+                                        Text(
+                                            date.format(DateTimeFormatter.ofPattern("M月d日 EEEE")),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    items(records, key = { it.id }) { session ->
+                                        HistorySessionCard(
+                                            session = session,
+                                            showDate = true,
+                                            onClick = { onOpenDetail(session.id) }
+                                        )
+                                    }
+                                }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HistoryModeSelector(
+    selected: HistoryViewMode,
+    onSelected: (HistoryViewMode) -> Unit
+) {
+    SelectionRow(
+        options = listOf(
+            HistoryViewMode.CALENDAR to stringResource(R.string.history_mode_calendar),
+            HistoryViewMode.RECENT to stringResource(R.string.history_mode_recent)
+        ),
+        selected = selected,
+        onSelected = onSelected
+    )
+}
+
+@Composable
+private fun RecentPeriodSelector(
+    selected: RecentPeriod,
+    onSelected: (RecentPeriod) -> Unit
+) {
+    SelectionRow(
+        options = listOf(
+            RecentPeriod.THIS_WEEK to stringResource(R.string.history_period_week),
+            RecentPeriod.THIS_MONTH to stringResource(R.string.history_period_month)
+        ),
+        selected = selected,
+        onSelected = onSelected
+    )
+}
+
+@Composable
+private fun <T> SelectionRow(
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelected: (T) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant,
+                MaterialTheme.shapes.large
+            )
+            .padding(AppSpacing.xSmall),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+    ) {
+        options.forEach { (option, label) ->
+            val isSelected = option == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = AppDimensions.minimumTouchTarget)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(
+                        if (isSelected) MaterialTheme.colorScheme.surface
+                        else Color.Transparent
+                    )
+                    .semantics {
+                        role = Role.RadioButton
+                        this.selected = isSelected
+                        contentDescription = if (isSelected) "$label，已选择" else label
+                    }
+                    .clickable { onSelected(option) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentSummaryCard(
+    period: RecentPeriod,
+    summary: RecentSummary?
+) {
+    val title = if (period == RecentPeriod.THIS_WEEK) {
+        stringResource(R.string.history_period_week)
+    } else {
+        stringResource(R.string.history_period_month)
+    }
+    DataCard {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            if (summary != null) {
+                Text(
+                    "${summary.startDate.format(DateTimeFormatter.ofPattern("yyyy年M月d日"))} 至 " +
+                        summary.endDateInclusive.format(DateTimeFormatter.ofPattern("M月d日")),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text("测量次数：${summary.recordCount} 次")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.large)
+                ) {
+                    SummaryValue(
+                        label = "平均收缩压",
+                        value = summary.averageSystolic?.let { "$it mmHg" } ?: "--",
+                        modifier = Modifier.weight(1f)
+                    )
+                    SummaryValue(
+                        label = "平均舒张压",
+                        value = summary.averageDiastolic?.let { "$it mmHg" } ?: "--",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                summary.averagePulse?.let { Text("平均脉搏：$it 次/分") }
+                Text("高风险记录：${summary.highRiskCount} 条")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryValue(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -400,7 +592,11 @@ private fun SelectedDaySummary(state: HistoryUiState) {
 }
 
 @Composable
-fun HistorySessionCard(session: HistorySessionItemUi, onClick: () -> Unit) {
+fun HistorySessionCard(
+    session: HistorySessionItemUi,
+    onClick: () -> Unit,
+    showDate: Boolean = false
+) {
     val visualStatus = bloodPressureVisualStatus(
         category = when (session.categoryText) {
             "正常" -> "NORMAL"
@@ -418,7 +614,15 @@ fun HistorySessionCard(session: HistorySessionItemUi, onClick: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(session.measuredAtText, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (showDate) {
+                        "${session.measuredDate.format(DateTimeFormatter.ofPattern("MM-dd"))} " +
+                            session.measuredAtText
+                    } else {
+                        session.measuredAtText
+                    },
+                    style = MaterialTheme.typography.titleMedium
+                )
                 StatusChip(
                     text = if (session.containsHighRiskReading) "含高风险读数" else session.categoryText,
                     isAbnormal = visualStatus.name != "NORMAL",
@@ -461,6 +665,22 @@ private fun EmptyMonthState(onAdd: () -> Unit) {
         Text(stringResource(R.string.calendar_empty_month), style = MaterialTheme.typography.titleMedium)
         AppPrimaryButton(
             text = "新增测量",
+            icon = Icons.Default.Add,
+            onClick = onAdd
+        )
+    }
+}
+
+@Composable
+private fun EmptyRecentState(onAdd: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = AppSpacing.xLarge),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)
+    ) {
+        Text("当前范围还没有血压记录", style = MaterialTheme.typography.titleMedium)
+        AppPrimaryButton(
+            text = stringResource(R.string.add_measurement),
             icon = Icons.Default.Add,
             onClick = onAdd
         )

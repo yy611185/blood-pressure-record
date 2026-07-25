@@ -2,6 +2,38 @@ package com.example.bloodpressurerecord.ui.history
 
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
+import com.example.bloodpressurerecord.domain.time.EpochMillisRange
+import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
+
+enum class HistoryViewMode {
+    CALENDAR,
+    RECENT
+}
+
+enum class RecentPeriod {
+    THIS_WEEK,
+    THIS_MONTH
+}
+
+object HistoryDateRanges {
+    fun recent(
+        period: RecentPeriod,
+        today: LocalDate,
+        zoneId: ZoneId
+    ): EpochMillisRange {
+        return when (period) {
+            RecentPeriod.THIS_WEEK -> {
+                val monday = today.minusDays((today.dayOfWeek.value - 1).toLong())
+                EpochMillisRange(
+                    startInclusive = monday.atStartOfDay(zoneId).toInstant().toEpochMilli(),
+                    endExclusive = monday.plusWeeks(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
+                )
+            }
+            RecentPeriod.THIS_MONTH -> YearMonth.from(today).toEpochMillisRange(zoneId)
+        }
+    }
+}
 
 data class CalendarDaySummary(
     val date: LocalDate,
@@ -41,4 +73,3 @@ enum class CalendarLoadingState {
     CONTENT,
     ERROR
 }
-

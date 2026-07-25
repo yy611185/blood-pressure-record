@@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
+import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SessionSummary
+import com.example.bloodpressurerecord.domain.time.EpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toLocalDate
 import java.time.Instant
@@ -26,6 +28,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 
 data class HistoryUiState(
+    val viewMode: HistoryViewMode = HistoryViewMode.CALENDAR,
+    val recentPeriod: RecentPeriod = RecentPeriod.THIS_WEEK,
     val displayedMonth: YearMonth = YearMonth.now(),
     val selectedDate: LocalDate? = null,
     val monthState: CalendarLoadingState = CalendarLoadingState.LOADING,
@@ -34,6 +38,10 @@ data class HistoryUiState(
     val selectedDayRecords: List<HistorySessionItemUi> = emptyList(),
     val selectedDayAverageSystolic: Int? = null,
     val selectedDayAverageDiastolic: Int? = null,
+    val recentState: CalendarLoadingState = CalendarLoadingState.LOADING,
+    val recentRecords: List<HistorySessionItemUi> = emptyList(),
+    val recentSummary: RecentSummary? = null,
+    val recentError: String? = null,
     val monthError: String? = null,
     val dayError: String? = null
 ) {
@@ -42,6 +50,8 @@ data class HistoryUiState(
 
 data class HistorySessionItemUi(
     val id: String,
+    val measuredAt: Long,
+    val measuredDate: LocalDate,
     val measuredAtText: String,
     val avgBloodPressureText: String,
     val avgPulseText: String,
@@ -51,6 +61,16 @@ data class HistorySessionItemUi(
     val containsHighRiskReading: Boolean
 )
 
+data class RecentSummary(
+    val startDate: LocalDate,
+    val endDateInclusive: LocalDate,
+    val recordCount: Int,
+    val averageSystolic: Int?,
+    val averageDiastolic: Int?,
+    val averagePulse: Int?,
+    val highRiskCount: Int
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModel(
     private val repository: BloodPressureRepository,
@@ -58,6 +78,16 @@ class HistoryViewModel(
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     private val todayProvider: () -> LocalDate = { LocalDate.now(zoneId) }
 ) : ViewModel() {
+    private val viewMode = MutableStateFlow(
+        savedStateHandle.get<String>(KEY_VIEW_MODE)
+            ?.let { runCatching { HistoryViewMode.valueOf(it) }.getOrNull() }
+            ?: HistoryViewMode.CALENDAR
+    )
+    private val recentPeriod = MutableStateFlow(
+        savedStateHandle.get<String>(KEY_RECENT_PERIOD)
+            ?.let { runCatching { RecentPeriod.valueOf(it) }.getOrNull() }
+            ?: RecentPeriod.THIS_WEEK
+    )
     private val displayedMonth = MutableStateFlow(
         savedStateHandle.get<String>(KEY_MONTH)?.let(YearMonth::parse)
             ?: YearMonth.from(todayProvider())
@@ -67,6 +97,7 @@ class HistoryViewModel(
     )
     private val monthRefresh = MutableStateFlow(0)
     private val dayRefresh = MutableStateFlow(0)
+    private val recentRefresh = MutableStateFlow(0)
     private var pendingRequestedDate: LocalDate? = null
 
     private val monthResult: Flow<MonthResult> = combine(
@@ -114,16 +145,66 @@ class HistoryViewModel(
         }
     }
 
-    val uiState: StateFlow<HistoryUiState> = combine(
+    private val recentResult: Flow<RecentResult> = combine(
+        recentPeriod,
+        recentRefresh
+    ) { period, _ -> period }.flatMapLatest { period ->
+        val range = HistoryDateRanges.recent(period, todayProvider(), zoneId)
+        combine(
+            repository.observeSessionSummariesInRange(
+                range.startInclusive,
+                range.endExclusive
+            ),
+            repository.observePeriodStatistics(
+                range.startInclusive,
+                range.endExclusive
+            )
+        ) { records, statistics ->
+            RecentResult(
+                period = period,
+                range = range,
+                records = records.sortedWith(
+                    compareByDescending<SessionSummary> { it.measuredAt }.thenBy { it.id }
+                ),
+                statistics = statistics
+            )
+        }.catch {
+            emit(
+                RecentResult(
+                    period = period,
+                    range = range,
+                    error = "无法加载近期记录，请重试。"
+                )
+            )
+        }
+    }
+
+    private val calendarStateParts = combine(
         displayedMonth,
         selectedDate,
         monthResult,
         dayResult
     ) { month, selected, monthData, dayData ->
+        CalendarStateParts(month, selected, monthData, dayData)
+    }
+
+    val uiState: StateFlow<HistoryUiState> = combine(
+        viewMode,
+        recentPeriod,
+        calendarStateParts,
+        recentResult
+    ) { mode, period, calendar, recentData ->
+        val month = calendar.month
+        val selected = calendar.selected
+        val monthData = calendar.monthData
+        val dayData = calendar.dayData
         val monthMatches = monthData.month == month
         val dayMatches = dayData.date == selected
+        val recentMatches = recentData.period == period
         val records = if (dayMatches) dayData.records.map(::toItem) else emptyList()
         HistoryUiState(
+            viewMode = mode,
+            recentPeriod = period,
             displayedMonth = month,
             selectedDate = selected,
             monthState = if (!monthMatches) {
@@ -146,6 +227,20 @@ class HistoryViewModel(
                 ?.map { it.avgSystolic }?.average()?.toInt(),
             selectedDayAverageDiastolic = dayData.records.takeIf { dayMatches && it.isNotEmpty() }
                 ?.map { it.avgDiastolic }?.average()?.toInt(),
+            recentState = if (!recentMatches) {
+                CalendarLoadingState.LOADING
+            } else if (recentData.error == null) {
+                CalendarLoadingState.CONTENT
+            } else {
+                CalendarLoadingState.ERROR
+            },
+            recentRecords = if (recentMatches) recentData.records.map(::toItem) else emptyList(),
+            recentSummary = if (recentMatches && recentData.error == null) {
+                recentData.toSummary(zoneId)
+            } else {
+                null
+            },
+            recentError = recentData.error,
             monthError = monthData.error,
             dayError = dayData.error
         )
@@ -166,8 +261,23 @@ class HistoryViewModel(
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        HistoryUiState(displayedMonth = displayedMonth.value, selectedDate = selectedDate.value)
+        HistoryUiState(
+            viewMode = viewMode.value,
+            recentPeriod = recentPeriod.value,
+            displayedMonth = displayedMonth.value,
+            selectedDate = selectedDate.value
+        )
     )
+
+    fun setViewMode(mode: HistoryViewMode) {
+        viewMode.value = mode
+        savedStateHandle[KEY_VIEW_MODE] = mode.name
+    }
+
+    fun setRecentPeriod(period: RecentPeriod) {
+        recentPeriod.value = period
+        savedStateHandle[KEY_RECENT_PERIOD] = period.name
+    }
 
     fun showPreviousMonth() = showMonth(displayedMonth.value.minusMonths(1))
 
@@ -188,6 +298,7 @@ class HistoryViewModel(
     }
 
     fun openDateWhenAvailable(date: LocalDate) {
+        setViewMode(HistoryViewMode.CALENDAR)
         pendingRequestedDate = date
         showMonth(YearMonth.from(date))
         if (uiState.value.displayedMonth == YearMonth.from(date) &&
@@ -214,6 +325,10 @@ class HistoryViewModel(
         dayRefresh.value += 1
     }
 
+    fun retryRecent() {
+        recentRefresh.value += 1
+    }
+
     private fun setSelectedDate(date: LocalDate?) {
         selectedDate.value = date
         savedStateHandle[KEY_SELECTED_DATE] = date?.toString()
@@ -222,6 +337,8 @@ class HistoryViewModel(
     private fun toItem(record: SessionSummary): HistorySessionItemUi {
         return HistorySessionItemUi(
             id = record.id,
+            measuredAt = record.measuredAt,
+            measuredDate = record.measuredAt.toLocalDate(zoneId),
             measuredAtText = Instant.ofEpochMilli(record.measuredAt)
                 .atZone(zoneId)
                 .format(DateTimeFormatter.ofPattern("HH:mm")),
@@ -255,8 +372,38 @@ class HistoryViewModel(
         val error: String? = null
     )
 
+    private data class RecentResult(
+        val period: RecentPeriod? = null,
+        val range: EpochMillisRange? = null,
+        val records: List<SessionSummary> = emptyList(),
+        val statistics: PeriodStatistics = PeriodStatistics(),
+        val error: String? = null
+    ) {
+        fun toSummary(zoneId: ZoneId): RecentSummary? {
+            val currentRange = range ?: return null
+            return RecentSummary(
+                startDate = currentRange.startInclusive.toLocalDate(zoneId),
+                endDateInclusive = (currentRange.endExclusive - 1L).toLocalDate(zoneId),
+                recordCount = statistics.recordCount,
+                averageSystolic = statistics.averageSystolic?.toInt(),
+                averageDiastolic = statistics.averageDiastolic?.toInt(),
+                averagePulse = statistics.averagePulse?.toInt(),
+                highRiskCount = statistics.highRiskCount
+            )
+        }
+    }
+
+    private data class CalendarStateParts(
+        val month: YearMonth,
+        val selected: LocalDate?,
+        val monthData: MonthResult,
+        val dayData: DayResult
+    )
+
     companion object {
         const val NO_NOTE_TEXT = "无备注"
+        private const val KEY_VIEW_MODE = "history.viewMode"
+        private const val KEY_RECENT_PERIOD = "history.recentPeriod"
         private const val KEY_MONTH = "history.displayedMonth"
         private const val KEY_SELECTED_DATE = "history.selectedDate"
     }

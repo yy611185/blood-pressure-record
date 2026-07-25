@@ -94,10 +94,18 @@ object TrendChartMath {
         endInclusive: Long
     ): List<TrendPoint> {
         if (points.isEmpty()) return emptyList()
-        val first = points.lowerBound(startInclusive)
-        val afterLast = points.upperBound(endInclusive)
+        val sortedPoints = if (points.zipWithNext().all { (a, b) ->
+                a.timestamp <= b.timestamp
+            }
+        ) {
+            points
+        } else {
+            points.sortedWith(compareBy<TrendPoint> { it.timestamp }.thenBy { it.id })
+        }
+        val first = sortedPoints.lowerBound(startInclusive)
+        val afterLast = sortedPoints.upperBound(endInclusive)
         if (first >= afterLast) return emptyList()
-        return points.subList(first, afterLast)
+        return sortedPoints.subList(first, afterLast)
     }
 
     fun nearestPoint(points: List<TrendPoint>, timestamp: Long): TrendPoint? {
@@ -137,6 +145,34 @@ object TrendChartMath {
         return kept.distinct().sorted().map(points::get)
     }
 
+    fun maxTickCount(canvasWidthPx: Int): Int {
+        return (canvasWidthPx / 88).coerceIn(2, 6)
+    }
+
+    fun nonOverlappingTickIndices(
+        centers: List<Float>,
+        widths: List<Float>,
+        left: Float,
+        right: Float,
+        minimumGap: Float
+    ): List<Int> {
+        require(centers.size == widths.size)
+        if (centers.isEmpty() || right <= left) return emptyList()
+        val selected = mutableListOf<Int>()
+        var previousRight = Float.NEGATIVE_INFINITY
+        centers.indices.forEach { index ->
+            val width = widths[index].coerceAtLeast(0f)
+            val labelLeft = (centers[index] - width / 2f)
+                .coerceIn(left, (right - width).coerceAtLeast(left))
+            val labelRight = labelLeft + width
+            if (labelLeft >= previousRight + minimumGap) {
+                selected += index
+                previousRight = labelRight
+            }
+        }
+        return selected
+    }
+
     fun timeAtX(x: Float, left: Float, right: Float, start: Long, end: Long): Long {
         val ratio = ((x - left) / (right - left).coerceAtLeast(1f)).coerceIn(0f, 1f)
         return start + ((end - start) * ratio).roundToLong()
@@ -155,14 +191,15 @@ object TrendChartMath {
         maxTicks: Int = 6
     ): List<TrendTimeTick> {
         if (endMillis <= startMillis) return emptyList()
+        val safeMaxTicks = maxTicks.coerceIn(2, 6)
         val start = Instant.ofEpochMilli(startMillis).atZone(zoneId)
         val end = Instant.ofEpochMilli(endMillis).atZone(zoneId)
         val spanDays = ChronoUnit.HOURS.between(start, end).coerceAtLeast(1) / 24.0
         return when {
-            spanDays <= 2.0 -> hourlyTicks(start, end, maxTicks)
-            spanDays <= 45.0 -> dailyTicks(start, end, maxTicks)
-            spanDays <= 730.0 -> monthlyTicks(start, end, maxTicks)
-            else -> yearlyTicks(start, end, maxTicks)
+            spanDays <= 2.0 -> hourlyTicks(start, end, safeMaxTicks)
+            spanDays <= 45.0 -> dailyTicks(start, end, safeMaxTicks)
+            spanDays <= 730.0 -> monthlyTicks(start, end, safeMaxTicks)
+            else -> yearlyTicks(start, end, safeMaxTicks)
         }
     }
 

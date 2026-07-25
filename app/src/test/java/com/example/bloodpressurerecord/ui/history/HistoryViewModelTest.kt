@@ -35,6 +35,97 @@ class HistoryViewModelTest {
     private val zone = ZoneId.of("Asia/Taipei")
 
     @Test
+    fun `默认日历模式并保存近期模式和范围`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val handle = SavedStateHandle()
+        val vm = HistoryViewModel(FakeRepository(), handle, zone) { today }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(HistoryViewMode.CALENDAR, vm.uiState.value.viewMode)
+        vm.setViewMode(HistoryViewMode.RECENT)
+        vm.setRecentPeriod(RecentPeriod.THIS_MONTH)
+        advanceUntilIdle()
+
+        assertEquals(HistoryViewMode.RECENT, vm.uiState.value.viewMode)
+        assertEquals(RecentPeriod.THIS_MONTH, vm.uiState.value.recentPeriod)
+        assertEquals("RECENT", handle["history.viewMode"])
+        assertEquals("THIS_MONTH", handle["history.recentPeriod"])
+    }
+
+    @Test
+    fun `SavedState恢复日历和近期各自状态`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val selected = LocalDate.of(2024, 2, 29)
+        val handle = SavedStateHandle(
+            mapOf(
+                "history.viewMode" to "RECENT",
+                "history.recentPeriod" to "THIS_MONTH",
+                "history.displayedMonth" to "2024-02",
+                "history.selectedDate" to selected.toString()
+            )
+        )
+        val repo = FakeRepository().apply {
+            summaries.value = listOf(CalendarSessionSummary(epoch(selected, 9), false))
+        }
+        val vm = HistoryViewModel(repo, handle, zone) { today }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(HistoryViewMode.RECENT, vm.uiState.value.viewMode)
+        assertEquals(RecentPeriod.THIS_MONTH, vm.uiState.value.recentPeriod)
+        assertEquals(YearMonth.of(2024, 2), vm.uiState.value.displayedMonth)
+        assertEquals(selected, vm.uiState.value.selectedDate)
+    }
+
+    @Test
+    fun `近期记录按时间从新到旧并使用SQL统计`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val repo = FakeRepository().apply {
+            records.value = listOf(
+                record("early", epoch(today, 7)),
+                record("late", epoch(today, 20))
+            )
+            statistics.value = PeriodStatistics(
+                recordCount = 2,
+                averageSystolic = 121.5,
+                averageDiastolic = 81.5,
+                averagePulse = 70.5,
+                highRiskCount = 1
+            )
+        }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone) { today }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        vm.setViewMode(HistoryViewMode.RECENT)
+        advanceUntilIdle()
+
+        assertEquals(listOf("late", "early"), vm.uiState.value.recentRecords.map { it.id })
+        assertEquals(2, vm.uiState.value.recentSummary?.recordCount)
+        assertEquals(1, vm.uiState.value.recentSummary?.highRiskCount)
+    }
+
+    @Test
+    fun `从首页打开指定日期会切回日历模式`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val repo = FakeRepository().apply {
+            summaries.value = listOf(CalendarSessionSummary(epoch(today, 9), false))
+        }
+        val vm = HistoryViewModel(
+            repo,
+            SavedStateHandle(mapOf("history.viewMode" to "RECENT")),
+            zone
+        ) { today }
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        vm.openDateWhenAvailable(today)
+        advanceUntilIdle()
+
+        assertEquals(HistoryViewMode.CALENDAR, vm.uiState.value.viewMode)
+        assertEquals(today, vm.uiState.value.selectedDate)
+    }
+
+    @Test
     fun `有记录日期可选择且当天记录按时间正序`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
@@ -189,6 +280,7 @@ class HistoryViewModelTest {
             mutableMapOf<Long, MutableStateFlow<List<CalendarSessionSummary>>>()
         val summaryRecordsByStart =
             mutableMapOf<Long, MutableStateFlow<List<SessionSummary>>>()
+        val statistics = MutableStateFlow(PeriodStatistics())
         override fun observeSessionCount(): Flow<Int> = flowOf(0)
         override fun observeSessions(): Flow<List<SessionRecord>> = records
         override fun observeSession(sessionId: String): Flow<SessionRecord?> = flowOf(null)
@@ -220,7 +312,7 @@ class HistoryViewModelTest {
         override fun observePeriodStatistics(
             startInclusive: Long,
             endExclusive: Long
-        ): Flow<PeriodStatistics> = flowOf(PeriodStatistics())
+        ): Flow<PeriodStatistics> = statistics
         override fun observeSessionsInRange(
             startInclusive: Long,
             endExclusive: Long

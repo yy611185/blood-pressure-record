@@ -25,11 +25,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,6 +48,7 @@ import com.example.bloodpressurerecord.reminder.ReminderAuthorization
 import com.example.bloodpressurerecord.reminder.ReminderAuthorizationStatus
 import com.example.bloodpressurerecord.reminder.ReminderType
 import com.example.bloodpressurerecord.ui.common.AppTopBar
+import com.example.bloodpressurerecord.ui.common.DigitalTimeInputDialog
 import java.time.LocalTime
 
 @Composable
@@ -224,27 +222,14 @@ private fun ReminderTimePickerButton(
     var showPicker by remember { mutableStateOf(false) }
     val initial = runCatching { LocalTime.parse(timeText) }.getOrDefault(LocalTime.NOON)
     if (showPicker) {
-        val pickerState = rememberTimePickerState(
+        DigitalTimeInputDialog(
+            title = label,
             initialHour = initial.hour,
             initialMinute = initial.minute,
-            is24Hour = true
-        )
-        AlertDialog(
-            onDismissRequest = { showPicker = false },
-            title = { Text(label) },
-            text = { TimePicker(state = pickerState) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onTimeSelected(
-                            "%02d:%02d".format(pickerState.hour, pickerState.minute)
-                        )
-                        showPicker = false
-                    }
-                ) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPicker = false }) { Text("取消") }
+            onDismiss = { showPicker = false },
+            onConfirm = { hour, minute ->
+                onTimeSelected("%02d:%02d".format(hour, minute))
+                showPicker = false
             }
         )
     }
