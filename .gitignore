@@ -1,0 +1,32 @@
+# Android / Gradle
+.gradle/
+.gradle-home/
+**/build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# Native / generated
+.externalNativeBuild/
+.cxx/
+captures/
+
+# Signing material
+*.jks
+*.keystore
+*.p12
+keystore/*
+!keystore/.gitignore
+
+# Release artifacts
+*.apk
+*.aab
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~

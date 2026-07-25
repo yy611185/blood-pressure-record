@@ -51,6 +51,17 @@ class BackupExportService(
         BackupExportPayload(
             instructions = buildInstructions(),
             measurements = measurementRows,
+            readings = measurementRows.flatMap { measurement ->
+                measurement.readings.mapIndexed { index, reading ->
+                    BackupReadingRow(
+                        recordId = measurement.recordId,
+                        orderIndex = index + 1,
+                        systolic = reading.systolic,
+                        diastolic = reading.diastolic,
+                        pulse = reading.pulse
+                    )
+                }
+            },
             userProfile = buildUserProfileItems(profile, settings),
             meta = buildMetaItems(
                 appName = appName,
@@ -86,7 +97,6 @@ class BackupExportService(
         val session = item.session
         val sortedReadings = item.readings
             .sortedBy { it.orderIndex }
-            .take(MAX_EXPORT_READING_GROUPS)
             .map { reading ->
                 BackupReadingValue(
                     systolic = reading.systolic,
@@ -107,6 +117,8 @@ class BackupExportService(
             avgPulse = session.avgPulse,
             level = session.category,
             highAlert = session.highRiskAlertTriggered,
+            scene = session.scene,
+            symptomsJson = session.symptomsJson,
             note = session.note,
             createdAt = formatDateTime(session.createdAt),
             updatedAt = formatDateTime(session.updatedAt)
@@ -125,7 +137,10 @@ class BackupExportService(
             avgDiastolic = item.diastolic,
             avgPulse = item.pulse,
             level = item.level,
-            highAlert = item.systolic >= 180 || item.diastolic >= 120,
+            highAlert = com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
+                .isHighRisk(item.systolic, item.diastolic),
+            scene = "旧版导入",
+            symptomsJson = null,
             note = "兼容旧版单次记录；成员：${item.memberName}",
             createdAt = null,
             updatedAt = null
@@ -144,7 +159,10 @@ class BackupExportService(
             avgDiastolic = item.diastolic,
             avgPulse = item.pulse,
             level = item.level.orEmpty(),
-            highAlert = item.systolic >= 180 || item.diastolic >= 120,
+            highAlert = com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
+                .isHighRisk(item.systolic, item.diastolic),
+            scene = "旧版导入",
+            symptomsJson = null,
             note = item.remark.orEmpty().ifBlank { "兼容旧版单次记录；成员：${item.memberName.orEmpty()}" },
             createdAt = null,
             updatedAt = null
@@ -177,7 +195,14 @@ class BackupExportService(
             BackupUserProfileItem("target_dia", profile?.targetDiastolic?.toString()),
             BackupUserProfileItem("reminder_enabled", reminderEnabled.toString()),
             BackupUserProfileItem("reminder_time", reminderTime.ifBlank { null }),
-            BackupUserProfileItem("display_show_target_line", settings.showTrendChart.toString())
+            BackupUserProfileItem("display_show_target_line", settings.showTrendChart.toString()),
+            BackupUserProfileItem("large_text_enabled", settings.largeTextEnabled.toString()),
+            BackupUserProfileItem("high_risk_alert_enabled", settings.highRiskAlertEnabled.toString()),
+            BackupUserProfileItem("show_trend_chart", settings.showTrendChart.toString()),
+            BackupUserProfileItem("morning_reminder_enabled", settings.morningReminderEnabled.toString()),
+            BackupUserProfileItem("morning_reminder_time", settings.morningReminderTime),
+            BackupUserProfileItem("evening_reminder_enabled", settings.eveningReminderEnabled.toString()),
+            BackupUserProfileItem("evening_reminder_time", settings.eveningReminderTime)
         )
     }
 
@@ -214,7 +239,6 @@ class BackupExportService(
     }
 
     companion object {
-        const val EXPORT_FORMAT_VERSION = 1
-        const val MAX_EXPORT_READING_GROUPS = 5
+        const val EXPORT_FORMAT_VERSION = 2
     }
 }

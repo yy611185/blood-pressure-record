@@ -16,6 +16,10 @@ import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.*
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 
+private val measurementScenes = listOf("晨起", "睡前", "居家安静", "运动后", "其他")
+private val measurementSymptoms = listOf("无症状", "头痛", "头晕", "心悸", "胸闷/胸痛", "视物模糊", "其他")
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddMeasurementScreen(
     viewModel: HomeViewModel,
@@ -45,10 +49,7 @@ fun AddMeasurementScreen(
             title = { Text("高风险提醒") },
             text = { Text("检测到读数超过 180/120，请注意休息，必要时及时就医。是否继续保存？") },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.confirmHighRiskAndSave()
-                    onSaved()
-                }) { Text("确认保存") }
+                TextButton(onClick = viewModel::confirmHighRiskAndSave) { Text("确认保存") }
             },
             dismissButton = { TextButton(onClick = viewModel::dismissHighRiskDialog) { Text("返回修改") } }
         )
@@ -76,6 +77,28 @@ fun AddMeasurementScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            OutlinedTextField(
+                value = uiState.measuredAtText,
+                onValueChange = viewModel::updateMeasuredAtText,
+                label = { Text("测量时间（yyyy-MM-dd HH:mm）") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Text("测量场景", style = MaterialTheme.typography.titleSmall)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                measurementScenes.forEach { scene ->
+                    FilterChip(
+                        selected = uiState.scene == scene,
+                        onClick = { viewModel.updateScene(scene) },
+                        label = { Text(scene) }
+                    )
+                }
+            }
+
             MeasurementInputCard(
                 title = "第 1 组",
                 systolic = uiState.reading1.systolic,
@@ -132,6 +155,20 @@ fun AddMeasurementScreen(
                             StatusChip(text = uiState.categoryLabel, isAbnormal = isAbnormal)
                         }
                     }
+                }
+            }
+
+            Text("伴随症状", style = MaterialTheme.typography.titleSmall)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                measurementSymptoms.forEach { symptom ->
+                    FilterChip(
+                        selected = symptom in uiState.selectedSymptoms,
+                        onClick = { viewModel.toggleSymptom(symptom) },
+                        label = { Text(symptom) }
+                    )
                 }
             }
 

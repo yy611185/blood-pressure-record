@@ -7,6 +7,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -61,6 +62,43 @@ class HomeViewModelDynamicTest {
         vm.toggleThirdReading(true)
         assertTrue(vm.uiState.value.showExtraReadings)
         assertEquals(1, vm.uiState.value.extraReadings.size)
+    }
+
+    @Test
+    fun disabledHighRiskAlertSavesWithoutShowingRiskDialog() = runTest {
+        val repo = FakeRepository()
+        val vm = HomeViewModel(repo, highRiskAlertEnabled = flowOf(false))
+        advanceUntilIdle()
+        vm.updateReading1Systolic("181")
+        vm.updateReading1Diastolic("80")
+        vm.updateReading2Systolic("181")
+        vm.updateReading2Diastolic("80")
+
+        vm.onSaveClicked()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.savedCount)
+        assertTrue(!vm.uiState.value.showHighRiskDialog)
+    }
+
+    @Test
+    fun enabledHighRiskAlertWaitsForExplicitConfirmation() = runTest {
+        val repo = FakeRepository()
+        val vm = HomeViewModel(repo, highRiskAlertEnabled = flowOf(true))
+        vm.updateReading1Systolic("181")
+        vm.updateReading1Diastolic("80")
+        vm.updateReading2Systolic("181")
+        vm.updateReading2Diastolic("80")
+
+        vm.onSaveClicked()
+        advanceUntilIdle()
+        assertEquals(0, repo.savedCount)
+        assertTrue(vm.uiState.value.showHighRiskDialog)
+
+        vm.confirmHighRiskAndSave()
+        advanceUntilIdle()
+        assertEquals(1, repo.savedCount)
+        assertEquals("保存成功。", vm.uiState.value.formMessage)
     }
 
     private class FakeRepository : BloodPressureRepository {

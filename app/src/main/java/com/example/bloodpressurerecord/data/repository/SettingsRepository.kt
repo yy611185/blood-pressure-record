@@ -39,4 +39,6 @@ interface SettingsRepository {
     suspend fun clearAllData(): Result<Unit>
 
     suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String>
+
+    suspend fun importBackupXlsxFromUri(uri: Uri): Result<String>
 }

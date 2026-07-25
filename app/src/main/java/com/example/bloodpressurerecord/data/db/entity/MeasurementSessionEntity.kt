@@ -1,9 +1,13 @@
 package com.example.bloodpressurerecord.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "measurement_sessions")
+@Entity(
+    tableName = "measurement_sessions",
+    indices = [Index(value = ["measuredAt"])]
+)
 data class MeasurementSessionEntity(
     @PrimaryKey val id: String,
     val measuredAt: Long,

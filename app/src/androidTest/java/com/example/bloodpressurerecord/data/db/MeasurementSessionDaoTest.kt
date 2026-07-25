@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,5 +76,36 @@ class MeasurementSessionDaoTest {
         assertEquals("session-1", loaded?.session?.id)
         assertEquals(2, loaded?.readings?.size)
         assertEquals(1, loaded?.readings?.first()?.orderIndex)
+    }
+
+    @Test
+    fun trend_query_returns_lightweight_rows_in_time_order_and_range() = runBlocking {
+        val first = session(id = "early", measuredAt = 1_000L, systolic = 120)
+        val second = session(id = "late", measuredAt = 3_000L, systolic = 140)
+        dao.insertSessionWithReadings(second, emptyList())
+        dao.insertSessionWithReadings(first, emptyList())
+
+        val rows = dao.getTrendPoints(startInclusive = 500L, endExclusive = 2_000L)
+
+        assertEquals(listOf("early"), rows.map { it.id })
+        assertEquals(120, rows.first().avgSystolic)
+        assertTrue(rows.first().measuredAt < second.measuredAt)
+    }
+
+    private fun session(id: String, measuredAt: Long, systolic: Int): MeasurementSessionEntity {
+        return MeasurementSessionEntity(
+            id = id,
+            measuredAt = measuredAt,
+            scene = "晨起",
+            note = null,
+            symptomsJson = null,
+            avgSystolic = systolic,
+            avgDiastolic = 80,
+            avgPulse = 70,
+            category = "NORMAL",
+            highRiskAlertTriggered = false,
+            createdAt = measuredAt,
+            updatedAt = measuredAt
+        )
     }
 }

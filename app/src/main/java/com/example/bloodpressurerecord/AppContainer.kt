@@ -6,11 +6,14 @@ import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.DefaultBloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
-import com.example.bloodpressurerecord.data.repository.SettingsRepositoryStable
+import com.example.bloodpressurerecord.data.repository.DefaultSettingsRepository
+import com.example.bloodpressurerecord.data.repository.DefaultTrendRepository
+import com.example.bloodpressurerecord.data.repository.TrendRepository
 
 interface AppContainer {
     val bloodPressureRepository: BloodPressureRepository
     val settingsRepository: SettingsRepository
+    val trendRepository: TrendRepository
 }
 
 class DefaultAppContainer(context: Context) : AppContainer {
@@ -25,12 +28,17 @@ class DefaultAppContainer(context: Context) : AppContainer {
     }
 
     override val settingsRepository: SettingsRepository by lazy {
-        SettingsRepositoryStable(
+        DefaultSettingsRepository(
             context = appContext,
             appSettingsStore = appSettingsStore,
+            database = database,
             userProfileDao = database.userProfileDao(),
             measurementSessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao()
         )
+    }
+
+    override val trendRepository: TrendRepository by lazy {
+        DefaultTrendRepository(database.measurementSessionDao())
     }
 }
