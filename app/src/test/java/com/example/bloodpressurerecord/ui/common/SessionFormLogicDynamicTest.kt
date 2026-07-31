@@ -33,7 +33,24 @@ class SessionFormLogicDynamicTest {
         )
         assertEquals(143, result.avgSystolic)
         assertEquals(90, result.avgDiastolic)
-        assertEquals("2期偏高（STAGE2）", result.categoryLabel)
+        // 中国指南：143/90 属 1 级高血压
+        assertEquals("1级高血压", result.categoryLabel)
+    }
+
+    @Test
+    fun derive_with_discard_first_strategy_ignores_first_group() {
+        val result = SessionFormLogic.recomputeDerived(
+            readings = listOf(
+                SessionReadingInputUi("160", "100", "90"),
+                SessionReadingInputUi("120", "78", "70"),
+                SessionReadingInputUi("122", "78", "72")
+            ),
+            requiredCount = 2,
+            strategy = com.example.bloodpressurerecord.domain.model.AverageStrategy.DISCARD_FIRST
+        )
+        assertEquals(121, result.avgSystolic)
+        assertEquals(78, result.avgDiastolic)
+        assertEquals("正常高值", result.categoryLabel)
     }
 }
 

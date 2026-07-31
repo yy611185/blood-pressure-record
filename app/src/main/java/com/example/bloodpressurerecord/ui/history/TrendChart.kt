@@ -8,6 +8,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,7 +18,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,14 +39,15 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,10 +63,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
-private data class SelectedChartPoint(
-    val point: TrendPoint,
-    val systolicSelected: Boolean
-)
+/** 图表手势状态机：待定 → 平移缩放 / 长按十字指针 / 点按。 */
+private enum class ChartGestureMode { PENDING, TRANSFORM, CROSSHAIR }
 
 @Composable
 fun SessionTimeSeriesDualLineChart(
@@ -91,15 +91,19 @@ fun SessionTimeSeriesDualLineChart(
     val viewport = remember(series.range, series.rangeStart, series.rangeEnd) {
         TrendTimeViewportState()
     }
-    var selected by remember(points) { mutableStateOf<SelectedChartPoint?>(null) }
+    // activePoint：点按选中或十字指针当前吸附的数据点；读数栏优先显示它。
+    var activePoint by remember(points) { mutableStateOf<TrendPoint?>(null) }
+    var crosshairActive by remember(points) { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var isInteracting by remember { mutableStateOf(false) }
     val sysPath = remember { Path() }
     val diaPath = remember { Path() }
+    val haptics = LocalHapticFeedback.current
 
     LaunchedEffect(series.range, series.rangeStart, series.rangeEnd) {
         viewport.reset(series.rangeStart, series.rangeEnd)
-        selected = null
+        activePoint = null
+        crosshairActive = false
         isInteracting = false
     }
 
@@ -125,29 +129,8 @@ fun SessionTimeSeriesDualLineChart(
             maxTicks = maxTicks
         )
     }
-    val geometry = remember(canvasSize, density) {
-        ChartGeometry.create(canvasSize, density.density)
-    }
-    val selectedPosition = remember(
-        selected,
-        geometry,
-        viewport.startMillis,
-        viewport.endMillis,
-        series.yAxis
-    ) {
-        selected?.let {
-            val scaler = ChartScaler(
-                geometry = geometry,
-                startMillis = viewport.startMillis,
-                endMillis = viewport.endMillis,
-                yAxis = series.yAxis
-            )
-            Offset(
-                x = scaler.xOf(it.point.timestamp),
-                y = scaler.yOf(if (it.systolicSelected) it.point.systolic else it.point.diastolic)
-            )
-        }
-    }
+    // 读数栏内容：指针/点按选中的点，否则回落到可见范围内最新一点。
+    val readoutPoint = activePoint ?: visiblePoints.lastOrNull() ?: points.last()
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -190,6 +173,13 @@ fun SessionTimeSeriesDualLineChart(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        // 读数栏固定在图表上方：指针滑到哪个点就显示哪个点。
+        ChartReadoutBar(
+            point = readoutPoint,
+            isPinned = activePoint != null,
+            crosshairActive = crosshairActive
+        )
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -224,82 +214,160 @@ fun SessionTimeSeriesDualLineChart(
                     .pointerInput(points, series.range) {
                         var lastTapAt = 0L
                         var lastTapPosition = Offset(-10_000f, -10_000f)
+
+                        // 按 x 坐标把指针吸附到最近的可见数据点（从完整点集 + 实时
+                        // viewport 计算，避免捕获过期的可见点列表）。
+                        fun snapCrosshairTo(x: Float) {
+                            val currentGeometry = ChartGeometry.create(size, density.density)
+                            val clampedX = x.coerceIn(currentGeometry.left, currentGeometry.right)
+                            val time = TrendChartMath.timeAtX(
+                                x = clampedX,
+                                left = currentGeometry.left,
+                                right = currentGeometry.right,
+                                start = viewport.startMillis,
+                                end = viewport.endMillis
+                            )
+                            val visible = TrendChartMath.visiblePoints(
+                                points,
+                                viewport.startMillis,
+                                viewport.endMillis
+                            )
+                            TrendChartMath.nearestPoint(visible, time)?.let { activePoint = it }
+                        }
+
+                        fun applyTransform(
+                            event: androidx.compose.ui.input.pointer.PointerEvent,
+                            zoom: Float,
+                            pan: Offset
+                        ) {
+                            val currentGeometry = ChartGeometry.create(size, density.density)
+                            val centroid = event.calculateCentroid(useCurrent = true)
+                            val focusMillis = TrendChartMath.timeAtX(
+                                x = centroid.x,
+                                left = currentGeometry.left,
+                                right = currentGeometry.right,
+                                start = viewport.startMillis,
+                                end = viewport.endMillis
+                            )
+                            viewport.zoomBy(
+                                zoomChange = zoom,
+                                focusMillis = focusMillis,
+                                seriesStart = series.rangeStart,
+                                seriesEnd = series.rangeEnd,
+                                minSpanMillis = TrendChartMath.minViewportSpan(series.range)
+                            )
+                            val deltaMillis = (
+                                -pan.x /
+                                    (currentGeometry.right - currentGeometry.left).coerceAtLeast(1f) *
+                                    viewport.spanMillis
+                                ).roundToLong()
+                            viewport.panBy(deltaMillis, series.rangeStart, series.rangeEnd)
+                            event.changes.forEach { it.consume() }
+                        }
+
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
-                            var transformed = false
+                            var mode = ChartGestureMode.PENDING
                             var accumulatedMovement = 0f
                             val tapPosition = down.position
+                            val downAt = SystemClock.uptimeMillis()
+                            val longPressTimeout = viewConfiguration.longPressTimeoutMillis
 
                             while (true) {
-                                val event = awaitPointerEvent()
+                                val event = if (mode == ChartGestureMode.PENDING) {
+                                    val remaining =
+                                        longPressTimeout - (SystemClock.uptimeMillis() - downAt)
+                                    if (remaining <= 0) {
+                                        null
+                                    } else {
+                                        withTimeoutOrNull(remaining) { awaitPointerEvent() }
+                                    }
+                                } else {
+                                    awaitPointerEvent()
+                                }
+
+                                if (event == null) {
+                                    // 长按达时：唤出十字指针（股票 App 式查看）。
+                                    mode = ChartGestureMode.CROSSHAIR
+                                    crosshairActive = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    snapCrosshairTo(tapPosition.x)
+                                    continue
+                                }
+
                                 val pressed = event.changes.filter { it.pressed }
                                 if (pressed.isEmpty()) break
 
-                                val zoom = event.calculateZoom()
-                                val pan = event.calculatePan()
-                                accumulatedMovement += pan.getDistance()
-                                if (!transformed &&
-                                    (abs(zoom - 1f) > 0.005f || accumulatedMovement > viewConfiguration.touchSlop)
-                                ) {
-                                    transformed = true
-                                    isInteracting = true
-                                    selected = null
-                                }
+                                when (mode) {
+                                    ChartGestureMode.PENDING -> {
+                                        val zoom = event.calculateZoom()
+                                        val pan = event.calculatePan()
+                                        accumulatedMovement += pan.getDistance()
+                                        if (event.changes.size > 1 ||
+                                            abs(zoom - 1f) > 0.005f ||
+                                            accumulatedMovement > viewConfiguration.touchSlop
+                                        ) {
+                                            mode = ChartGestureMode.TRANSFORM
+                                            isInteracting = true
+                                            activePoint = null
+                                            crosshairActive = false
+                                            applyTransform(event, zoom, pan)
+                                        }
+                                    }
 
-                                if (transformed) {
-                                    val currentGeometry = ChartGeometry.create(size, density.density)
-                                    val centroid = event.calculateCentroid(useCurrent = true)
-                                    val focusMillis = TrendChartMath.timeAtX(
-                                        x = centroid.x,
-                                        left = currentGeometry.left,
-                                        right = currentGeometry.right,
-                                        start = viewport.startMillis,
-                                        end = viewport.endMillis
-                                    )
-                                    viewport.zoomBy(
-                                        zoomChange = zoom,
-                                        focusMillis = focusMillis,
-                                        seriesStart = series.rangeStart,
-                                        seriesEnd = series.rangeEnd,
-                                        minSpanMillis = TrendChartMath.minViewportSpan(series.range)
-                                    )
-                                    val deltaMillis = (
-                                        -pan.x /
-                                            (currentGeometry.right - currentGeometry.left).coerceAtLeast(1f) *
-                                            viewport.spanMillis
-                                        ).roundToLong()
-                                    viewport.panBy(deltaMillis, series.rangeStart, series.rangeEnd)
-                                    event.changes.forEach { it.consume() }
+                                    ChartGestureMode.TRANSFORM -> {
+                                        applyTransform(
+                                            event,
+                                            event.calculateZoom(),
+                                            event.calculatePan()
+                                        )
+                                    }
+
+                                    ChartGestureMode.CROSSHAIR -> {
+                                        snapCrosshairTo(pressed.first().position.x)
+                                        event.changes.forEach { it.consume() }
+                                    }
                                 }
                             }
 
-                            if (transformed) {
-                                isInteracting = false
-                            } else {
-                                val now = SystemClock.uptimeMillis()
-                                val isDoubleTap =
-                                    now - lastTapAt in viewConfiguration.doubleTapMinTimeMillis..
-                                        viewConfiguration.doubleTapTimeoutMillis &&
-                                        (tapPosition - lastTapPosition).getDistance() <=
-                                        viewConfiguration.touchSlop * 2f
-                                if (isDoubleTap) {
-                                    viewport.reset(series.rangeStart, series.rangeEnd)
-                                    selected = null
-                                    lastTapAt = 0L
-                                } else {
-                                    selected = selectNearestPoint(
-                                        tap = tapPosition,
-                                        points = visiblePoints,
-                                        geometry = ChartGeometry.create(size, density.density),
-                                        viewport = viewport,
-                                        yAxis = series.yAxis,
-                                        showSystolic = showSystolic,
-                                        showDiastolic = showDiastolic,
-                                        hitRadiusPx = with(density) { HIT_RADIUS.toPx() }
-                                    )
-                                    selected?.point?.let(onPointActivated)
-                                    lastTapAt = now
-                                    lastTapPosition = tapPosition
+                            when (mode) {
+                                ChartGestureMode.TRANSFORM -> isInteracting = false
+                                ChartGestureMode.CROSSHAIR -> {
+                                    // 松手指针消失，读数栏回到最新一点。
+                                    crosshairActive = false
+                                    activePoint = null
+                                }
+                                ChartGestureMode.PENDING -> {
+                                    val now = SystemClock.uptimeMillis()
+                                    val isDoubleTap =
+                                        now - lastTapAt in viewConfiguration.doubleTapMinTimeMillis..
+                                            viewConfiguration.doubleTapTimeoutMillis &&
+                                            (tapPosition - lastTapPosition).getDistance() <=
+                                            viewConfiguration.touchSlop * 2f
+                                    if (isDoubleTap) {
+                                        viewport.reset(series.rangeStart, series.rangeEnd)
+                                        activePoint = null
+                                        lastTapAt = 0L
+                                    } else {
+                                        val tapped = selectNearestPoint(
+                                            tap = tapPosition,
+                                            points = TrendChartMath.visiblePoints(
+                                                points,
+                                                viewport.startMillis,
+                                                viewport.endMillis
+                                            ),
+                                            geometry = ChartGeometry.create(size, density.density),
+                                            viewport = viewport,
+                                            yAxis = series.yAxis,
+                                            showSystolic = showSystolic,
+                                            showDiastolic = showDiastolic,
+                                            hitRadiusPx = with(density) { HIT_RADIUS.toPx() }
+                                        )
+                                        activePoint = tapped
+                                        tapped?.let(onPointActivated)
+                                        lastTapAt = now
+                                        lastTapPosition = tapPosition
+                                    }
                                 }
                             }
                         }
@@ -316,16 +384,17 @@ fun SessionTimeSeriesDualLineChart(
                     yAxis = series.yAxis
                 )
 
-                selected?.let { selectedPoint ->
+                activePoint?.let { point ->
                     if (!isInteracting &&
-                        selectedPoint.point.timestamp in viewport.startMillis..viewport.endMillis
+                        point.timestamp in viewport.startMillis..viewport.endMillis
                     ) {
-                        val x = scaler.xOf(selectedPoint.point.timestamp)
+                        val x = scaler.xOf(point.timestamp)
+                        // 十字指针激活时用更醒目的实线，点按选中时用浅色细线。
                         drawLine(
-                            color = Color(0x8894A3B8),
+                            color = if (crosshairActive) Color(0xCC645C50) else Color(0x88A19786),
                             start = Offset(x, currentGeometry.top),
                             end = Offset(x, currentGeometry.bottom),
-                            strokeWidth = 1.4f
+                            strokeWidth = if (crosshairActive) 2f else 1.4f
                         )
                     }
                 }
@@ -342,14 +411,14 @@ fun SessionTimeSeriesDualLineChart(
                 if (!isInteracting && pointSpacing >= MIN_NODE_SPACING_PX) {
                     renderPoints.forEach { point ->
                         val x = scaler.xOf(point.timestamp)
-                        val isSelected = selected?.point?.id == point.id
+                        val isSelected = activePoint?.id == point.id
                         if (showSystolic) {
                             drawPointNode(
                                 x = x,
                                 y = scaler.yOf(point.systolic),
                                 color = valueColor(point.systolic, SYS_COLOR),
                                 backgroundColor = nodeBackgroundColor,
-                                selected = isSelected && selected?.systolicSelected == true
+                                selected = isSelected
                             )
                         }
                         if (showDiastolic) {
@@ -358,26 +427,31 @@ fun SessionTimeSeriesDualLineChart(
                                 y = scaler.yOf(point.diastolic),
                                 color = valueColor(point.diastolic, DIA_COLOR),
                                 backgroundColor = nodeBackgroundColor,
-                                selected = isSelected && selected?.systolicSelected == false
+                                selected = isSelected
                             )
                         }
                     }
                 } else if (!isInteracting) {
-                    selected?.let { selectedPoint ->
-                        val point = selectedPoint.point
-                        drawPointNode(
-                            x = scaler.xOf(point.timestamp),
-                            y = scaler.yOf(
-                                if (selectedPoint.systolicSelected) point.systolic else point.diastolic
-                            ),
-                            color = if (selectedPoint.systolicSelected) {
-                                valueColor(point.systolic, SYS_COLOR)
-                            } else {
-                                valueColor(point.diastolic, DIA_COLOR)
-                            },
-                            backgroundColor = nodeBackgroundColor,
-                            selected = true
-                        )
+                    // 密集视图下只描画选中点的两条曲线节点。
+                    activePoint?.let { point ->
+                        if (showSystolic) {
+                            drawPointNode(
+                                x = scaler.xOf(point.timestamp),
+                                y = scaler.yOf(point.systolic),
+                                color = valueColor(point.systolic, SYS_COLOR),
+                                backgroundColor = nodeBackgroundColor,
+                                selected = true
+                            )
+                        }
+                        if (showDiastolic) {
+                            drawPointNode(
+                                x = scaler.xOf(point.timestamp),
+                                y = scaler.yOf(point.diastolic),
+                                color = valueColor(point.diastolic, DIA_COLOR),
+                                backgroundColor = nodeBackgroundColor,
+                                selected = true
+                            )
+                        }
                     }
                 }
 
@@ -386,27 +460,123 @@ fun SessionTimeSeriesDualLineChart(
                 }
             }
 
-            if (!isInteracting) {
-                ChartTooltip(
-                    selected = selected,
-                    selectedPosition = selectedPosition,
-                    canvasSize = canvasSize,
-                    density = density
-                )
-            }
         }
 
         Text(
             if (series.range == com.example.bloodpressurerecord.domain.model.TrendRange.ALL) {
-                "轻触每日节点查看当天原始记录"
+                "长按图表滑动查看各点数值；轻触每日节点看当天原始记录，双击复位"
             } else {
-                "轻触节点查看详细数值"
+                "长按图表滑动查看各点数值；双指缩放，双击复位"
             },
             modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF94A3B8)
+            color = Color(0xFF82796A)
         )
     }
+}
+
+/**
+ * 图表上方的固定读数栏（股票 App 式）：
+ * 显示指针当前吸附点的完整信息，未唤出指针时显示最新一点。
+ */
+@Composable
+private fun ChartReadoutBar(
+    point: TrendPoint,
+    isPinned: Boolean,
+    crosshairActive: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (crosshairActive) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                RoundedCornerShape(14.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            when {
+                point.aggregation == TrendAggregation.DAILY ->
+                    "${formatReadoutDate(point.timestamp)} · ${point.recordCount}次平均"
+                else -> formatReadoutDateTime(point.timestamp)
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${point.systolic}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = valueColor(point.systolic, SYS_COLOR)
+            )
+            Text(
+                " / ",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "${point.diastolic}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = valueColor(point.diastolic, DIA_COLOR)
+            )
+            Text(
+                " mmHg",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            "脉搏 ${point.pulse?.toString() ?: "--"}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        Text(
+            if (point.containsHighRiskReading) {
+                "⚠ ${point.category.toChineseCategoryLabel()}"
+            } else {
+                point.category.toChineseCategoryLabel()
+            },
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (point.containsHighRiskReading) {
+                OUTLIER_COLOR
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+            maxLines = 1
+        )
+        if (!isPinned) {
+            Text(
+                "最新",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+private fun formatReadoutDate(millis: Long): String {
+    return Instant.ofEpochMilli(millis)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("MM-dd"))
+}
+
+private fun formatReadoutDateTime(millis: Long): String {
+    return Instant.ofEpochMilli(millis)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
 }
 
 private fun selectNearestPoint(
@@ -418,7 +588,7 @@ private fun selectNearestPoint(
     showSystolic: Boolean,
     showDiastolic: Boolean,
     hitRadiusPx: Float
-): SelectedChartPoint? {
+): TrendPoint? {
     val tapTime = TrendChartMath.timeAtX(
         tap.x,
         geometry.left,
@@ -439,93 +609,18 @@ private fun selectNearestPoint(
     } else {
         Float.MAX_VALUE
     }
-    val best = minOf(sysDistance, diaDistance)
-    return if (best <= hitRadiusPx) {
-        SelectedChartPoint(point = point, systolicSelected = sysDistance <= diaDistance)
-    } else {
-        null
-    }
-}
-
-@Composable
-private fun ChartTooltip(
-    selected: SelectedChartPoint?,
-    selectedPosition: Offset?,
-    canvasSize: IntSize,
-    density: androidx.compose.ui.unit.Density
-) {
-    val point = selected?.point ?: return
-    val position = selectedPosition ?: return
-    Card(
-        modifier = Modifier.offset {
-            val width = with(density) { 184.dp.toPx() }.roundToInt()
-            val maxX = (canvasSize.width - width).coerceAtLeast(8)
-            IntOffset(
-                x = (position.x - width / 2f).roundToInt().coerceIn(8, maxX),
-                y = (position.y - 126f).roundToInt().coerceAtLeast(8)
-            )
-        },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                formatFullDate(point.timestamp),
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (point.aggregation == TrendAggregation.RAW) {
-                Text(
-                    formatFullTime(point.timestamp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Text(
-                    "当日 ${point.recordCount} 次测量平均",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            TooltipValue("收缩压", "${point.systolic} mmHg", valueColor(point.systolic, SYS_COLOR))
-            TooltipValue("舒张压", "${point.diastolic} mmHg", valueColor(point.diastolic, DIA_COLOR))
-            Text(
-                "脉搏 ${point.pulse?.toString() ?: "--"} bpm",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "分级 ${point.category.toChineseCategoryLabel()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun TooltipValue(label: String, value: String, color: Color) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(modifier = Modifier.size(7.dp)) {
-            drawCircle(color = color, radius = size.minDimension / 2f)
-        }
-        Text(
-            "$label $value",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
+    return if (minOf(sysDistance, diaDistance) <= hitRadiusPx) point else null
 }
 
 private val CHART_HEIGHT = 280.dp
 private val HIT_RADIUS = 32.dp
-private val SYS_COLOR = Color(0xFF3B82F6)
-private val DIA_COLOR = Color(0xFF2DD4BF)
-private val GRID_COLOR = Color(0xFFE2E8F0)
-private val AXIS_COLOR = Color(0xFF94A3B8)
-private val REFERENCE_COLOR = Color(0xFFF59E0B)
-private val OUTLIER_COLOR = Color(0xFFDC2626)
+// 暖阳设计 3d：收缩压陶土橙、舒张压鼠尾草绿，坐标与网格用暖中性色。
+private val SYS_COLOR = Color(0xFFC67139)
+private val DIA_COLOR = Color(0xFF7A8A5E)
+private val GRID_COLOR = Color(0xFFEEE7DB)
+private val AXIS_COLOR = Color(0xFF82796A)
+private val REFERENCE_COLOR = Color(0xFFC0B6A5)
+private val OUTLIER_COLOR = Color(0xFFB3261E)
 private const val MIN_DRAW_POINTS = 60
 private const val MAX_DRAW_POINTS = 900
 private const val MIN_NODE_SPACING_PX = 12f
@@ -803,23 +898,5 @@ private fun valueColor(value: Int, normalColor: Color): Color {
     }
 }
 
-private fun formatFullDate(millis: Long): String {
-    return Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-}
-
-private fun formatFullTime(millis: Long): String {
-    return Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-}
-
-private fun String.toChineseCategoryLabel(): String = when (uppercase()) {
-    "NORMAL" -> "正常"
-    "ELEVATED" -> "偏高"
-    "STAGE1" -> "1期偏高"
-    "STAGE2" -> "2期偏高"
-    "SEVERE" -> "重度偏高"
-    else -> this
-}
+private fun String.toChineseCategoryLabel(): String =
+    com.example.bloodpressurerecord.ui.common.CategoryPresentation.label(this)

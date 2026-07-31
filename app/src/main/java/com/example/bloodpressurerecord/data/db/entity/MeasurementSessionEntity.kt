@@ -18,6 +18,9 @@ data class MeasurementSessionEntity(
     val avgSystolic: Int,
     val avgDiastolic: Int,
     val avgPulse: Int?,
+    /** 保存该记录时使用的平均值计算策略，避免之后编辑或导出时按当前全局设置重算。 */
+    @ColumnInfo(defaultValue = "'ALL'")
+    val averageStrategy: String = "ALL",
     val category: String,
     /**
      * 是否包含高风险原始读数或高风险平均值。

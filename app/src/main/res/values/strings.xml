@@ -8,19 +8,11 @@
     <string name="history_period_month">本月</string>
     <string name="previous_month">上一个月</string>
     <string name="next_month">下一个月</string>
-    <string name="choose_year_month">选择年月</string>
     <string name="calendar_select_recorded_day">请选择有记录的日期查看当天记录</string>
     <string name="calendar_empty_month">本月还没有血压记录</string>
-    <string name="calendar_no_record_disabled">无记录，不可选择</string>
-    <string name="calendar_has_record_selectable">有记录，可选择</string>
-    <string name="calendar_selected">已选择</string>
-    <string name="calendar_today">今天</string>
-    <string name="loading">正在加载…</string>
-    <string name="retry">重试</string>
     <string name="add_measurement">新增测量</string>
-    <string name="save_record">保存记录</string>
-    <string name="save_changes">保存修改</string>
-    <string name="medical_disclaimer_short">本应用不能替代医疗诊断。</string>
+    <string name="widget_label">血压概览</string>
+    <string name="widget_description">查看最近血压、今日测量与服药进度；拖大到 4×4 可显示近 7 天趋势。</string>
     <string name="weekday_sunday">日</string>
     <string name="weekday_monday">一</string>
     <string name="weekday_tuesday">二</string>
@@ -31,9 +23,5 @@
     <plurals name="measurement_count">
         <item quantity="one">%d 次测量</item>
         <item quantity="other">%d 次测量</item>
-    </plurals>
-    <plurals name="record_count">
-        <item quantity="one">%d 条记录</item>
-        <item quantity="other">%d 条记录</item>
     </plurals>
 </resources>

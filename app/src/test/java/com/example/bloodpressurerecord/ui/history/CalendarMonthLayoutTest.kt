@@ -11,11 +11,19 @@ import org.junit.Test
 
 class CalendarMonthLayoutTest {
     @Test
-    fun `普通月份按周日开头排列`() {
+    fun `普通月份按周一开头排列`() {
+        // 2026-07-01 是周三：周一开头时前面留 2 个空位。
         val cells = CalendarMonthLayout.cells(YearMonth.of(2026, 7))
-        assertEquals(3, cells.indexOfFirst { it.date == LocalDate.of(2026, 7, 1) })
+        assertEquals(2, cells.indexOfFirst { it.date == LocalDate.of(2026, 7, 1) })
         assertEquals(LocalDate.of(2026, 7, 31), cells.last { it.date != null }.date)
         assertEquals(0, cells.size % 7)
+    }
+
+    @Test
+    fun `周一开头与本周统计使用同一种周定义`() {
+        // 2026-06-01 恰好是周一：日历首格与“本周”起点一致，都不留空位。
+        val cells = CalendarMonthLayout.cells(YearMonth.of(2026, 6))
+        assertEquals(LocalDate.of(2026, 6, 1), cells.first().date)
     }
 
     @Test

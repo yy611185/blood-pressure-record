@@ -32,10 +32,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppDangerButton
 import java.time.LocalDateTime
@@ -139,12 +141,14 @@ fun SettingsDataManagementScreen(
         )
     }
 
+    val topBarScroll = rememberHideOnScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .nestedScroll(topBarScroll.nestedScrollConnection)
     ) {
-        AppTopBar(title = "数据管理", onBack = onBack)
+        AppTopBar(title = "数据管理", onBack = onBack, hideOnScroll = topBarScroll)
 
         Column(
             modifier = Modifier

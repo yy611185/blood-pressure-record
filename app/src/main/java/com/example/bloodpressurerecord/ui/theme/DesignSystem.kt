@@ -20,15 +20,24 @@ object AppSpacing {
 }
 
 object AppDimensions {
-    val pageHorizontalPadding = 16.dp
+    /** 页面水平边距（暖阳设计：18dp）。 */
+    val pageHorizontalPadding = 18.dp
+    /** 卡片内边距（暖阳设计：20dp）。 */
+    val cardPadding = 20.dp
     val minimumTouchTarget = 48.dp
-    val primaryButtonHeight = 56.dp
+    /** 主按钮高度（暖阳设计：60dp，全药丸）。 */
+    val primaryButtonHeight = 60.dp
+    /** 表单保存按钮高度。 */
+    val saveButtonHeight = 58.dp
     val calendarDayMinHeight = 48.dp
+    /** 日历日期圆形直径。 */
+    val calendarDaySize = 38.dp
     val bottomActionPadding = 16.dp
 }
 
 enum class BloodPressureVisualStatus {
     NORMAL,
+    LOW,
     ELEVATED,
     HIGH,
     HIGH_RISK
@@ -41,30 +50,40 @@ data class BloodPressureStatusStyle(
     val contentColor: Color
 )
 
+/**
+ * 血压状态色（暖阳设计固定值）：
+ * 正常走鼠尾草绿，偏高/高风险走陶土橙，偏低走浅橙提示。
+ */
 fun BloodPressureVisualStatus.style(colors: ColorScheme): BloodPressureStatusStyle = when (this) {
     BloodPressureVisualStatus.NORMAL -> BloodPressureStatusStyle(
         label = "正常",
         icon = Icons.Default.CheckCircle,
-        containerColor = colors.secondaryContainer,
-        contentColor = colors.onSecondaryContainer
+        containerColor = Sage200,
+        contentColor = Sage800
+    )
+    BloodPressureVisualStatus.LOW -> BloodPressureStatusStyle(
+        label = "血压偏低",
+        icon = Icons.Default.Info,
+        containerColor = Terracotta100,
+        contentColor = Terracotta700
     )
     BloodPressureVisualStatus.ELEVATED -> BloodPressureStatusStyle(
-        label = "偏高",
+        label = "正常高值",
         icon = Icons.Default.Info,
-        containerColor = colors.tertiaryContainer,
-        contentColor = colors.onTertiaryContainer
+        containerColor = Terracotta200,
+        contentColor = Terracotta800
     )
     BloodPressureVisualStatus.HIGH -> BloodPressureStatusStyle(
         label = "血压偏高",
         icon = Icons.Default.Warning,
-        containerColor = colors.errorContainer,
-        contentColor = colors.onErrorContainer
+        containerColor = Terracotta200,
+        contentColor = Terracotta800
     )
     BloodPressureVisualStatus.HIGH_RISK -> BloodPressureStatusStyle(
         label = "含高风险读数",
         icon = Icons.Default.Error,
-        containerColor = colors.errorContainer,
-        contentColor = colors.onErrorContainer
+        containerColor = Terracotta300,
+        contentColor = Terracotta900
     )
 }
 
@@ -74,7 +93,9 @@ fun bloodPressureVisualStatus(
 ): BloodPressureVisualStatus = when {
     containsHighRiskReading -> BloodPressureVisualStatus.HIGH_RISK
     category.equals("NORMAL", ignoreCase = true) -> BloodPressureVisualStatus.NORMAL
-    category.equals("ELEVATED", ignoreCase = true) -> BloodPressureVisualStatus.ELEVATED
+    category.equals("LOW", ignoreCase = true) -> BloodPressureVisualStatus.LOW
+    // ELEVATED 为 v5 迁移前的旧命名，与正常高值同级
+    category.equals("HIGH_NORMAL", ignoreCase = true) ||
+        category.equals("ELEVATED", ignoreCase = true) -> BloodPressureVisualStatus.ELEVATED
     else -> BloodPressureVisualStatus.HIGH
 }
-

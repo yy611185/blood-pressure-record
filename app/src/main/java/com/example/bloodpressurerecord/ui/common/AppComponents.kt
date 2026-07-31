@@ -1,6 +1,5 @@
 package com.example.bloodpressurerecord.ui.common
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -12,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material3.Button
@@ -25,14 +25,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
+import com.example.bloodpressurerecord.ui.theme.WarmNeutral300
+import com.example.bloodpressurerecord.ui.theme.WarmTextMuted
 import com.example.bloodpressurerecord.ui.theme.style
 
 @Composable
@@ -47,18 +53,21 @@ fun AppPrimaryButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier.height(AppDimensions.primaryButtonHeight),
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContainerColor = WarmNeutral300,
+            disabledContentColor = WarmTextMuted
         ),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp),
         contentPadding = PaddingValues(horizontal = AppSpacing.xLarge)
     ) {
         if (icon != null) {
-            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(AppSpacing.xLarge))
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(22.dp))
             Spacer(modifier = Modifier.width(AppSpacing.small))
         }
-        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -71,7 +80,7 @@ fun AppSecondaryButton(
     Button(
         onClick = onClick,
         modifier = modifier.height(AppDimensions.primaryButtonHeight),
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             contentColor = MaterialTheme.colorScheme.onSurface
@@ -91,7 +100,7 @@ fun AppDangerButton(
     Button(
         onClick = onClick,
         modifier = modifier.height(AppDimensions.primaryButtonHeight),
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -108,6 +117,7 @@ fun DataCard(
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
+    // 暖阳设计：28dp 圆角、柔和投影、无描边细线。
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -116,10 +126,9 @@ fun DataCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Box(modifier = Modifier.padding(AppSpacing.large)) {
+        Box(modifier = Modifier.padding(AppDimensions.cardPadding)) {
             content()
         }
     }
@@ -147,7 +156,7 @@ fun StatusChip(
     Row(
         modifier = modifier
             .background(color = containerColor, shape = MaterialTheme.shapes.large)
-            .padding(horizontal = AppSpacing.medium, vertical = AppSpacing.xSmall),
+            .padding(horizontal = AppSpacing.medium, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         resolved?.let {
@@ -155,7 +164,7 @@ fun StatusChip(
                 imageVector = it.icon,
                 contentDescription = null,
                 tint = contentColor,
-                modifier = Modifier.size(AppSpacing.large)
+                modifier = Modifier.size(15.dp)
             )
             Spacer(Modifier.width(AppSpacing.xSmall))
         }
@@ -172,10 +181,27 @@ fun StatusChip(
 fun AppTopBar(
     title: String,
     onBack: (() -> Unit)? = null,
+    hideOnScroll: HideOnScrollState? = null,
     actions: @Composable () -> Unit = {}
 ) {
+    // 滚动隐藏：按 offsetPx 收缩自身布局高度并上移内容，
+    // 下方页面内容随之自然上移，露出更多可视区域。
+    val collapseModifier = if (hideOnScroll != null) {
+        Modifier
+            .clipToBounds()
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                hideOnScroll.barHeightPx = placeable.height.toFloat()
+                val offset = hideOnScroll.offsetPx.roundToInt()
+                layout(placeable.width, (placeable.height + offset).coerceAtLeast(0)) {
+                    placeable.place(0, offset)
+                }
+            }
+    } else {
+        Modifier
+    }
     Row(
-        modifier = Modifier
+        modifier = collapseModifier
             .fillMaxWidth()
             .height(AppDimensions.primaryButtonHeight + AppSpacing.small)
             .padding(horizontal = AppDimensions.pageHorizontalPadding),
@@ -185,8 +211,8 @@ fun AppTopBar(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(AppDimensions.minimumTouchTarget)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.small)
+                    .size(44.dp)
+                    .background(MaterialTheme.colorScheme.surface, CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Default.ChevronLeft,
@@ -196,14 +222,42 @@ fun AppTopBar(
             }
             Spacer(modifier = Modifier.width(AppSpacing.large))
         }
-        
+
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge,
+            // 一级页面 24sp 大标题，带返回键的子页 22sp。
+            style = if (onBack != null) {
+                MaterialTheme.typography.titleLarge
+            } else {
+                MaterialTheme.typography.headlineMedium
+            },
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f)
         )
-        
+
         actions()
+    }
+}
+
+/** 暖阳设计的 46dp 圆形图标底座，用于设置列表等。 */
+@Composable
+fun RoundIconBadge(
+    icon: ImageVector,
+    containerColor: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(46.dp)
+            .background(containerColor, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = contentColor,
+            modifier = Modifier.size(22.dp)
+        )
     }
 }

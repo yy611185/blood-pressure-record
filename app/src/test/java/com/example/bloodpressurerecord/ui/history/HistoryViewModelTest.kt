@@ -38,7 +38,7 @@ class HistoryViewModelTest {
     fun `默认日历模式并保存近期模式和范围`() = runTest {
         val today = LocalDate.of(2026, 7, 25)
         val handle = SavedStateHandle()
-        val vm = HistoryViewModel(FakeRepository(), handle, zone) { today }
+        val vm = HistoryViewModel(FakeRepository(), handle, zone, todayProvider = { today })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
 
@@ -68,7 +68,7 @@ class HistoryViewModelTest {
         val repo = FakeRepository().apply {
             summaries.value = listOf(CalendarSessionSummary(epoch(selected, 9), false))
         }
-        val vm = HistoryViewModel(repo, handle, zone) { today }
+        val vm = HistoryViewModel(repo, handle, zone, todayProvider = { today })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
 
@@ -94,7 +94,7 @@ class HistoryViewModelTest {
                 highRiskCount = 1
             )
         }
-        val vm = HistoryViewModel(repo, SavedStateHandle(), zone) { today }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { today })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         vm.setViewMode(HistoryViewMode.RECENT)
         advanceUntilIdle()
@@ -113,8 +113,9 @@ class HistoryViewModelTest {
         val vm = HistoryViewModel(
             repo,
             SavedStateHandle(mapOf("history.viewMode" to "RECENT")),
-            zone
-        ) { today }
+            zone,
+            todayProvider = { today }
+        )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
 
@@ -132,7 +133,7 @@ class HistoryViewModelTest {
             summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), false))
             records.value = listOf(record("late", epoch(date, 20)), record("early", epoch(date, 7)))
         }
-        val vm = HistoryViewModel(repo, SavedStateHandle(), zone) { date }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { date })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
         vm.selectDate(date)
@@ -145,7 +146,7 @@ class HistoryViewModelTest {
     @Test
     fun `无记录日期不可选择`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
-        val vm = HistoryViewModel(FakeRepository(), SavedStateHandle(), zone) { date }
+        val vm = HistoryViewModel(FakeRepository(), SavedStateHandle(), zone, todayProvider = { date })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
         vm.selectDate(date)
@@ -159,7 +160,7 @@ class HistoryViewModelTest {
             summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), false))
             records.value = listOf(record("one", epoch(date, 9)))
         }
-        val vm = HistoryViewModel(repo, SavedStateHandle(), zone) { date }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { date })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
         vm.selectDate(date)
@@ -184,7 +185,7 @@ class HistoryViewModelTest {
         val repo = FakeRepository().apply {
             summaries.value = listOf(CalendarSessionSummary(epoch(date, 12), false))
         }
-        val vm = HistoryViewModel(repo, handle, zone) { date }
+        val vm = HistoryViewModel(repo, handle, zone, todayProvider = { date })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
 
@@ -203,7 +204,7 @@ class HistoryViewModelTest {
         val mayFlow = MutableStateFlow<List<CalendarSessionSummary>>(emptyList())
         repo.summariesByStart[june.toEpochMillisRange(zone).startInclusive] = juneFlow
         repo.summariesByStart[may.toEpochMillisRange(zone).startInclusive] = mayFlow
-        val vm = HistoryViewModel(repo, SavedStateHandle(), zone) { today }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { today })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
 
@@ -230,7 +231,7 @@ class HistoryViewModelTest {
         val secondFlow = MutableStateFlow<List<SessionSummary>>(emptyList())
         repo.summaryRecordsByStart[firstDate.toEpochMillisRange(zone).startInclusive] = firstFlow
         repo.summaryRecordsByStart[secondDate.toEpochMillisRange(zone).startInclusive] = secondFlow
-        val vm = HistoryViewModel(repo, SavedStateHandle(), zone) { secondDate }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { secondDate })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
 
@@ -242,6 +243,27 @@ class HistoryViewModelTest {
 
         assertEquals(secondDate, vm.uiState.value.selectedDate)
         assertEquals(listOf("second"), vm.uiState.value.selectedDayRecords.map { it.id })
+    }
+
+    @Test
+    fun `近期范围跨零点后跟随新的一天`() = runTest {
+        val sunday = LocalDate.of(2026, 7, 26)
+        val nextMonday = LocalDate.of(2026, 7, 27)
+        val todayTicks = MutableStateFlow(sunday)
+        val vm = HistoryViewModel(
+            FakeRepository(),
+            SavedStateHandle(),
+            zone,
+            todayProvider = { sunday },
+            todayTicks = todayTicks
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+        assertEquals(LocalDate.of(2026, 7, 20), vm.uiState.value.recentSummary?.startDate)
+
+        todayTicks.value = nextMonday
+        advanceUntilIdle()
+        assertEquals(nextMonday, vm.uiState.value.recentSummary?.startDate)
     }
 
     private fun epoch(date: LocalDate, hour: Int): Long =
@@ -281,10 +303,7 @@ class HistoryViewModelTest {
         val summaryRecordsByStart =
             mutableMapOf<Long, MutableStateFlow<List<SessionSummary>>>()
         val statistics = MutableStateFlow(PeriodStatistics())
-        override fun observeSessionCount(): Flow<Int> = flowOf(0)
-        override fun observeSessions(): Flow<List<SessionRecord>> = records
         override fun observeSession(sessionId: String): Flow<SessionRecord?> = flowOf(null)
-        override fun observeLatestSession(): Flow<SessionRecord?> = flowOf(null)
         override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = flowOf(null)
         override fun observeCalendarSessionSummaries(
             startInclusive: Long,
@@ -313,10 +332,6 @@ class HistoryViewModelTest {
             startInclusive: Long,
             endExclusive: Long
         ): Flow<PeriodStatistics> = statistics
-        override fun observeSessionsInRange(
-            startInclusive: Long,
-            endExclusive: Long
-        ): Flow<List<SessionRecord>> = records
         override suspend fun saveSession(input: SaveSessionInput): Result<String> = Result.success("id")
         override suspend fun updateSession(sessionId: String, input: SaveSessionInput) = Result.success(Unit)
         override suspend fun deleteSession(sessionId: String) = Result.success(Unit)

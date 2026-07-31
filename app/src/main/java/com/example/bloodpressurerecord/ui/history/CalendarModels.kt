@@ -50,10 +50,11 @@ object CalendarMonthLayout {
     const val COLUMN_COUNT = 7
 
     /**
-     * 星期从周日开始。跨月位置留空，行数按当前月份实际需要生成。
+     * 星期从周一开始，与“近期·本周”的周一起始保持同一种周定义。
+     * 跨月位置留空，行数按当前月份实际需要生成。
      */
     fun cells(month: YearMonth): List<CalendarMonthCell> {
-        val leadingBlanks = month.atDay(1).dayOfWeek.value % COLUMN_COUNT
+        val leadingBlanks = month.atDay(1).dayOfWeek.value - 1
         return buildList {
             repeat(leadingBlanks) {
                 add(CalendarMonthCell(date = null, isInDisplayedMonth = false))

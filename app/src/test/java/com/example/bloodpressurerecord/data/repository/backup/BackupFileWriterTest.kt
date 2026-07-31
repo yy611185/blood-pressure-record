@@ -11,7 +11,7 @@ import org.junit.Test
 
 class BackupFileWriterTest {
     @Test
-    fun writeXlsx_createsVersion2SheetsWithUnlimitedReadingRows() {
+    fun writeXlsx_createsVersion3SheetsWithExplicitAverageStrategy() {
         val payload = samplePayload()
 
         val bytes = ByteArrayOutputStream().use { output ->
@@ -57,6 +57,7 @@ class BackupFileWriterTest {
                     avgSystolic = 119,
                     avgDiastolic = 79,
                     avgPulse = 72,
+                    averageStrategy = "DISCARD_FIRST",
                     level = "NORMAL",
                     highAlert = false,
                     scene = "晨起",
@@ -77,7 +78,7 @@ class BackupFileWriterTest {
             },
             userProfile = listOf(BackupUserProfileItem("target_sys", "120")),
             meta = listOf(
-                BackupMetaItem("export_format_version", "2"),
+                BackupMetaItem("export_format_version", "3"),
                 BackupMetaItem("total_records", "1"),
                 BackupMetaItem("measurement_sessions_count", "1"),
                 BackupMetaItem("measurement_readings_count", "7")
@@ -111,6 +112,7 @@ class BackupFileWriterTest {
             assertEquals(false, row.getCell(9).booleanCellValue)
             assertEquals("晨起", row.getCell(10).stringCellValue)
             assertEquals("[\"头晕\"]", row.getCell(11).stringCellValue)
+            assertEquals("DISCARD_FIRST", row.getCell(15).stringCellValue)
 
             val readingsSheet = workbook.getSheet("原始读数")
             assertEquals(7, readingsSheet.lastRowNum)
@@ -119,7 +121,7 @@ class BackupFileWriterTest {
 
             val metaSheet = workbook.getSheet("导出信息")
             assertEquals("export_format_version", metaSheet.getRow(1).getCell(0).stringCellValue)
-            assertEquals("2", metaSheet.getRow(1).getCell(1).stringCellValue)
+            assertEquals("3", metaSheet.getRow(1).getCell(1).stringCellValue)
             assertEquals("measurement_sessions_count", metaSheet.getRow(3).getCell(0).stringCellValue)
             assertEquals("1", metaSheet.getRow(3).getCell(1).stringCellValue)
             assertEquals("measurement_readings_count", metaSheet.getRow(4).getCell(0).stringCellValue)

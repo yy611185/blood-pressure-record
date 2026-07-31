@@ -6,6 +6,7 @@ import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithRead
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -13,23 +14,13 @@ import org.json.JSONArray
 import java.util.UUID
 
 class DefaultBloodPressureRepository(
-    private val sessionDao: MeasurementSessionDao
+    private val sessionDao: MeasurementSessionDao,
+    /** 数据变化后的回调（用于刷新桌面小部件等）。 */
+    private val onDataChanged: (() -> Unit)? = null
 ) : BloodPressureRepository {
-
-    override fun observeSessionCount(): Flow<Int> {
-        return sessionDao.observeSessionCount()
-    }
-
-    override fun observeSessions(): Flow<List<SessionRecord>> {
-        return sessionDao.observeSessionsWithReadings().map { list -> list.map { it.toRecord() } }
-    }
 
     override fun observeSession(sessionId: String): Flow<SessionRecord?> {
         return sessionDao.observeSessionWithReadings(sessionId).map { it?.toRecord() }
-    }
-
-    override fun observeLatestSession(): Flow<SessionRecord?> {
-        return sessionDao.observeLatestSessionWithReadings().map { it?.toRecord() }
     }
 
     override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> {
@@ -59,14 +50,6 @@ class DefaultBloodPressureRepository(
                 )
             }
         }
-    }
-
-    override fun observeSessionsInRange(
-        startInclusive: Long,
-        endExclusive: Long
-    ): Flow<List<SessionRecord>> {
-        return sessionDao.observeSessionsWithReadingsInRange(startInclusive, endExclusive)
-            .map { rows -> rows.map { it.toRecord() } }
     }
 
     override fun observeSessionSummariesInRange(
@@ -107,6 +90,7 @@ class DefaultBloodPressureRepository(
         )
         val readings = buildReadingEntities(sessionId, input.readings)
         sessionDao.insertSessionWithReadings(session, readings)
+        onDataChanged?.invoke()
         sessionId
     }
 
@@ -122,21 +106,25 @@ class DefaultBloodPressureRepository(
         )
         val readings = buildReadingEntities(sessionId, input.readings)
         sessionDao.updateSessionWithReadings(session, readings)
+        onDataChanged?.invoke()
     }
 
     override suspend fun deleteSession(sessionId: String): Result<Unit> = runCatching {
         sessionDao.deleteSessionById(sessionId)
+        onDataChanged?.invoke()
     }
 
     override suspend fun restoreSession(session: SessionRecord): Result<Unit> = runCatching {
+        val orderedReadings = session.readings.sortedBy { it.orderIndex }.map {
+            SessionReadingInput(it.systolic, it.diastolic, it.pulse)
+        }
         val input = SaveSessionInput(
             measuredAt = session.measuredAt,
             scene = session.scene,
             note = session.note,
             symptoms = session.symptoms,
-            readings = session.readings.sortedBy { it.orderIndex }.map {
-                SessionReadingInput(it.systolic, it.diastolic, it.pulse)
-            }
+            readings = orderedReadings,
+            averageStrategy = session.averageStrategy
         )
         val entity = buildSessionEntity(
             sessionId = session.id,
@@ -155,6 +143,7 @@ class DefaultBloodPressureRepository(
             )
         }
         sessionDao.insertSessionWithReadings(entity, readings)
+        onDataChanged?.invoke()
     }
 
     private fun buildSessionEntity(
@@ -173,7 +162,7 @@ class DefaultBloodPressureRepository(
                 "第 ${index + 1} 组读数不符合统一输入规则"
             }
         }
-        val derived = MeasurementDerivation.derive(readingValues)
+        val derived = MeasurementDerivation.derive(readingValues, input.averageStrategy)
         val symptomsJson = if (input.symptoms.isEmpty()) null else JSONArray(input.symptoms).toString()
         return MeasurementSessionEntity(
             id = sessionId,
@@ -184,6 +173,7 @@ class DefaultBloodPressureRepository(
             avgSystolic = derived.average.avgSystolic,
             avgDiastolic = derived.average.avgDiastolic,
             avgPulse = derived.average.avgPulse,
+            averageStrategy = input.averageStrategy.name,
             category = derived.category.name,
             containsHighRiskReading = derived.containsHighRiskReading,
             createdAt = createdAt,
@@ -218,6 +208,7 @@ class DefaultBloodPressureRepository(
             avgSystolic = session.avgSystolic,
             avgDiastolic = session.avgDiastolic,
             avgPulse = session.avgPulse,
+            averageStrategy = session.averageStrategy.toAverageStrategy(),
             category = session.category,
             containsHighRiskReading = session.containsHighRiskReading,
             readings = readings.sortedBy { it.orderIndex }.map {
@@ -254,5 +245,9 @@ class DefaultBloodPressureRepository(
             val arr = JSONArray(json)
             List(arr.length()) { index -> arr.getString(index) }
         }.getOrDefault(emptyList())
+    }
+
+    private fun String.toAverageStrategy(): AverageStrategy {
+        return AverageStrategy.entries.firstOrNull { it.name == this } ?: AverageStrategy.ALL
     }
 }

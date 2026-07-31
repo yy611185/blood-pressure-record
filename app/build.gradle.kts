@@ -1,20 +1,21 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("androidx.baselineprofile")
 }
 
 android {
     namespace = "com.example.bloodpressurerecord"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.bloodpressurerecord"
+        applicationId = "com.yang.bloodpressure"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 24
-        versionName = "1.6.2"
+        targetSdk = 35
+        versionCode = 28
+        versionName = "1.8.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -44,6 +45,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -70,10 +75,6 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -90,15 +91,16 @@ ksp {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    // Compose 1.7（strong skipping 等性能强化）；Navigation 2.8 支持预测式返回。
+    val composeBom = platform("androidx.compose:compose-bom:2024.10.00")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
-    implementation("androidx.activity:activity-compose:1.9.1")
-    implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.navigation:navigation-compose:2.8.3")
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -111,15 +113,17 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.0")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // 桌面小部件（Glance AppWidget，2×2/4×2/4×4 响应式布局）
+    implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
-    implementation("org.apache.poi:poi-ooxml:5.2.5")
+    // 5.4.0 之前的 OOXML 解析存在重复 ZIP 条目安全问题；备份导入必须使用修复版本。
+    implementation("org.apache.poi:poi-ooxml:5.5.1")
     baselineProfile(project(":baselineprofile"))
 
     testImplementation("junit:junit:4.13.2")

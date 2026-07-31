@@ -86,17 +86,6 @@ interface MeasurementSessionDao {
     @Query("SELECT * FROM measurement_sessions WHERE id = :sessionId")
     fun observeSessionWithReadings(sessionId: String): Flow<MeasurementSessionWithReadings?>
 
-    @Transaction
-    @Query("SELECT * FROM measurement_sessions ORDER BY measuredAt DESC")
-    fun observeSessionsWithReadings(): Flow<List<MeasurementSessionWithReadings>>
-
-    @Query("SELECT COUNT(*) FROM measurement_sessions")
-    fun observeSessionCount(): Flow<Int>
-
-    @Transaction
-    @Query("SELECT * FROM measurement_sessions ORDER BY measuredAt DESC LIMIT 1")
-    fun observeLatestSessionWithReadings(): Flow<MeasurementSessionWithReadings?>
-
     @Query(
         """
         SELECT id, measuredAt, avgSystolic, avgDiastolic, category,
@@ -124,19 +113,6 @@ interface MeasurementSessionDao {
         startInclusive: Long,
         endExclusive: Long
     ): List<MeasurementSessionWithReadings>
-
-    @Transaction
-    @Query(
-        """
-        SELECT * FROM measurement_sessions
-        WHERE measuredAt >= :startInclusive AND measuredAt < :endExclusive
-        ORDER BY measuredAt ASC
-        """
-    )
-    fun observeSessionsWithReadingsInRange(
-        startInclusive: Long,
-        endExclusive: Long
-    ): Flow<List<MeasurementSessionWithReadings>>
 
     @Query(
         """

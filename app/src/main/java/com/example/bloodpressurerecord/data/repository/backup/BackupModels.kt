@@ -22,7 +22,8 @@ data class BackupMeasurementRow(
     val symptomsJson: String?,
     val note: String?,
     val createdAt: String?,
-    val updatedAt: String?
+    val updatedAt: String?,
+    val averageStrategy: String = "ALL"
 )
 
 data class BackupReadingRow(

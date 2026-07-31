@@ -59,7 +59,8 @@ class DefaultBloodPressureRepositoryTest {
         assertEquals(132, loaded?.avgSystolic)
         assertEquals(83, loaded?.avgDiastolic)
         assertEquals(73, loaded?.avgPulse)
-        assertEquals("STAGE1", loaded?.category)
+        // 中国指南：132/83 属于正常高值
+        assertEquals("HIGH_NORMAL", loaded?.category)
         assertFalse(loaded?.containsHighRiskReading ?: true)
         assertEquals(2, loaded?.readings?.size)
     }

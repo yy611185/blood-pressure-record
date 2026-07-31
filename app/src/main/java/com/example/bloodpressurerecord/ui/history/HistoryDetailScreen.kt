@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.*
 
@@ -61,24 +62,20 @@ fun HistoryDetailScreen(
     }
 
     val isAbnormal = session.containsHighRiskReading || session.category.uppercase() != "NORMAL"
-    val categoryText = when (session.category) {
-        "NORMAL" -> "正常"
-        "ELEVATED" -> "正常高值"
-        "STAGE1" -> "1级高血压"
-        "STAGE2" -> "2级高血压"
-        "SEVERE" -> "重度高血压"
-        else -> session.category
-    }
+    val categoryText = CategoryPresentation.label(session.category)
 
+    val topBarScroll = rememberHideOnScrollState()
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(topBarScroll.nestedScrollConnection)
         ) {
-            AppTopBar(title = "记录详情", onBack = onBack)
+            AppTopBar(title = "记录详情", onBack = onBack, hideOnScroll = topBarScroll)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -126,9 +123,21 @@ fun HistoryDetailScreen(
                         Text("测量场景", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(session.scene, style = MaterialTheme.typography.bodyLarge)
                     }
+                    val (symptomTags, factorTags) = remember(session.symptoms) {
+                        MeasurementTags.splitSymptomsAndFactors(session.symptoms)
+                    }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("伴随症状", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(uiState.symptomsText, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            symptomTags.takeIf { it.isNotEmpty() }?.joinToString("、") ?: "无",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                    if (factorTags.isNotEmpty()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("影响因素", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(factorTags.joinToString("、"), style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
                     if (!session.note.isNullOrBlank()) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

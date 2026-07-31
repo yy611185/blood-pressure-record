@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 暖阳打卡设计：奶油页面底色，用于窗口首帧背景 -->
+    <color name="warm_background">#F5EAD8</color>
+</resources>

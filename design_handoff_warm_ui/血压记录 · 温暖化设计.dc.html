@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/organic-d8732d73-eb6c-409f-80c7-f13bb9c3ec61/styles.css">
+<script src="_ds/organic-d8732d73-eb6c-409f-80c7-f13bb9c3ec61/_ds_bundle.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f0eee9;font-family:Figtree,'Noto Sans SC',system-ui,sans-serif}
+a{color:#8c491a}a:hover{color:#643312}
+.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}
+.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}
+.dv-opts{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55);max-width:412px}
+.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}
+.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}
+</style>
+</helmet>
+<section class="dv-turn" id="notes" style="padding:32px 44px 24px">
+  <div style="max-width:860px;display:flex;flex-direction:column;gap:8px">
+    <div style="font:600 15px system-ui;color:#1a1a1a">血压记录 App · 温暖化 UI 探索</div>
+    <div style="font:12px/1.7 system-ui;color:rgba(0,0,0,.6)">
+      依据:仓库 yy611185/blood-pressure-record(Jetpack Compose + Material 3),面向中老年人及帮父母记录的子女。现状为冷调蓝 #3B82F6 + 白卡片,工具感强。
+      方向:按你的选择走「大胆全新」,采用 Organic 设计系统 —— 奶油底 #f5ead8、陶土橙 + 鼠尾草绿双声部、超圆角与药丸按钮、Caprasimo 数字显示(中文标题回退到圆润的 ZCOOL KuaiLe)。
+      温暖化五个抓手都有落位:暖色调、亲切文案、鼓励式打卡、柔和圆角阴影、图形化元素。下方 <a href="#t2">第 2 组</a>是三个温暖方向(各配两屏),<a href="#t1">第 1 组</a>是现有界面的忠实复刻,便于对照。
+    </div>
+  </div>
+</section>
+<section class="dv-turn" id="t3">
+  <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">「暖阳打卡」<a class="dv-oid" href="#2a">2a</a> 方向 · 全部五个页面</span></div>
+  <div class="dv-opts">
+
+    <div class="dv-opt" id="3a">
+      <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>测量首页 —— 问候 + 最近血压 + 打卡鼓励</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="3a 测量首页" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font-size:13px;color:var(--color-neutral-600)">7月26日 星期日 · 早晨</div>
+              <div style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:30px;line-height:1.2;margin-top:2px">早上好</div>
+              <div style="font-size:13px;color:var(--color-neutral-600);margin-top:4px">记录是为了帮你观察变化,身体的感觉你最懂。</div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:15px;font-weight:600">最近一次血压</span>
+                <span style="font-size:13px;color:var(--color-neutral-600)">今早 8:12</span>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:Caprasimo,system-ui;font-size:54px;line-height:1;color:var(--color-accent-700)">128 / 82</span>
+                <span style="font-size:14px;color:var(--color-neutral-600)">mmHg</span>
+              </div>
+              <div style="display:flex">
+                <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-800);font-size:13px;font-weight:600">
+                  <span style="display:inline-block;width:15px;height:15px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/circle-check.svg') center / contain no-repeat"></span>
+                  血压平稳,继续保持</span>
+              </div>
+            </div>
+            <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;display:flex;align-items:center;gap:14px">
+              <span style="display:inline-block;width:26px;height:26px;background:var(--color-accent-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/flame.svg') center / contain no-repeat"></span>
+              <div style="flex:1">
+                <div style="font-size:15px;font-weight:700;color:var(--color-accent-2-900)">已连续记录 5 天</div>
+                <div style="font-size:12px;color:var(--color-accent-2-800)">坚持得很好,为自己鼓个掌</div>
+              </div>
+              <div style="display:flex;gap:5px">
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-accent-2-500);box-sizing:border-box"></span>
+                <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-accent-2-500);box-sizing:border-box"></span>
+              </div>
+            </div>
+            <div style="height:60px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;gap:10px;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:18px;box-shadow:var(--shadow-md)">
+              <span style="display:inline-block;width:22px;height:22px;background:#fff7ef;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>
+              记一次血压
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:15px;font-weight:600">今日概览</span>
+              <span style="font-size:14px">今天已经测了 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">2</b> 次,平均 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">126 / 80</b> mmHg</span>
+              <span style="font-size:13px;color:var(--color-neutral-600)">和昨天差不多,挺稳的。</span>
+              <a href="#3c" style="font-size:14px;font-weight:600;color:var(--color-accent-700);text-decoration:none">看看今天的记录 →</a>
+            </div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="3b">
+      <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>记一次血压 —— 含场景、症状与备注的完整表单</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="3b 记一次血压" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="display:flex;align-items:center;gap:14px;padding:10px 18px">
+            <div style="width:44px;height:44px;border-radius:50%;background:var(--color-surface);display:flex;align-items:center;justify-content:center">
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span>
+            </div>
+            <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:22px">记一次血压</span>
+          </div>
+          <div style="flex:1;overflow:auto;padding:4px 18px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:14px;font-weight:600">什么时候测的?</span>
+              <div style="display:flex;gap:10px">
+                <div style="flex:1;height:50px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+                  <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/calendar.svg') center / contain no-repeat"></span>7月26日 今天</div>
+                <div style="flex:1;height:50px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+                  <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/clock.svg') center / contain no-repeat"></span>08:12</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:14px;font-weight:600">在什么情况下测的?</span>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-accent);color:#fff7ef;font-size:13px;font-weight:600">晨起</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">睡前</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">居家安静</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">运动后</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">其他</span>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:15px;font-weight:700">第 1 组</span>
+              <div style="display:flex;gap:10px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">收缩压(高压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">128</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">舒张压(低压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">82</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">脉搏</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">72</div>
+                </div>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:15px;font-weight:700">第 2 组</span>
+              <div style="display:flex;gap:10px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">收缩压(高压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">124</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">舒张压(低压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">79</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">脉搏</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">70</div>
+                </div>
+              </div>
+            </div>
+            <div style="height:48px;border-radius:999px;border:1.5px dashed var(--color-accent-500);color:var(--color-accent-700);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600;flex:none">
+              <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>再加一组</div>
+            <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:13px;font-weight:600;color:var(--color-accent-2-800)">两次平均</span>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:Caprasimo,system-ui;font-size:32px;line-height:1;color:var(--color-accent-2-900)">126 / 80</span>
+                <span style="font-size:13px;color:var(--color-accent-2-800)">mmHg · 脉搏 71</span>
+              </div>
+              <span style="font-size:13px;color:var(--color-accent-2-900)">数值很平稳,记得保持规律作息。</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:14px;font-weight:600">有没有不舒服?</span>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-accent);color:#fff7ef;font-size:13px;font-weight:600">没有,挺好的</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">头痛</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">头晕</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">心悸</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">胸闷或胸痛</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">视物模糊</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">其他</span>
+              </div>
+            </div>
+            <div style="min-height:88px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);padding:14px 16px;font-size:14px;color:var(--color-neutral-500)">想补充点什么?比如"早饭前测的"(选填)</div>
+            <div style="height:8px;flex:none"></div>
+          </div>
+          <div style="padding:12px 18px;background:var(--color-surface);border-radius:28px 28px 0 0;box-shadow:var(--shadow-md)">
+            <div style="height:58px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:17px">保存这次记录</div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="3c">
+      <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>历史 —— 日历/近期双模式,结构同现状,暖色皮肤</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="3c 历史" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+            <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">历史记录</span>
+            <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+              <div style="flex:1;height:44px;border-radius:999px;background:var(--color-surface);box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--color-accent-800)">日历</div>
+              <div style="flex:1;height:44px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-600)">近期</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;background:var(--color-accent-2-200);border-radius:999px;padding:10px 18px">
+              <span style="display:inline-block;width:18px;height:18px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/sun.svg') center / contain no-repeat"></span>
+              <span style="font-size:13px;font-weight:600;color:var(--color-accent-2-900)">7 月你已经记录了 12 天,真不错</span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 14px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px">
+                <div style="width:38px;height:38px;border-radius:50%;background:var(--color-neutral-100);display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:17px;height:17px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span></div>
+                <span style="font-size:16px;font-weight:700">2026年7月</span>
+                <div style="width:38px;height:38px;border-radius:50%;background:var(--color-neutral-100);display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:17px;height:17px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);font-size:12px;color:var(--color-neutral-600);text-align:center;padding:2px 0">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;justify-items:center">
+                <span></span><span></span><span></span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">1</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">2</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">3</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">4</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">5</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">6</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">7</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">8</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">9</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">10</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">11</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">12</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">13</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">14</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">15</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">16</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">17</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">18</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">19</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">20</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">21</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-300);color:var(--color-accent-900);font-weight:700">22</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">23</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">24</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">25</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-600);color:#fff7ef;font-weight:700;box-shadow:var(--shadow-sm)">26</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">27</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">28</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">29</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">30</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">31</span>
+              </div>
+              <div style="display:flex;gap:14px;font-size:11px;color:var(--color-neutral-600);padding:4px 6px 0">
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-300)"></i>有记录</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-300)"></i>含偏高读数</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-600)"></i>选中</span>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:17px;font-weight:700">7月26日 · 共 2 次测量</span>
+              <span style="font-size:14px;color:var(--color-neutral-600)">当天平均 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">128 / 82</b> mmHg</span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:15px;font-weight:700">08:12</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-800);font-size:12px;font-weight:700">
+                  <span style="display:inline-block;width:14px;height:14px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/circle-check.svg') center / contain no-repeat"></span>正常</span>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:Caprasimo,system-ui;font-size:30px;line-height:1;color:var(--color-accent-700)">128 / 82</span>
+                <span style="font-size:13px;color:var(--color-neutral-600)">mmHg</span>
+              </div>
+              <span style="font-size:13px;color:var(--color-neutral-600)">脉搏 72 次/分 · 晨起</span>
+            </div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="3d">
+      <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>趋势 —— 摘要更口语,图表换暖色双声部</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="3d 趋势" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+            <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">血压趋势</span>
+            <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;font-size:14px;line-height:1.7;color:var(--color-accent-2-900)">
+              这 7 天测了 <b>12</b> 次,平均 <b style="font-family:Caprasimo,system-ui;font-size:17px">126 / 80</b> mmHg,比上一周低了 2/1,<b>整体很平稳</b>,没有高风险读数。
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+                <span style="flex:1;text-align:center;padding:10px 0;border-radius:999px;background:var(--color-accent);color:#fff7ef;font-size:13px;font-weight:700">近 7 天</span>
+                <span style="flex:1;text-align:center;padding:10px 0;border-radius:999px;color:var(--color-neutral-600);font-size:13px">近 30 天</span>
+                <span style="flex:1;text-align:center;padding:10px 0;border-radius:999px;color:var(--color-neutral-600);font-size:13px">全部</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:15px;font-weight:700">最近 7 天</span>
+                <span style="font-size:12px;color:var(--color-neutral-600)">12 次测量</span>
+              </div>
+              <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+                <span style="flex:1;text-align:center;padding:8px 0;border-radius:999px;color:var(--color-neutral-600);font-size:12px">收缩压</span>
+                <span style="flex:1;text-align:center;padding:8px 0;border-radius:999px;color:var(--color-neutral-600);font-size:12px">舒张压</span>
+                <span style="flex:1;text-align:center;padding:8px 0;border-radius:999px;background:var(--color-surface);box-shadow:var(--shadow-sm);color:var(--color-accent-800);font-size:12px;font-weight:700">双曲线</span>
+              </div>
+              <svg viewBox="0 0 340 180" style="width:100%;height:auto">
+                <line x1="30" y1="50" x2="330" y2="50" stroke="#c0b6a5" stroke-width="1.5" stroke-dasharray="5 5"></line>
+                <polyline points="45,72 90,60 135,80 180,64 225,56 270,68 315,52" fill="none" stroke="#c67139" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                <circle cx="45" cy="72" r="4.5" fill="#c67139"></circle><circle cx="90" cy="60" r="4.5" fill="#c67139"></circle><circle cx="135" cy="80" r="4.5" fill="#c67139"></circle><circle cx="180" cy="64" r="4.5" fill="#c67139"></circle><circle cx="225" cy="56" r="4.5" fill="#c67139"></circle><circle cx="270" cy="68" r="4.5" fill="#c67139"></circle><circle cx="315" cy="52" r="4.5" fill="#c67139"></circle>
+                <polyline points="45,124 90,118 135,130 180,122 225,114 270,124 315,110" fill="none" stroke="#7a8a5e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                <circle cx="45" cy="124" r="4.5" fill="#7a8a5e"></circle><circle cx="90" cy="118" r="4.5" fill="#7a8a5e"></circle><circle cx="135" cy="130" r="4.5" fill="#7a8a5e"></circle><circle cx="180" cy="122" r="4.5" fill="#7a8a5e"></circle><circle cx="225" cy="114" r="4.5" fill="#7a8a5e"></circle><circle cx="270" cy="124" r="4.5" fill="#7a8a5e"></circle><circle cx="315" cy="110" r="4.5" fill="#7a8a5e"></circle>
+                <text x="26" y="54" font-size="9" fill="#82796a" text-anchor="end">140</text>
+                <text x="26" y="103" font-size="9" fill="#82796a" text-anchor="end">110</text>
+                <text x="26" y="153" font-size="9" fill="#82796a" text-anchor="end">80</text>
+                <text x="45" y="170" font-size="9" fill="#82796a" text-anchor="middle">7-20</text>
+                <text x="180" y="170" font-size="9" fill="#82796a" text-anchor="middle">7-23</text>
+                <text x="315" y="170" font-size="9" fill="#82796a" text-anchor="middle">7-26</text>
+              </svg>
+              <div style="display:flex;gap:16px;font-size:12px;color:var(--color-neutral-600)">
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent)"></i>收缩压(高压)</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2)"></i>舒张压(低压)</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:12px;height:2px;background:var(--color-neutral-400)"></i>目标线</span>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:var(--shadow-sm)"><div style="font-size:12px;color:var(--color-neutral-600)">最高一次</div><div style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-800)">138/90</div></div>
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:var(--shadow-sm)"><div style="font-size:12px;color:var(--color-neutral-600)">最低一次</div><div style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-2-800)">118/76</div></div>
+            </div>
+            <div style="font-size:12px;color:var(--color-neutral-600);padding:0 4px 8px">短期变化仅供观察,不代表医学结论。</div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="3e">
+      <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>设置 —— 圆形图标底,分组同现状</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="3e 设置" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+            <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">设置</span>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;align-items:center;gap:16px">
+              <span style="width:46px;height:46px;border-radius:50%;background:var(--color-accent-200);display:flex;align-items:center;justify-content:center;flex:none"><span style="display:inline-block;width:22px;height:22px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/user.svg') center / contain no-repeat"></span></span>
+              <div style="flex:1"><div style="font-size:15px;font-weight:700">用户资料</div><div style="font-size:13px;color:var(--color-neutral-600)">目标血压、年龄、性别等基础信息</div></div>
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-neutral-500);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;align-items:center;gap:16px">
+              <span style="width:46px;height:46px;border-radius:50%;background:var(--color-accent-2-200);display:flex;align-items:center;justify-content:center;flex:none"><span style="display:inline-block;width:22px;height:22px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/bell.svg') center / contain no-repeat"></span></span>
+              <div style="flex:1"><div style="font-size:15px;font-weight:700">提醒设置</div><div style="font-size:13px;color:var(--color-neutral-600)">晨间/晚间测量提醒和提醒时间</div></div>
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-neutral-500);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;align-items:center;gap:16px">
+              <span style="width:46px;height:46px;border-radius:50%;background:var(--color-accent-200);display:flex;align-items:center;justify-content:center;flex:none"><span style="display:inline-block;width:22px;height:22px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/eye.svg') center / contain no-repeat"></span></span>
+              <div style="flex:1"><div style="font-size:15px;font-weight:700">显示设置</div><div style="font-size:13px;color:var(--color-neutral-600)">趋势图、高风险提醒和大字显示</div></div>
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-neutral-500);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;align-items:center;gap:16px">
+              <span style="width:46px;height:46px;border-radius:50%;background:var(--color-accent-2-200);display:flex;align-items:center;justify-content:center;flex:none"><span style="display:inline-block;width:22px;height:22px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/folder.svg') center / contain no-repeat"></span></span>
+              <div style="flex:1"><div style="font-size:15px;font-weight:700">数据管理</div><div style="font-size:13px;color:var(--color-neutral-600)">导出 Excel、本地备份和清空数据</div></div>
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-neutral-500);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;align-items:center;gap:16px">
+              <span style="width:46px;height:46px;border-radius:50%;background:var(--color-accent-200);display:flex;align-items:center;justify-content:center;flex:none"><span style="display:inline-block;width:22px;height:22px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/info.svg') center / contain no-repeat"></span></span>
+              <div style="flex:1"><div style="font-size:15px;font-weight:700">应用说明与更新说明</div><div style="font-size:13px;color:var(--color-neutral-600)">查看应用功能、使用边界和版本变化</div></div>
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-neutral-500);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="font-size:12px;color:var(--color-neutral-600);text-align:center;padding:6px 0 10px">数据只保存在这台手机上,不会上传。</div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+  </div>
+  <p class="dv-next">日历已换成 <a class="dv-oid" href="#2b">2b</a> 圆点风 · 可点击的交互原型在这里:<a href="血压记录 · 交互原型.dc.html">血压记录 · 交互原型</a></p>
+</section>
+<section class="dv-turn" id="t2">
+  <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">温暖新方向 · Organic 设计系统 · 三套对比</span></div>
+  <div class="dv-opts">
+
+    <div class="dv-opt" id="2a">
+      <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>暖阳打卡 —— 问候语 + 连续记录鼓励,现有信息结构不变,换温暖的皮肤和语气</div>
+      <div style="display:flex;gap:20px">
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="2a 测量首页" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font-size:13px;color:var(--color-neutral-600)">7月26日 星期日 · 早晨</div>
+              <div style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:30px;line-height:1.2;margin-top:2px">早上好</div>
+              <div style="font-size:13px;color:var(--color-neutral-600);margin-top:4px">记录是为了帮你观察变化,身体的感觉你最懂。</div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:15px;font-weight:600">最近一次血压</span>
+                <span style="font-size:13px;color:var(--color-neutral-600)">今早 8:12</span>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:Caprasimo,system-ui;font-size:54px;line-height:1;color:var(--color-accent-700)">128 / 82</span>
+                <span style="font-size:14px;color:var(--color-neutral-600)">mmHg</span>
+              </div>
+              <div style="display:flex">
+                <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-800);font-size:13px;font-weight:600">
+                  <span style="display:inline-block;width:15px;height:15px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/circle-check.svg') center / contain no-repeat"></span>
+                  血压平稳,继续保持</span>
+              </div>
+            </div>
+            <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;display:flex;align-items:center;gap:14px">
+              <span style="display:inline-block;width:26px;height:26px;background:var(--color-accent-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/flame.svg') center / contain no-repeat"></span>
+              <div style="flex:1">
+                <div style="font-size:15px;font-weight:700;color:var(--color-accent-2-900)">已连续记录 5 天</div>
+                <div style="font-size:12px;color:var(--color-accent-2-800)">坚持得很好,为自己鼓个掌</div>
+              </div>
+              <div style="display:flex;gap:5px">
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-600)"></span>
+                <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-accent-2-500);box-sizing:border-box"></span>
+                <span style="width:10px;height:10px;border-radius:50%;border:1.5px solid var(--color-accent-2-500);box-sizing:border-box"></span>
+              </div>
+            </div>
+            <div style="height:60px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;gap:10px;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:18px;box-shadow:var(--shadow-md)">
+              <span style="display:inline-block;width:22px;height:22px;background:#fff7ef;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>
+              记一次血压
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:15px;font-weight:600">今日概览</span>
+              <span style="font-size:14px">今天已经测了 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">2</b> 次,平均 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">126 / 80</b> mmHg</span>
+              <span style="font-size:13px;color:var(--color-neutral-600)">和昨天差不多,挺稳的。</span>
+              <a href="#2a" style="font-size:14px;font-weight:600;color:var(--color-accent-700);text-decoration:none">看看今天的记录 →</a>
+            </div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="2a 记一次血压" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="display:flex;align-items:center;gap:14px;padding:10px 18px">
+            <div style="width:44px;height:44px;border-radius:50%;background:var(--color-surface);display:flex;align-items:center;justify-content:center">
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span>
+            </div>
+            <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:22px">记一次血压</span>
+          </div>
+          <div style="flex:1;overflow:auto;padding:4px 18px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:14px;font-weight:600">什么时候测的?</span>
+              <div style="display:flex;gap:10px">
+                <div style="flex:1;height:50px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+                  <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/calendar.svg') center / contain no-repeat"></span>7月26日 今天</div>
+                <div style="flex:1;height:50px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+                  <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/clock.svg') center / contain no-repeat"></span>08:12</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:14px;font-weight:600">在什么情况下测的?</span>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-accent);color:#fff7ef;font-size:13px;font-weight:600">晨起</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">睡前</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">居家安静</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">运动后</span>
+                <span style="padding:9px 18px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);color:var(--color-neutral-700);font-size:13px">其他</span>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:15px;font-weight:700">第 1 组</span>
+              <div style="display:flex;gap:10px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">收缩压(高压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">128</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">舒张压(低压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">82</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">脉搏</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">72</div>
+                </div>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:15px;font-weight:700">第 2 组</span>
+              <div style="display:flex;gap:10px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">收缩压(高压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px dashed var(--color-neutral-400);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">点击输入</div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">舒张压(低压)</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px dashed var(--color-neutral-400)"></div>
+                </div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                  <span style="font-size:12px;color:var(--color-neutral-600)">脉搏</span>
+                  <div style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px dashed var(--color-neutral-400)"></div>
+                </div>
+              </div>
+              <div style="font-size:12px;color:var(--color-neutral-600)">建议连续测两次,间隔 1-2 分钟,取平均更准。</div>
+            </div>
+            <div style="height:48px;border-radius:999px;border:1.5px dashed var(--color-accent-500);color:var(--color-accent-700);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+              <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>再加一组</div>
+          </div>
+          <div style="padding:12px 18px;background:var(--color-surface);border-radius:28px 28px 0 0;box-shadow:var(--shadow-md)">
+            <div style="height:58px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:17px">保存这次记录</div>
+          </div>
+        </div>
+      </x-import>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="2b">
+      <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>圆环安心 —— 大圆盘一眼看懂 + 日历变成"陪伴地图",图形感最强</div>
+      <div style="display:flex;gap:20px">
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="2b 测量首页" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text);position:relative;overflow:hidden">
+          <div style="position:absolute;width:220px;height:220px;border-radius:50%;background:var(--color-accent-200);top:-70px;right:-70px;opacity:.7"></div>
+          <div style="position:absolute;width:120px;height:120px;border-radius:50%;background:var(--color-accent-2-200);top:110px;left:-50px"></div>
+          <div style="flex:1;overflow:auto;padding:12px 18px 0;display:flex;flex-direction:column;gap:16px;position:relative">
+            <div style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px;margin-top:4px">你好呀</div>
+            <div style="display:flex;justify-content:center;padding:6px 0 2px">
+              <div style="width:250px;height:250px;border-radius:50%;border:16px solid var(--color-accent-2-400);background:var(--color-neutral-100);box-shadow:var(--shadow-md);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+                <span style="font-size:12px;color:var(--color-neutral-600)">上次 · 今早 8:12</span>
+                <span style="font-family:Caprasimo,system-ui;font-size:46px;line-height:1;color:var(--color-accent-800)">128/82</span>
+                <span style="font-size:13px;color:var(--color-neutral-600)">mmHg · 脉搏 72</span>
+                <span style="margin-top:4px;padding:5px 14px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-800);font-size:13px;font-weight:700">一切平稳,放心</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:12px">
+              <div style="flex:1;background:var(--color-surface);border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--shadow-sm)">
+                <div style="font-size:12px;color:var(--color-neutral-600)">今天</div>
+                <div style="font-family:Caprasimo,system-ui;font-size:26px;color:var(--color-accent-700)">2 次</div>
+                <div style="font-size:12px;color:var(--color-neutral-600)">平均 126/80</div>
+              </div>
+              <div style="flex:1;background:var(--color-surface);border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--shadow-sm)">
+                <div style="font-size:12px;color:var(--color-neutral-600)">本周</div>
+                <div style="font-family:Caprasimo,system-ui;font-size:26px;color:var(--color-accent-2-700)">12 次</div>
+                <div style="font-size:12px;color:var(--color-neutral-600)">比上周更稳</div>
+              </div>
+            </div>
+            <div style="height:60px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;gap:10px;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:18px;box-shadow:var(--shadow-md)">
+              <span style="display:inline-block;width:22px;height:22px;background:#fff7ef;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/heart-pulse.svg') center / contain no-repeat"></span>现在测一次</div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="2b 记录日历" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text)">
+          <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">记录日历</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:38px;height:38px;border-radius:50%;background:var(--color-surface);display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:17px;height:17px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span></div>
+                <span style="font-size:15px;font-weight:700;padding:0 4px">2026年7月</span>
+                <div style="width:38px;height:38px;border-radius:50%;background:var(--color-surface);display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:17px;height:17px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;background:var(--color-accent-2-200);border-radius:999px;padding:10px 18px">
+              <span style="display:inline-block;width:18px;height:18px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/sun.svg') center / contain no-repeat"></span>
+              <span style="font-size:13px;font-weight:600;color:var(--color-accent-2-900)">7 月你已经记录了 12 天,真不错</span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 14px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:12px;color:var(--color-neutral-600);text-align:center">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;justify-items:center">
+                <span></span><span></span><span></span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">1</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">2</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">3</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">4</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">5</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">6</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">7</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">8</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">9</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">10</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">11</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">12</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">13</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">14</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">15</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">16</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">17</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">18</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">19</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">20</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">21</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-300);color:var(--color-accent-900);font-weight:700">22</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">23</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">24</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-2-300);color:var(--color-accent-2-900);font-weight:700">25</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--color-accent-600);color:#fff7ef;font-weight:700;box-shadow:var(--shadow-sm)">26</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">27</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">28</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">29</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">30</span>
+                <span style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--color-neutral-500)">31</span>
+              </div>
+              <div style="display:flex;gap:14px;font-size:11px;color:var(--color-neutral-600);padding:4px 6px 0">
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-300)"></i>有记录</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-300)"></i>含偏高读数</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-600)"></i>选中</span>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline">
+                <span style="font-size:16px;font-weight:700">7月26日 · 2 次测量</span>
+                <span style="font-size:13px;color:var(--color-neutral-600)">当天平均 128 / 82</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;background:var(--color-neutral-100);border-radius:20px;padding:12px 16px">
+                <div><div style="font-size:14px;font-weight:700">08:12 · 晨起</div><div style="font-size:12px;color:var(--color-neutral-600)">脉搏 72 次/分</div></div>
+                <div style="display:flex;align-items:center;gap:10px"><span style="font-family:Caprasimo,system-ui;font-size:20px;color:var(--color-accent-700)">128/82</span><span style="padding:4px 10px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-800);font-size:12px;font-weight:700">正常</span></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;background:var(--color-neutral-100);border-radius:20px;padding:12px 16px">
+                <div><div style="font-size:14px;font-weight:700">21:40 · 睡前</div><div style="font-size:12px;color:var(--color-neutral-600)">脉搏 68 次/分</div></div>
+                <div style="display:flex;align-items:center;gap:10px"><span style="font-family:Caprasimo,system-ui;font-size:20px;color:var(--color-accent-700)">124/79</span><span style="padding:4px 10px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-800);font-size:12px;font-weight:700">正常</span></div>
+              </div>
+            </div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-800);font-size:13px;font-weight:700">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;color:var(--color-neutral-600);font-size:13px">
+              <span style="display:inline-block;width:19px;height:19px;background:var(--color-neutral-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+      </div>
+    </div>
+
+    <div class="dv-opt" id="2c">
+      <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>大字同行 —— 适老化优先:更大的字、更高对比、把趋势翻译成一句话</div>
+      <div style="display:flex;gap:20px">
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="2c 测量首页" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-neutral-900)">
+          <div style="flex:1;overflow:auto;padding:18px 20px 0;display:flex;flex-direction:column;gap:18px">
+            <div>
+              <div style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:34px;line-height:1.2">今天好呀</div>
+              <div style="font-size:16px;color:var(--color-neutral-700);margin-top:4px">7月26日 星期日</div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:24px;display:flex;flex-direction:column;gap:12px">
+              <div style="font-size:17px;font-weight:700">最近一次 · 今早 8:12</div>
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <span style="font-family:Caprasimo,system-ui;font-size:68px;line-height:1;color:var(--color-accent-800)">128/82</span>
+              </div>
+              <div style="font-size:16px;color:var(--color-neutral-700)">单位 mmHg · 脉搏 72</div>
+              <div style="display:flex">
+                <span style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-900);font-size:16px;font-weight:700">
+                  <span style="display:inline-block;width:19px;height:19px;background:var(--color-accent-2-900);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/circle-check.svg') center / contain no-repeat"></span>血压正常</span>
+              </div>
+            </div>
+            <div style="height:68px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;gap:12px;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:21px;box-shadow:var(--shadow-md)">
+              <span style="display:inline-block;width:26px;height:26px;background:#fff7ef;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>记一次血压</div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:22px 24px;display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:17px;font-weight:700">今天</div>
+              <div style="font-size:18px;line-height:1.6">已经测了 <b style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-800)">2</b> 次<br>平均 <b style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-800)">126/80</b>,和昨天差不多</div>
+              <a href="#2c" style="font-size:17px;font-weight:700;color:var(--color-accent-700);text-decoration:none">查看今天的记录 →</a>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px">
+              <span style="display:inline-block;width:24px;height:24px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/bell.svg') center / contain no-repeat"></span>
+              <span style="font-size:15px;color:var(--color-accent-2-900);line-height:1.5">晚上 9 点会提醒你再测一次,别担心忘记。</span>
+            </div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-900);font-size:15px;font-weight:700">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-accent-900);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;color:var(--color-neutral-700);font-size:15px">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-neutral-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;color:var(--color-neutral-700);font-size:15px">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-neutral-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;color:var(--color-neutral-700);font-size:15px">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-neutral-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+        <div data-screen-label="2c 趋势" style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-neutral-900)">
+          <div style="flex:1;overflow:auto;padding:18px 20px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:30px">最近的变化</div>
+            <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:20px 24px;font-size:19px;line-height:1.7;color:var(--color-accent-2-900)">
+              这 7 天平均 <b style="font-family:Caprasimo,system-ui;font-size:24px">126/80</b>,比上一周低了一点,<b>整体很平稳</b>。
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;background:var(--color-neutral-100);border-radius:999px;padding:5px;gap:4px">
+                <span style="flex:1;text-align:center;padding:10px 0;border-radius:999px;background:var(--color-accent);color:#fff7ef;font-size:15px;font-weight:700">近 7 天</span>
+                <span style="flex:1;text-align:center;padding:10px 0;border-radius:999px;color:var(--color-neutral-700);font-size:15px">近 30 天</span>
+                <span style="flex:1;text-align:center;padding:10px 0;border-radius:999px;color:var(--color-neutral-700);font-size:15px">全部</span>
+              </div>
+              <svg viewBox="0 0 340 170" style="width:100%;height:auto">
+                <line x1="10" y1="45" x2="330" y2="45" stroke="#c0b6a5" stroke-width="1.5" stroke-dasharray="5 5"></line>
+                <polyline points="20,70 70,58 120,76 170,62 220,54 270,66 320,50" fill="none" stroke="#c67139" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                <polyline points="20,130 70,122 120,136 170,126 220,118 270,128 320,114" fill="none" stroke="#7a8a5e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                <circle cx="320" cy="50" r="7" fill="#c67139"></circle>
+                <circle cx="320" cy="114" r="7" fill="#7a8a5e"></circle>
+              </svg>
+              <div style="display:flex;gap:18px;font-size:14px;color:var(--color-neutral-700)">
+                <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:50%;background:var(--color-accent)"></i>收缩压(高压)</span>
+                <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:50%;background:var(--color-accent-2)"></i>舒张压(低压)</span>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:16px 20px;box-shadow:var(--shadow-sm)"><div style="font-size:14px;color:var(--color-neutral-700)">最高一次</div><div style="font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800)">138/90</div></div>
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:16px 20px;box-shadow:var(--shadow-sm)"><div style="font-size:14px;color:var(--color-neutral-700)">最低一次</div><div style="font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-2-800)">118/76</div></div>
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:16px 20px;box-shadow:var(--shadow-sm)"><div style="font-size:14px;color:var(--color-neutral-700)">测量次数</div><div style="font-family:Caprasimo,system-ui;font-size:24px">12 次</div></div>
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:16px 20px;box-shadow:var(--shadow-sm)"><div style="font-size:14px;color:var(--color-neutral-700)">高风险读数</div><div style="font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-2-800)">0 次</div></div>
+            </div>
+            <div style="font-size:14px;color:var(--color-neutral-600);padding:0 4px 8px">短期变化仅供观察,不代表医学结论。</div>
+          </div>
+          <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm)">
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;color:var(--color-neutral-700);font-size:15px">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-neutral-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span>测量</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;color:var(--color-neutral-700);font-size:15px">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-neutral-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span>历史</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;background:var(--color-accent-200);color:var(--color-accent-900);font-size:15px;font-weight:700">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-accent-900);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span>趋势</div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:48px;border-radius:999px;color:var(--color-neutral-700);font-size:15px">
+              <span style="display:inline-block;width:21px;height:21px;background:var(--color-neutral-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span>设置</div>
+          </div>
+        </div>
+      </x-import>
+      </div>
+    </div>
+  </div>
+  <p class="dv-next">下一步可以说:"按 <a class="dv-oid" href="#2a">2a</a> 的方向把五个页面全部做完" · "喜欢 <a class="dv-oid" href="#2b">2b</a> 的圆盘但要 <a class="dv-oid" href="#2c">2c</a> 的大字" · "换一批新方向"</p>
+</section>
+<section class="dv-turn" id="t1">
+  <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">现状复刻 · Material 3 蓝色主题(对照基准)</span></div>
+  <div class="dv-opts">
+
+    <div class="dv-opt" id="1a">
+      <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>测量首页(DashboardScreen.kt)</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#F8F9FA" hint-size="412px,892px">
+        <div data-screen-label="1a 测量首页" style="height:100%;display:flex;flex-direction:column;background:#F8F9FA;font-family:Roboto,'Noto Sans SC',system-ui,sans-serif;color:#1F2937">
+          <div style="flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font-size:24px;font-weight:700;line-height:32px">血压记录</div>
+              <div style="font-size:14px;line-height:20px;color:#6B7280">记录用于帮助观察变化,不替代医疗诊断。</div>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:16px;font-weight:600">最近一次血压</span>
+                <span style="font-size:14px;color:#6B7280">7月26日 08:12</span>
+              </div>
+              <div style="display:flex;align-items:flex-end;gap:8px">
+                <span style="font-size:36px;font-weight:700;line-height:44px;color:#3B82F6">128 / 82</span>
+                <span style="font-size:16px;line-height:32px">mmHg</span>
+              </div>
+              <div style="display:flex">
+                <span style="display:inline-flex;align-items:center;gap:4px;background:#D1FAE5;color:#065F46;border-radius:24px;padding:4px 12px;font-size:12px;font-weight:600">
+                  <span style="display:inline-block;width:16px;height:16px;background:#065F46;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/circle-check.svg') center / contain no-repeat"></span>正常</span>
+              </div>
+            </div>
+            <div style="height:56px;border-radius:16px;background:#3B82F6;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+              <span style="display:inline-block;width:24px;height:24px;background:#fff;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>新增测量</div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:16px;font-weight:600">今日概览</span>
+              <span style="font-size:16px;font-weight:600">今天已测量 2 次</span>
+              <span style="font-size:14px">今日平均 126 / 80 mmHg</span>
+              <div style="display:flex;align-items:center;gap:4px;color:#3B82F6;font-size:14px;font-weight:500;padding:8px 0">
+                <span style="display:inline-block;width:18px;height:18px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/calendar.svg') center / contain no-repeat"></span>查看今天记录</div>
+            </div>
+          </div>
+          <div style="height:80px;background:#fff;display:flex;align-items:center;box-shadow:0 -1px 0 #F3F4F6">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;border-radius:16px;background:#D1FAE5;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#065F46;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;font-weight:600;color:#1F2937">测量</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">历史</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">趋势</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">设置</span></div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="1b">
+      <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>新增测量(AddMeasurementScreen.kt)</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#F8F9FA" hint-size="412px,892px">
+        <div data-screen-label="1b 新增测量" style="height:100%;display:flex;flex-direction:column;background:#F8F9FA;font-family:Roboto,'Noto Sans SC',system-ui,sans-serif;color:#1F2937">
+          <div style="display:flex;align-items:center;gap:16px;height:64px;padding:0 16px">
+            <div style="width:48px;height:48px;border-radius:8px;background:#F3F4F6;display:flex;align-items:center;justify-content:center">
+              <span style="display:inline-block;width:22px;height:22px;background:#1F2937;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span></div>
+            <span style="font-size:20px;font-weight:600">新增测量</span>
+          </div>
+          <div style="flex:1;overflow:auto;padding:0 16px;display:flex;flex-direction:column;gap:16px">
+            <span style="font-size:16px;font-weight:600">测量日期和时间</span>
+            <div style="display:flex;gap:8px">
+              <div style="flex:1;height:40px;border-radius:20px;border:1px solid #E5E7EB;color:#3B82F6;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:500">
+                <span style="display:inline-block;width:17px;height:17px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/calendar.svg') center / contain no-repeat"></span>2026年7月26日</div>
+              <div style="flex:1;height:40px;border-radius:20px;border:1px solid #E5E7EB;color:#3B82F6;display:flex;align-items:center;justify-content:center;gap:6px;font-size:14px;font-weight:500">
+                <span style="display:inline-block;width:17px;height:17px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/clock.svg') center / contain no-repeat"></span>08:12</div>
+            </div>
+            <span style="font-size:16px;font-weight:600">测量场景</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <span style="padding:7px 14px;border-radius:8px;background:#D1FAE5;color:#065F46;font-size:14px;font-weight:500">晨起</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">睡前</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">居家安静</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">运动后</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">其他</span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:16px;font-weight:600">第1组</span>
+              <div style="display:flex;gap:8px">
+                <div style="flex:1;position:relative;height:56px;border:1px solid #E5E7EB;border-radius:4px;display:flex;align-items:center;padding:0 14px;font-size:16px">128<span style="position:absolute;top:-8px;left:10px;background:#fff;padding:0 4px;font-size:12px;color:#6B7280">收缩压</span></div>
+                <div style="flex:1;position:relative;height:56px;border:1px solid #E5E7EB;border-radius:4px;display:flex;align-items:center;padding:0 14px;font-size:16px">82<span style="position:absolute;top:-8px;left:10px;background:#fff;padding:0 4px;font-size:12px;color:#6B7280">舒张压</span></div>
+                <div style="flex:1;position:relative;height:56px;border:1px solid #E5E7EB;border-radius:4px;display:flex;align-items:center;padding:0 14px;font-size:16px">72<span style="position:absolute;top:-8px;left:10px;background:#fff;padding:0 4px;font-size:12px;color:#6B7280">脉搏</span></div>
+              </div>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:12px">
+              <span style="font-size:16px;font-weight:600">第2组</span>
+              <div style="display:flex;gap:8px">
+                <div style="flex:1;position:relative;height:56px;border:1px solid #E5E7EB;border-radius:4px"><span style="position:absolute;top:18px;left:14px;font-size:16px;color:#6B7280">收缩压</span></div>
+                <div style="flex:1;position:relative;height:56px;border:1px solid #E5E7EB;border-radius:4px"><span style="position:absolute;top:18px;left:14px;font-size:16px;color:#6B7280">舒张压</span></div>
+                <div style="flex:1;position:relative;height:56px;border:1px solid #E5E7EB;border-radius:4px"><span style="position:absolute;top:18px;left:14px;font-size:16px;color:#6B7280">脉搏</span></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:4px;color:#3B82F6;font-size:14px;font-weight:500;padding:6px 0">
+              <span style="display:inline-block;width:18px;height:18px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>添加一组</div>
+            <span style="font-size:16px;font-weight:600">伴随症状</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <span style="padding:7px 14px;border-radius:8px;background:#D1FAE5;color:#065F46;font-size:14px;font-weight:500">无症状</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">头痛</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">头晕</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">心悸</span>
+              <span style="padding:7px 14px;border-radius:8px;border:1px solid #E5E7EB;color:#6B7280;font-size:14px">胸闷或胸痛</span>
+            </div>
+            <div style="position:relative;min-height:96px;border:1px solid #E5E7EB;border-radius:4px"><span style="position:absolute;top:14px;left:14px;font-size:16px;color:#6B7280">备注或"其他"补充说明</span></div>
+          </div>
+          <div style="background:#fff;padding:8px 16px 12px">
+            <div style="height:56px;border-radius:16px;background:#3B82F6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600">保存记录</div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="1c">
+      <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>历史 · 日历模式(HistoryScreen.kt)</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#F8F9FA" hint-size="412px,892px">
+        <div data-screen-label="1c 历史" style="height:100%;display:flex;flex-direction:column;background:#F8F9FA;font-family:Roboto,'Noto Sans SC',system-ui,sans-serif;color:#1F2937">
+          <div style="display:flex;align-items:center;height:64px;padding:0 16px"><span style="font-size:20px;font-weight:600">历史记录</span></div>
+          <div style="flex:1;overflow:auto;padding:0 16px 24px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;gap:4px;background:#F3F4F6;border-radius:24px;padding:4px">
+              <div style="flex:1;height:48px;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#3B82F6">日历</div>
+              <div style="flex:1;height:48px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;color:#6B7280">近期</div>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="display:inline-block;width:24px;height:24px;background:#1F2937;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span>
+                <span style="display:flex;align-items:center;gap:6px;color:#3B82F6;font-size:16px;font-weight:700">
+                  <span style="display:inline-block;width:18px;height:18px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/calendar.svg') center / contain no-repeat"></span>
+                  <span style="color:#1F2937">2026年7月</span></span>
+                <span style="display:inline-block;width:24px;height:24px;background:#1F2937;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);font-size:12px;font-weight:500;color:#6B7280;text-align:center;padding:4px 0">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);row-gap:4px">
+                <span></span><span></span><span></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">1</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">2</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">3<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">4</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">5</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">6</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">7<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">8</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">9</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">10<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">11</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">12</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">13</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">14<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">15<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">16</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">17</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">18<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">19</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">20<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">21<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:14px;font-weight:600">22<span style="display:inline-block;width:10px;height:10px;background:#EF4444;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/triangle-alert.svg') center / contain no-repeat"></span></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">23</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">24<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600">25<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:14px;font-weight:600;background:#E0E7FF;border:1px solid #3B82F6;border-radius:8px;color:#1E3A8A;margin:2px">26<i style="width:5px;height:5px;border-radius:50%;background:#3B82F6"></i></span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">27</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">28</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">29</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">30</span>
+                <span style="height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;color:rgba(31,41,55,.38)">31</span>
+              </div>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:20px;font-weight:600">2026年7月26日</span>
+              <span style="font-size:14px;color:#6B7280">共 2 次测量</span>
+              <span style="font-size:16px;font-weight:600">当天平均 128 / 82 mmHg</span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:16px;font-weight:600">08:12</span>
+                <span style="display:inline-flex;align-items:center;gap:4px;background:#D1FAE5;color:#065F46;border-radius:24px;padding:4px 12px;font-size:12px;font-weight:600">
+                  <span style="display:inline-block;width:16px;height:16px;background:#065F46;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/circle-check.svg') center / contain no-repeat"></span>正常</span>
+              </div>
+              <div style="display:flex;align-items:flex-end;gap:8px"><span style="font-size:24px;font-weight:700;color:#3B82F6">128 / 82</span><span style="font-size:14px;line-height:28px">mmHg</span></div>
+              <span style="font-size:14px;color:#6B7280">脉搏 72 次/分 · 晨起</span>
+            </div>
+          </div>
+          <div style="height:80px;background:#fff;display:flex;align-items:center;box-shadow:0 -1px 0 #F3F4F6">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">测量</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;border-radius:16px;background:#D1FAE5;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#065F46;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;font-weight:600;color:#1F2937">历史</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">趋势</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">设置</span></div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="1d">
+      <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>趋势(TrendScreen.kt)</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#F8F9FA" hint-size="412px,892px">
+        <div data-screen-label="1d 趋势" style="height:100%;display:flex;flex-direction:column;background:#F8F9FA;font-family:Roboto,'Noto Sans SC',system-ui,sans-serif;color:#1F2937">
+          <div style="flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:14px">
+            <span style="font-size:24px;font-weight:700">血压趋势分析</span>
+            <span style="font-size:12px;color:#6B7280">横轴按真实时间排列;双指缩放、拖动平移,双击图表恢复完整范围。</span>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:8px;font-size:14px">
+              <span style="font-size:16px;font-weight:600">趋势文字摘要</span>
+              <span>测量次数:12 次</span>
+              <span>周期平均:126 / 80 mmHg</span>
+              <span>最高值:138 / 90 mmHg</span>
+              <span>最低值:118 / 76 mmHg</span>
+              <span>高风险次数:0 次</span>
+              <span>与上一周期平均相比:-2 / -1 mmHg</span>
+              <span style="font-size:12px;color:#6B7280">短期变化仅供记录观察,不代表医学结论。</span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:24px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;gap:4px;background:#F3F4F6;border-radius:18px;padding:4px">
+                <div style="flex:1;height:48px;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.1);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#3B82F6">近7天</div>
+                <div style="flex:1;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#6B7280">近30天</div>
+                <div style="flex:1;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#6B7280">全部</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:16px;font-weight:600">最近7天</span>
+                <span style="font-size:12px;color:#6B7280">12 次测量</span>
+              </div>
+              <div style="display:flex;gap:4px;background:#F3F4F6;border-radius:18px;padding:4px">
+                <div style="flex:1;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#6B7280">收缩压</div>
+                <div style="flex:1;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#6B7280">舒张压</div>
+                <div style="flex:1;height:48px;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.1);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#3B82F6">双曲线</div>
+              </div>
+              <svg viewBox="0 0 340 180" style="width:100%;height:auto">
+                <line x1="30" y1="20" x2="30" y2="150" stroke="#E5E7EB" stroke-width="1"></line>
+                <line x1="30" y1="150" x2="330" y2="150" stroke="#E5E7EB" stroke-width="1"></line>
+                <line x1="30" y1="50" x2="330" y2="50" stroke="#F59E0B" stroke-width="1" stroke-dasharray="4 4"></line>
+                <polyline points="45,72 90,60 135,80 180,64 225,56 270,68 315,52" fill="none" stroke="#3B82F6" stroke-width="2.5"></polyline>
+                <circle cx="45" cy="72" r="3.5" fill="#3B82F6"></circle><circle cx="90" cy="60" r="3.5" fill="#3B82F6"></circle><circle cx="135" cy="80" r="3.5" fill="#3B82F6"></circle><circle cx="180" cy="64" r="3.5" fill="#3B82F6"></circle><circle cx="225" cy="56" r="3.5" fill="#3B82F6"></circle><circle cx="270" cy="68" r="3.5" fill="#3B82F6"></circle><circle cx="315" cy="52" r="3.5" fill="#3B82F6"></circle>
+                <polyline points="45,124 90,118 135,130 180,122 225,114 270,124 315,110" fill="none" stroke="#10B981" stroke-width="2.5"></polyline>
+                <circle cx="45" cy="124" r="3.5" fill="#10B981"></circle><circle cx="90" cy="118" r="3.5" fill="#10B981"></circle><circle cx="135" cy="130" r="3.5" fill="#10B981"></circle><circle cx="180" cy="122" r="3.5" fill="#10B981"></circle><circle cx="225" cy="114" r="3.5" fill="#10B981"></circle><circle cx="270" cy="124" r="3.5" fill="#10B981"></circle><circle cx="315" cy="110" r="3.5" fill="#10B981"></circle>
+                <text x="26" y="54" font-size="9" fill="#6B7280" text-anchor="end">140</text>
+                <text x="26" y="103" font-size="9" fill="#6B7280" text-anchor="end">110</text>
+                <text x="26" y="153" font-size="9" fill="#6B7280" text-anchor="end">80</text>
+                <text x="45" y="166" font-size="9" fill="#6B7280" text-anchor="middle">7-20</text>
+                <text x="180" y="166" font-size="9" fill="#6B7280" text-anchor="middle">7-23</text>
+                <text x="315" y="166" font-size="9" fill="#6B7280" text-anchor="middle">7-26</text>
+              </svg>
+              <span style="font-size:12px;color:#6B7280">样本区间:2026-07-20 - 2026-07-26</span>
+            </div>
+          </div>
+          <div style="height:80px;background:#fff;display:flex;align-items:center;box-shadow:0 -1px 0 #F3F4F6">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">测量</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">历史</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;border-radius:16px;background:#D1FAE5;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#065F46;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;font-weight:600;color:#1F2937">趋势</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">设置</span></div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+
+    <div class="dv-opt" id="1e">
+      <div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a>设置(SettingsScreen.kt)</div>
+      <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#F8F9FA" hint-size="412px,892px">
+        <div data-screen-label="1e 设置" style="height:100%;display:flex;flex-direction:column;background:#F8F9FA;font-family:Roboto,'Noto Sans SC',system-ui,sans-serif;color:#1F2937">
+          <div style="display:flex;align-items:center;height:64px;padding:0 16px"><span style="font-size:20px;font-weight:600">设置</span></div>
+          <div style="flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:16px">
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;align-items:center;gap:16px">
+              <span style="display:inline-block;width:28px;height:28px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/user.svg') center / contain no-repeat"></span>
+              <div style="flex:1"><div style="font-size:16px;font-weight:600">用户资料</div><div style="font-size:14px;color:#6B7280">目标血压、年龄、性别等基础信息</div></div>
+              <span style="display:inline-block;width:22px;height:22px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;align-items:center;gap:16px">
+              <span style="display:inline-block;width:28px;height:28px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/bell.svg') center / contain no-repeat"></span>
+              <div style="flex:1"><div style="font-size:16px;font-weight:600">提醒设置</div><div style="font-size:14px;color:#6B7280">晨间/晚间测量提醒和提醒时间</div></div>
+              <span style="display:inline-block;width:22px;height:22px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;align-items:center;gap:16px">
+              <span style="display:inline-block;width:28px;height:28px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/eye.svg') center / contain no-repeat"></span>
+              <div style="flex:1"><div style="font-size:16px;font-weight:600">显示设置</div><div style="font-size:14px;color:#6B7280">趋势图、高风险提醒和大字显示</div></div>
+              <span style="display:inline-block;width:22px;height:22px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;align-items:center;gap:16px">
+              <span style="display:inline-block;width:28px;height:28px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/folder.svg') center / contain no-repeat"></span>
+              <div style="flex:1"><div style="font-size:16px;font-weight:600">数据管理</div><div style="font-size:14px;color:#6B7280">导出 Excel、本地备份和清空数据</div></div>
+              <span style="display:inline-block;width:22px;height:22px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+            <div style="background:#fff;border:1px solid #F3F4F6;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:16px;display:flex;align-items:center;gap:16px">
+              <span style="display:inline-block;width:28px;height:28px;background:#3B82F6;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/info.svg') center / contain no-repeat"></span>
+              <div style="flex:1"><div style="font-size:16px;font-weight:600">应用说明与更新说明</div><div style="font-size:14px;color:#6B7280">查看应用功能、使用边界和版本变化</div></div>
+              <span style="display:inline-block;width:22px;height:22px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span>
+            </div>
+          </div>
+          <div style="height:80px;background:#fff;display:flex;align-items:center;box-shadow:0 -1px 0 #F3F4F6">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/house.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">测量</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/history.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">历史</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#6B7280;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chart-line.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;color:#6B7280">趋势</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="width:64px;height:32px;border-radius:16px;background:#D1FAE5;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:24px;height:24px;background:#065F46;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/settings.svg') center / contain no-repeat"></span></span>
+              <span style="font-size:12px;font-weight:600;color:#1F2937">设置</span></div>
+          </div>
+        </div>
+      </x-import>
+    </div>
+  </div>
+</section>
+</x-dc>
+</body>
+</html>

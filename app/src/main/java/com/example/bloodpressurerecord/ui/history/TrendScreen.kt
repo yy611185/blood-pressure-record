@@ -39,11 +39,16 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.ui.common.AppBackButton
-import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.Sage200
+import com.example.bloodpressurerecord.ui.theme.Sage800
+import com.example.bloodpressurerecord.ui.theme.Sage900
+import com.example.bloodpressurerecord.ui.theme.Terracotta800
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -75,7 +80,7 @@ fun TrendScreen(
                 AppBackButton(onClick = onBack)
             }
             Text(
-                text = "血压趋势分析",
+                text = "血压趋势",
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(start = if (onBack != null) 4.dp else 0.dp)
             )
@@ -86,7 +91,7 @@ fun TrendScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        TrendTextSummaryCard(uiState.summary)
+        TrendTextSummaryCard(uiState.summary, uiState.range)
 
         TrendCard(
             series = uiState.series,
@@ -103,36 +108,105 @@ fun TrendScreen(
 }
 
 @Composable
-private fun TrendTextSummaryCard(summary: TrendTextSummary) {
-    DataCard {
-        if (summary.recordCount == 0) {
-            Text("当前周期暂无足够数据生成文字摘要。")
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("趋势文字摘要", style = MaterialTheme.typography.titleMedium)
-                Text("测量次数：${summary.recordCount} 次")
-                Text("周期平均：${summary.averageSystolic} / ${summary.averageDiastolic} mmHg")
-                Text("最高值：${summary.highestSystolic} / ${summary.highestDiastolic} mmHg")
-                Text("最低值：${summary.lowestSystolic} / ${summary.lowestDiastolic} mmHg")
-                Text("高风险次数：${summary.highRiskCount} 次")
-                val changeText = if (summary.systolicChange == null || summary.diastolicChange == null) {
-                    "与上一周期相比：数据不足"
-                } else {
-                    "与上一周期平均相比：" +
-                        "${summary.systolicChange.withSign()} / ${summary.diastolicChange.withSign()} mmHg"
-                }
-                Text(changeText)
+private fun TrendTextSummaryCard(summary: TrendTextSummary, range: TrendRange) {
+    // 暖阳设计 3d：口语化摘要（鼠尾草绿底）+ 最高/最低两列统计卡。
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = Sage200),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (summary.recordCount == 0) {
                 Text(
-                    "短期变化仅供记录观察，不代表医学结论。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    "这个周期还没有记录，先测一次吧。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Sage900
+                )
+            } else {
+                Text(
+                    buildString {
+                        append(range.title)
+                        append("测了 ${summary.recordCount} 次，平均 ")
+                        append("${summary.averageSystolic} / ${summary.averageDiastolic} mmHg")
+                        val sysChange = summary.systolicChange
+                        val diaChange = summary.diastolicChange
+                        if (sysChange != null && diaChange != null) {
+                            append(
+                                when {
+                                    sysChange < 0 && diaChange <= 0 ->
+                                        "，比上一周期低了 ${-sysChange}/${-diaChange}，整体在往好的方向走。"
+                                    sysChange > 0 || diaChange > 0 ->
+                                        "，比上一周期高了 ${sysChange.coerceAtLeast(0)}/${diaChange.coerceAtLeast(0)}，注意休息与复测。"
+                                    else -> "，和上一周期基本持平，整体很平稳。"
+                                }
+                            )
+                        } else {
+                            append("，整体情况以图表为准。")
+                        }
+                        if (summary.highRiskCount > 0) {
+                            append("其中 ${summary.highRiskCount} 次含高风险读数。")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp),
+                    color = Sage900
                 )
             }
         }
     }
+
+    if (summary.recordCount > 0) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ExtremeStatCard(
+                title = "最高一次",
+                value = "${summary.highestSystolic}/${summary.highestDiastolic}",
+                valueColor = Terracotta800,
+                modifier = Modifier.weight(1f)
+            )
+            ExtremeStatCard(
+                title = "最低一次",
+                value = "${summary.lowestSystolic}/${summary.lowestDiastolic}",
+                valueColor = Sage800,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
 }
 
-private fun Int.withSign(): String = if (this > 0) "+$this" else toString()
+@Composable
+private fun ExtremeStatCard(
+    title: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                fontSize = 22.sp,
+                fontFamily = NumberFontFamily,
+                color = valueColor
+            )
+        }
+    }
+}
 
 @Composable
 private fun TrendCard(
@@ -158,7 +232,8 @@ private fun TrendCard(
                 items = TrendRange.entries,
                 selected = selectedRange,
                 label = { it.label },
-                onSelected = onRangeChange
+                onSelected = onRangeChange,
+                accent = true
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
@@ -218,13 +293,18 @@ private fun <T> SegmentedControl(
     items: List<T>,
     selected: T,
     label: (T) -> String,
-    onSelected: (T) -> Unit
+    onSelected: (T) -> Unit,
+    accent: Boolean = false
 ) {
+    // 暖阳设计：范围分段用陶土橙实底（accent），指标分段用 surface + 投影。
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
-            .padding(4.dp),
+            .background(
+                MaterialTheme.colorScheme.surfaceContainerHighest,
+                MaterialTheme.shapes.large
+            )
+            .padding(5.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         items.forEach { item ->
@@ -232,11 +312,19 @@ private fun <T> SegmentedControl(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .shadow(if (isSelected) 2.dp else 0.dp, RoundedCornerShape(14.dp), clip = false)
+                    .heightIn(min = 44.dp)
+                    .shadow(
+                        if (isSelected && !accent) 2.dp else 0.dp,
+                        MaterialTheme.shapes.large,
+                        clip = false
+                    )
                     .background(
-                        if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
-                        RoundedCornerShape(14.dp)
+                        when {
+                            isSelected && accent -> MaterialTheme.colorScheme.primary
+                            isSelected -> MaterialTheme.colorScheme.surface
+                            else -> Color.Transparent
+                        },
+                        MaterialTheme.shapes.large
                     )
                     .semantics {
                         role = Role.RadioButton
@@ -248,12 +336,12 @@ private fun <T> SegmentedControl(
                 Text(
                     text = label(item),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    color = when {
+                        isSelected && accent -> MaterialTheme.colorScheme.onPrimary
+                        isSelected -> Terracotta800
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
         }
@@ -361,11 +449,5 @@ private fun formatSessionTime(measuredAt: Long): String {
         .format(DateTimeFormatter.ofPattern("HH:mm"))
 }
 
-private fun String.toChineseCategory(): String = when (uppercase()) {
-    "NORMAL" -> "正常"
-    "ELEVATED" -> "偏高"
-    "STAGE1" -> "1期偏高"
-    "STAGE2" -> "2期偏高"
-    "SEVERE" -> "重度偏高"
-    else -> this
-}
+private fun String.toChineseCategory(): String =
+    com.example.bloodpressurerecord.ui.common.CategoryPresentation.label(this)

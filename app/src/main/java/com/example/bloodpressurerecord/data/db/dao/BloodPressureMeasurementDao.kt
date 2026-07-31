@@ -7,7 +7,6 @@ import androidx.room.Query
 import androidx.room.RawQuery
 import com.example.bloodpressurerecord.data.db.entity.BloodPressureMeasurementEntity
 import androidx.sqlite.db.SupportSQLiteQuery
-import kotlinx.coroutines.flow.Flow
 
 data class LegacyBloodPressureRecordRow(
     val id: Long,
@@ -22,9 +21,6 @@ data class LegacyBloodPressureRecordRow(
 
 @Dao
 interface BloodPressureMeasurementDao {
-    @Query("SELECT * FROM bp_measurements ORDER BY measuredAtMillis DESC")
-    fun observeAll(): Flow<List<BloodPressureMeasurementEntity>>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: BloodPressureMeasurementEntity)
 

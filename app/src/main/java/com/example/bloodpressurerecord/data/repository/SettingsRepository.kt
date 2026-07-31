@@ -26,6 +26,8 @@ interface SettingsRepository {
 
     suspend fun setShowTrendChart(enabled: Boolean)
 
+    suspend fun setDiscardFirstReading(enabled: Boolean)
+
     suspend fun setMorningReminderEnabled(enabled: Boolean)
 
     suspend fun setMorningReminderTime(value: String)
@@ -33,6 +35,10 @@ interface SettingsRepository {
     suspend fun setEveningReminderEnabled(enabled: Boolean)
 
     suspend fun setEveningReminderTime(value: String)
+
+    suspend fun setMedicationReminderEnabled(enabled: Boolean)
+
+    suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean)
 
     suspend fun refreshReminders()
 

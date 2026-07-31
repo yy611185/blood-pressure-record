@@ -3,6 +3,8 @@ package com.example.bloodpressurerecord.ui.settings
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
+import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,10 +18,14 @@ data class SettingsUiState(
     val isLargeTextEnabled: Boolean = true,
     val highRiskAlertEnabled: Boolean = true,
     val showTrendChart: Boolean = true,
+    val discardFirstReading: Boolean = false,
     val morningReminderEnabled: Boolean = false,
     val morningReminderTime: String = "07:30",
     val eveningReminderEnabled: Boolean = false,
     val eveningReminderTime: String = "21:00",
+    val medicationReminderEnabled: Boolean = true,
+    val medicationCalendarSyncEnabled: Boolean = false,
+    val medications: List<MedicationWithTimes> = emptyList(),
     val name: String = "",
     val ageText: String = "",
     val gender: String = "",
@@ -37,13 +43,21 @@ data class SettingsUiState(
 )
 
 class SettingsViewModel(
-    private val repository: SettingsRepository
+    private val repository: SettingsRepository,
+    private val medicationRepository: MedicationRepository? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
     private var isProfileDirty: Boolean = false
 
     init {
+        medicationRepository?.let { medRepo ->
+            viewModelScope.launch {
+                medRepo.observeMedicationsWithTimes().collectLatest { meds ->
+                    _uiState.update { it.copy(medications = meds) }
+                }
+            }
+        }
         viewModelScope.launch {
             repository.observeSettings().collectLatest { bundle ->
                 _uiState.update { state ->
@@ -56,10 +70,14 @@ class SettingsViewModel(
                         isLargeTextEnabled = bundle.appSettings.largeTextEnabled,
                         highRiskAlertEnabled = bundle.appSettings.highRiskAlertEnabled,
                         showTrendChart = bundle.appSettings.showTrendChart,
+                        discardFirstReading = bundle.appSettings.discardFirstReading,
                         morningReminderEnabled = bundle.appSettings.morningReminderEnabled,
                         morningReminderTime = bundle.appSettings.morningReminderTime,
                         eveningReminderEnabled = bundle.appSettings.eveningReminderEnabled,
                         eveningReminderTime = bundle.appSettings.eveningReminderTime,
+                        medicationReminderEnabled = bundle.appSettings.medicationReminderEnabled,
+                        medicationCalendarSyncEnabled =
+                            bundle.appSettings.medicationCalendarSyncEnabled,
                         name = profileName,
                         ageText = profileAge,
                         gender = profileGender,
@@ -84,6 +102,10 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setShowTrendChart(enabled) }
     }
 
+    fun setDiscardFirstReading(enabled: Boolean) {
+        viewModelScope.launch { repository.setDiscardFirstReading(enabled) }
+    }
+
     fun setMorningReminderEnabled(enabled: Boolean) {
         viewModelScope.launch {
             repository.setMorningReminderEnabled(enabled)
@@ -102,32 +124,194 @@ class SettingsViewModel(
         }
     }
 
+    fun setMedicationReminderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching { repository.setMedicationReminderEnabled(enabled) }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(message = if (enabled) "服药提醒已启用。" else "服药提醒已关闭。")
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(message = "服药提醒更新失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
+    fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching { repository.setMedicationCalendarSyncEnabled(enabled) }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            message = if (enabled) {
+                                "已开启同步：服药时间会写入系统日历的每日日程。"
+                            } else {
+                                "已关闭日历同步，本应用创建的服药日程已清理。"
+                            }
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(message = "日历同步失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
+    fun addMedication(name: String, dosage: String, times: List<String>) {
+        if (name.isBlank()) {
+            _uiState.update { it.copy(message = "请填写药品名称。") }
+            return
+        }
+        if (times.isEmpty()) {
+            _uiState.update { it.copy(message = "请至少添加一个服药时间。") }
+            return
+        }
+        val medRepo = medicationRepository ?: return
+        viewModelScope.launch {
+            medRepo.addMedication(name, dosage, times)
+                .onSuccess {
+                    runCatching { repository.refreshReminders() }
+                        .onSuccess {
+                            _uiState.update { it.copy(message = "已添加「${name.trim()}」。") }
+                        }
+                        .onFailure { throwable ->
+                            _uiState.update {
+                                it.copy(
+                                    message = "药品已保存，但提醒同步失败：" +
+                                        (throwable.message ?: "请稍后在提醒设置中重试")
+                                )
+                            }
+                        }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(message = "添加失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
+    fun updateMedication(id: Long, name: String, dosage: String, times: List<String>) {
+        if (name.isBlank()) {
+            _uiState.update { it.copy(message = "请填写药品名称。") }
+            return
+        }
+        if (times.isEmpty()) {
+            _uiState.update { it.copy(message = "请至少添加一个服药时间。") }
+            return
+        }
+        val medRepo = medicationRepository ?: return
+        viewModelScope.launch {
+            medRepo.updateMedication(id, name, dosage, enabled = true, times = times)
+                .onSuccess {
+                    runCatching { repository.refreshReminders() }
+                        .onSuccess {
+                            _uiState.update { it.copy(message = "「${name.trim()}」已更新。") }
+                        }
+                        .onFailure { throwable ->
+                            _uiState.update {
+                                it.copy(
+                                    message = "药品已更新，但提醒同步失败：" +
+                                        (throwable.message ?: "请稍后在提醒设置中重试")
+                                )
+                            }
+                        }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(message = "保存失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
+    fun deleteMedication(id: Long) {
+        val medRepo = medicationRepository ?: return
+        viewModelScope.launch {
+            medRepo.deleteMedication(id)
+                .onSuccess {
+                    runCatching { repository.refreshReminders() }
+                        .onSuccess {
+                            _uiState.update { it.copy(message = "药品已删除。") }
+                        }
+                        .onFailure { throwable ->
+                            _uiState.update {
+                                it.copy(
+                                    message = "药品已删除，但提醒同步失败：" +
+                                        (throwable.message ?: "请稍后在提醒设置中重试")
+                                )
+                            }
+                        }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(message = "删除失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
     fun showReminderAuthorizationRequired(message: String) {
         _uiState.update { it.copy(message = message) }
     }
 
     fun refreshReminders() {
-        viewModelScope.launch { repository.refreshReminders() }
+        viewModelScope.launch {
+            runCatching { repository.refreshReminders() }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(message = "提醒刷新失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
     }
 
     fun updateMorningTime(value: String) {
-        _uiState.update { it.copy(morningReminderTime = value) }
-    }
-
-    fun updateEveningTime(value: String) {
-        _uiState.update { it.copy(eveningReminderTime = value) }
-    }
-
-    fun saveReminderTimes() {
-        val state = _uiState.value
-        if (!isTimeTextValid(state.morningReminderTime) || !isTimeTextValid(state.eveningReminderTime)) {
+        if (!isTimeTextValid(value)) {
             _uiState.update { it.copy(message = "提醒时间格式应为 HH:mm，例如 07:30。") }
             return
         }
+        if (_uiState.value.morningReminderTime == value) return
+        _uiState.update { it.copy(morningReminderTime = value) }
         viewModelScope.launch {
-            repository.setMorningReminderTime(state.morningReminderTime)
-            repository.setEveningReminderTime(state.eveningReminderTime)
-            _uiState.update { it.copy(message = "提醒时间已保存。") }
+            runCatching { repository.setMorningReminderTime(value) }
+                .onSuccess {
+                    _uiState.update { state ->
+                        state.copy(message = "晨间提醒时间已自动保存。")
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update { state ->
+                        state.copy(message = "自动保存失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
+    fun updateEveningTime(value: String) {
+        if (!isTimeTextValid(value)) {
+            _uiState.update { it.copy(message = "提醒时间格式应为 HH:mm，例如 19:30。") }
+            return
+        }
+        if (_uiState.value.eveningReminderTime == value) return
+        _uiState.update { it.copy(eveningReminderTime = value) }
+        viewModelScope.launch {
+            runCatching { repository.setEveningReminderTime(value) }
+                .onSuccess {
+                    _uiState.update { state ->
+                        state.copy(message = "晚间提醒时间已自动保存。")
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update { state ->
+                        state.copy(message = "自动保存失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
         }
     }
 

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="stylesheet" href="_ds/organic-d8732d73-eb6c-409f-80c7-f13bb9c3ec61/styles.css">
+<script src="_ds/organic-d8732d73-eb6c-409f-80c7-f13bb9c3ec61/_ds_bundle.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f0eee9;font-family:Figtree,'Noto Sans SC',system-ui,sans-serif}
+a{color:#8c491a}a:hover{color:#643312}
+input,textarea{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:14px;padding:26px 0 40px">
+  <div style="font:600 13px system-ui;color:rgba(0,0,0,.6)">「暖阳打卡」交互原型 —— 可切换标签、点日历、填表保存 · <a href="血压记录 · 温暖化设计.dc.html">返回设计稿</a></div>
+  <x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" bg="#f5ead8" hint-size="412px,892px">
+    <div style="height:100%;display:flex;flex-direction:column;background:var(--color-bg);font-family:Figtree,'Noto Sans SC',system-ui,sans-serif;color:var(--color-text);position:relative">
+
+      <sc-if value="{{ showHome }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:16px">
+          <div>
+            <div style="font-size:13px;color:var(--color-neutral-600)">7月26日 星期日</div>
+            <div style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:30px;line-height:1.2;margin-top:2px">{{ greeting }}</div>
+            <div style="font-size:13px;color:var(--color-neutral-600);margin-top:4px">记录是为了帮你观察变化,身体的感觉你最懂。</div>
+          </div>
+          <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:15px;font-weight:600">最近一次血压</span>
+              <span style="font-size:13px;color:var(--color-neutral-600)">{{ latestTime }}</span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span style="font-family:Caprasimo,system-ui;font-size:54px;line-height:1;color:var(--color-accent-700)">{{ latestBP }}</span>
+              <span style="font-size:14px;color:var(--color-neutral-600)">mmHg</span>
+            </div>
+            <div style="display:flex">
+              <span style="{{ latestPillStyle }}"><span style="{{ latestPillIcon }}"></span>{{ latestStatus }}</span>
+            </div>
+          </div>
+          <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;display:flex;align-items:center;gap:14px">
+            <span style="display:inline-block;width:26px;height:26px;background:var(--color-accent-600);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/flame.svg') center / contain no-repeat"></span>
+            <div style="flex:1">
+              <div style="font-size:15px;font-weight:700;color:var(--color-accent-2-900)">已连续记录 {{ streak }} 天</div>
+              <div style="font-size:12px;color:var(--color-accent-2-800)">坚持得很好,为自己鼓个掌</div>
+            </div>
+            <div style="display:flex;gap:5px">
+              <sc-for list="{{ weekDots }}" as="d" hint-placeholder-count="7"><span style="{{ d.style }}"></span></sc-for>
+            </div>
+          </div>
+          <div onClick="{{ openAdd }}" style="height:60px;border-radius:999px;background:var(--color-accent);color:#fff7ef;display:flex;align-items:center;justify-content:center;gap:10px;font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:18px;box-shadow:var(--shadow-md);cursor:pointer;flex:none" style-hover="background:var(--color-accent-600)" style-active="background:var(--color-accent-700)">
+            <span style="display:inline-block;width:22px;height:22px;background:#fff7ef;mask:url('https://unpkg.com/lucide-static@0.462.0/icons/plus.svg') center / contain no-repeat"></span>
+            记一次血压
+          </div>
+          <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:15px;font-weight:600">今日概览</span>
+            <span style="font-size:14px">今天已经测了 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">{{ todayCount }}</b> 次,平均 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">{{ todayAvg }}</b> mmHg</span>
+            <span style="font-size:13px;color:var(--color-neutral-600)">{{ todayComment }}</span>
+            <span onClick="{{ goToday }}" style="font-size:14px;font-weight:600;color:var(--color-accent-700);cursor:pointer">看看今天的记录 →</span>
+          </div>
+          <div style="height:4px;flex:none"></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showAdd }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:14px;padding:10px 18px;flex:none">
+          <div onClick="{{ closeAdd }}" style="width:44px;height:44px;border-radius:50%;background:var(--color-surface);display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:var(--color-neutral-300)">
+            <span style="display:inline-block;width:20px;height:20px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span>
+          </div>
+          <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:22px">记一次血压</span>
+        </div>
+        <div style="flex:1;overflow:auto;padding:4px 18px 0;display:flex;flex-direction:column;gap:16px">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:14px;font-weight:600">什么时候测的?</span>
+            <div style="display:flex;gap:10px">
+              <div style="flex:1;height:50px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+                <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/calendar.svg') center / contain no-repeat"></span>7月26日 今天</div>
+              <div style="flex:1;height:50px;border-radius:999px;background:var(--color-neutral-100);border:1px solid var(--color-divider);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:600">
+                <span style="display:inline-block;width:17px;height:17px;background:var(--color-accent-700);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/clock.svg') center / contain no-repeat"></span>09:30</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:14px;font-weight:600">在什么情况下测的?</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{ sceneChips }}" as="c" hint-placeholder-count="5"><span onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</span></sc-for>
+            </div>
+          </div>
+          <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+            <span style="font-size:15px;font-weight:700">第 1 组</span>
+            <div style="display:flex;gap:10px">
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--color-neutral-600)">收缩压(高压)</span>
+                <input value="{{ r1s }}" onChange="{{ setR1s }}" inputMode="numeric" placeholder="--" style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);text-align:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800);outline:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)">
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--color-neutral-600)">舒张压(低压)</span>
+                <input value="{{ r1d }}" onChange="{{ setR1d }}" inputMode="numeric" placeholder="--" style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);text-align:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800);outline:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)">
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--color-neutral-600)">脉搏</span>
+                <input value="{{ r1p }}" onChange="{{ setR1p }}" inputMode="numeric" placeholder="--" style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);text-align:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800);outline:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)">
+              </div>
+            </div>
+          </div>
+          <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:12px">
+            <span style="font-size:15px;font-weight:700">第 2 组</span>
+            <div style="display:flex;gap:10px">
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--color-neutral-600)">收缩压(高压)</span>
+                <input value="{{ r2s }}" onChange="{{ setR2s }}" inputMode="numeric" placeholder="--" style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);text-align:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800);outline:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)">
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--color-neutral-600)">舒张压(低压)</span>
+                <input value="{{ r2d }}" onChange="{{ setR2d }}" inputMode="numeric" placeholder="--" style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);text-align:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800);outline:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)">
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--color-neutral-600)">脉搏</span>
+                <input value="{{ r2p }}" onChange="{{ setR2p }}" inputMode="numeric" placeholder="--" style="width:100%;height:56px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);text-align:center;font-family:Caprasimo,system-ui;font-size:24px;color:var(--color-accent-800);outline:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)">
+              </div>
+            </div>
+            <div style="font-size:12px;color:var(--color-neutral-600)">建议连续测两次,间隔 1-2 分钟,取平均更准。</div>
+          </div>
+          <sc-if value="{{ hasAvg }}" hint-placeholder-val="{{ false }}">
+            <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;display:flex;flex-direction:column;gap:6px;flex:none">
+              <span style="font-size:13px;font-weight:600;color:var(--color-accent-2-800)">{{ avgTitle }}</span>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:Caprasimo,system-ui;font-size:32px;line-height:1;color:var(--color-accent-2-900)">{{ avgBP }}</span>
+                <span style="font-size:13px;color:var(--color-accent-2-800)">mmHg{{ avgPulseText }}</span>
+              </div>
+              <span style="font-size:13px;color:var(--color-accent-2-900)">{{ avgNote }}</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ relBad }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;color:var(--color-accent-700);padding:0 4px">低压要小于高压,再看一眼数字?</div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:14px;font-weight:600">有没有不舒服?</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{ symptomChips }}" as="c" hint-placeholder-count="6"><span onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</span></sc-for>
+            </div>
+          </div>
+          <textarea value="{{ note }}" onChange="{{ setNote }}" placeholder="想补充点什么?比如「早饭前测的」(选填)" style="min-height:80px;border-radius:20px;background:var(--color-neutral-100);border:1px solid var(--color-divider);padding:14px 16px;font-size:14px;color:var(--color-text);outline:none;resize:none;box-sizing:border-box" style-focus="border-color:var(--color-accent)"></textarea>
+          <div style="height:6px;flex:none"></div>
+        </div>
+        <div style="padding:10px 18px 12px;background:var(--color-surface);border-radius:28px 28px 0 0;box-shadow:var(--shadow-md);display:flex;flex-direction:column;gap:6px;flex:none">
+          <sc-if value="{{ saveHint }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:12px;color:var(--color-neutral-600);text-align:center">{{ saveHint }}</span>
+          </sc-if>
+          <div onClick="{{ onSave }}" style="{{ saveStyle }}">{{ saveLabel }}</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showHistory }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+          <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">历史记录</span>
+          <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+            <div onClick="{{ setCal }}" style="{{ calSegStyle }}">日历</div>
+            <div onClick="{{ setRecent }}" style="{{ recentSegStyle }}">近期</div>
+          </div>
+          <sc-if value="{{ isCal }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:center;gap:10px;background:var(--color-accent-2-200);border-radius:999px;padding:10px 18px;flex:none">
+              <span style="display:inline-block;width:18px;height:18px;background:var(--color-accent-2-800);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/sun.svg') center / contain no-repeat"></span>
+              <span style="font-size:13px;font-weight:600;color:var(--color-accent-2-900)">{{ monthPillText }}</span>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 14px;display:flex;flex-direction:column;gap:8px;flex:none">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px">
+                <div onClick="{{ monthTap }}" style="width:38px;height:38px;border-radius:50%;background:var(--color-neutral-100);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="display:inline-block;width:17px;height:17px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-left.svg') center / contain no-repeat"></span></div>
+                <span style="font-size:16px;font-weight:700">2026年7月</span>
+                <div onClick="{{ monthTap }}" style="width:38px;height:38px;border-radius:50%;background:var(--color-neutral-100);display:flex;align-items:center;justify-content:center;cursor:pointer"><span style="display:inline-block;width:17px;height:17px;background:var(--color-text);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat"></span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);font-size:12px;color:var(--color-neutral-600);text-align:center;padding:2px 0">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;justify-items:center">
+                <sc-for list="{{ calCells }}" as="c" hint-placeholder-count="35"><span onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.day }}</span></sc-for>
+              </div>
+              <div style="display:flex;gap:14px;font-size:11px;color:var(--color-neutral-600);padding:4px 6px 0">
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2-300)"></i>有记录</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-300)"></i>含偏高读数</span>
+                <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-600)"></i>选中</span>
+              </div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;flex-direction:column;gap:4px;flex:none">
+              <span style="font-size:16px;font-weight:700">{{ selDayTitle }}</span>
+              <span style="font-size:13px;color:var(--color-neutral-600)">当天平均 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">{{ selDayAvg }}</b> mmHg</span>
+            </div>
+            <sc-for list="{{ selDayRecords }}" as="r" hint-placeholder-count="2">
+              <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex:none">
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <span style="font-size:14px;font-weight:700">{{ r.time }} · {{ r.scene }}</span>
+                  <span style="font-size:12px;color:var(--color-neutral-600)">脉搏 {{ r.pulseText }} 次/分</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-700)">{{ r.bp }}</span>
+                  <span style="{{ r.pillStyle }}">{{ r.status }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </sc-if>
+          <sc-if value="{{ isRecent }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+              <div onClick="{{ setWeek }}" style="{{ weekSegStyle }}">本周</div>
+              <div onClick="{{ setMonth }}" style="{{ monthSegStyle }}">本月</div>
+            </div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:18px 20px;display:flex;flex-direction:column;gap:6px;flex:none">
+              <span style="font-size:16px;font-weight:700">{{ recentTitle }}</span>
+              <span style="font-size:12px;color:var(--color-neutral-600)">{{ recentRange }}</span>
+              <span style="font-size:14px">测了 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">{{ recentCount }}</b> 次,平均 <b style="font-family:Caprasimo,system-ui;color:var(--color-accent-700)">{{ recentAvg }}</b> mmHg · 脉搏 {{ recentPulse }}</span>
+              <span style="font-size:13px;color:var(--color-neutral-600)">{{ recentHighText }}</span>
+            </div>
+            <sc-for list="{{ recentItems }}" as="it" hint-placeholder-count="6">
+              <sc-if value="{{ it.h }}"><div style="font-size:14px;font-weight:700;padding:6px 2px 0">{{ it.h }}</div></sc-if>
+              <sc-if value="{{ it.isRec }}">
+                <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex:none">
+                  <div style="display:flex;flex-direction:column;gap:3px">
+                    <span style="font-size:14px;font-weight:700">{{ it.time }} · {{ it.scene }}</span>
+                    <span style="font-size:12px;color:var(--color-neutral-600)">脉搏 {{ it.pulseText }} 次/分</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-700)">{{ it.bp }}</span>
+                    <span style="{{ it.pillStyle }}">{{ it.status }}</span>
+                  </div>
+                </div>
+              </sc-if>
+            </sc-for>
+          </sc-if>
+          <div style="height:4px;flex:none"></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showTrend }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+          <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">血压趋势</span>
+          <div style="background:var(--color-accent-2-200);border-radius:var(--radius-lg);padding:16px 20px;font-size:14px;line-height:1.7;color:var(--color-accent-2-900);flex:none">
+            {{ tTitle }}测了 <b>{{ tCount }}</b> 次,平均 <b style="font-family:Caprasimo,system-ui;font-size:17px">{{ tAvg }}</b> mmHg,{{ tChange }}
+          </div>
+          <div style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:20px;display:flex;flex-direction:column;gap:14px;flex:none">
+            <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+              <sc-for list="{{ rangeSeg }}" as="s" hint-placeholder-count="3"><span onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</span></sc-for>
+            </div>
+            <div style="display:flex;gap:4px;background:var(--color-neutral-200);border-radius:999px;padding:5px">
+              <sc-for list="{{ metricSeg }}" as="s" hint-placeholder-count="3"><span onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</span></sc-for>
+            </div>
+            <svg viewBox="0 0 340 185" style="width:100%;height:auto">
+              <line x1="30" y1="46" x2="330" y2="46" stroke="#c0b6a5" stroke-width="1.5" stroke-dasharray="5 5"></line>
+              <sc-if value="{{ showSysLine }}" hint-placeholder-val="{{ true }}">
+                <polyline points="{{ sysPts }}" fill="none" stroke="#c67139" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                <sc-for list="{{ sysDots }}" as="d" hint-placeholder-count="7"><circle cx="{{ d.cx }}" cy="{{ d.cy }}" r="4.5" fill="#c67139"></circle></sc-for>
+              </sc-if>
+              <sc-if value="{{ showDiaLine }}" hint-placeholder-val="{{ true }}">
+                <polyline points="{{ diaPts }}" fill="none" stroke="#7a8a5e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                <sc-for list="{{ diaDots }}" as="d" hint-placeholder-count="7"><circle cx="{{ d.cx }}" cy="{{ d.cy }}" r="4.5" fill="#7a8a5e"></circle></sc-for>
+              </sc-if>
+              <text x="26" y="50" font-size="9" fill="#82796a" text-anchor="end">140</text>
+              <text x="26" y="102" font-size="9" fill="#82796a" text-anchor="end">100</text>
+              <text x="26" y="154" font-size="9" fill="#82796a" text-anchor="end">60</text>
+              <sc-for list="{{ axisLabels }}" as="a" hint-placeholder-count="3"><text x="{{ a.x }}" y="172" font-size="9" fill="#82796a" text-anchor="middle">{{ a.t }}</text></sc-for>
+            </svg>
+            <div style="display:flex;gap:16px;font-size:12px;color:var(--color-neutral-600)">
+              <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent)"></i>收缩压(高压)</span>
+              <span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:50%;background:var(--color-accent-2)"></i>舒张压(低压)</span>
+              <span style="display:flex;align-items:center;gap:5px"><i style="width:12px;height:2px;background:var(--color-neutral-400)"></i>目标线 140</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:none">
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:var(--shadow-sm)"><div style="font-size:12px;color:var(--color-neutral-600)">最高一次</div><div style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-800)">{{ tHigh }}</div></div>
+            <div style="background:var(--color-surface);border-radius:var(--radius-lg);padding:14px 18px;box-shadow:var(--shadow-sm)"><div style="font-size:12px;color:var(--color-neutral-600)">最低一次</div><div style="font-family:Caprasimo,system-ui;font-size:22px;color:var(--color-accent-2-800)">{{ tLow }}</div></div>
+          </div>
+          <div style="font-size:12px;color:var(--color-neutral-600);padding:0 4px 8px">短期变化仅供观察,不代表医学结论。</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;overflow:auto;padding:16px 18px 0;display:flex;flex-direction:column;gap:14px">
+          <span style="font-family:Caprasimo,'ZCOOL KuaiLe',system-ui;font-size:24px">设置</span>
+          <sc-for list="{{ settingItems }}" as="s" hint-placeholder-count="5">
+            <div onClick="{{ s.onClick }}" style="background:var(--color-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 20px;display:flex;align-items:center;gap:16px;cursor:pointer;flex:none">
+              <span style="{{ s.circleStyle }}"><span style="{{ s.iconStyle }}"></span></span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">{{ s.title }}</div>
+                <div style="font-size:13px;color:var(--color-neutral-600)">{{ s.subtitle }}</div>
+              </div>
+              <span style="display:inline-block;width:20px;height:20px;background:var(--color-neutral-500);mask:url('https://unpkg.com/lucide-static@0.462.0/icons/chevron-right.svg') center / contain no-repeat;flex:none"></span>
+            </div>
+          </sc-for>
+          <div style="font-size:12px;color:var(--color-neutral-600);text-align:center;padding:6px 0 10px">数据只保存在这台手机上,不会上传。</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showNav }}" hint-placeholder-val="{{ true }}">
+        <div style="margin:10px 16px 8px;background:var(--color-surface);border-radius:999px;padding:8px;display:flex;gap:4px;box-shadow:var(--shadow-sm);flex:none">
+          <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="4">
+            <div onClick="{{ n.onClick }}" style="{{ n.wrapStyle }}"><span style="{{ n.iconStyle }}"></span>{{ n.label }}</div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:var(--color-neutral-900);color:#f9f4ed;border-radius:999px;padding:10px 22px;font-size:14px;box-shadow:var(--shadow-lg);white-space:nowrap;z-index:10">{{ toast }}</div>
+      </sc-if>
+    </div>
+  </x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;470px&quot;,&quot;height&quot;:&quot;980px&quot;},&quot;greetingName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;个性化&quot;},&quot;showTrendTab&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;功能开关&quot;}}">
+class Component extends DCLogic {
+  state = {
+    tab: 'home', adding: false, toast: '',
+    scene: '晨起', symptoms: ['没有,挺好的'], note: '',
+    r1s: '', r1d: '', r1p: '', r2s: '', r2d: '', r2p: '',
+    viewMode: 'cal', period: 'week', selectedDate: '2026-07-26',
+    trendRange: '7', metric: 'both',
+    records: [
+      { date: '2026-07-03', time: '08:05', sys: 126, dia: 80, pulse: 70, scene: '晨起' },
+      { date: '2026-07-07', time: '21:30', sys: 124, dia: 79, pulse: 68, scene: '睡前' },
+      { date: '2026-07-10', time: '08:12', sys: 129, dia: 83, pulse: 72, scene: '晨起' },
+      { date: '2026-07-14', time: '08:02', sys: 125, dia: 80, pulse: 71, scene: '晨起' },
+      { date: '2026-07-15', time: '21:45', sys: 122, dia: 78, pulse: 66, scene: '睡前' },
+      { date: '2026-07-18', time: '08:20', sys: 127, dia: 81, pulse: 70, scene: '晨起' },
+      { date: '2026-07-20', time: '08:10', sys: 130, dia: 84, pulse: 73, scene: '晨起' },
+      { date: '2026-07-20', time: '21:50', sys: 125, dia: 80, pulse: 69, scene: '睡前' },
+      { date: '2026-07-21', time: '08:08', sys: 128, dia: 82, pulse: 71, scene: '晨起' },
+      { date: '2026-07-22', time: '08:15', sys: 145, dia: 95, pulse: 78, scene: '晨起' },
+      { date: '2026-07-23', time: '21:35', sys: 124, dia: 79, pulse: 67, scene: '睡前' },
+      { date: '2026-07-24', time: '08:06', sys: 126, dia: 80, pulse: 70, scene: '晨起' },
+      { date: '2026-07-25', time: '21:40', sys: 123, dia: 78, pulse: 67, scene: '睡前' },
+      { date: '2026-07-26', time: '08:12', sys: 128, dia: 82, pulse: 72, scene: '晨起' }
+    ]
+  };
+  C = { n100:'#f9f4ed', n200:'#eee7db', n300:'#dcd3c4', n400:'#c0b6a5', n500:'#a19786', n600:'#82796a', n700:'#645c50', n900:'#2e2b25', a:'#c67139', a200:'#ffe1d0', a300:'#ffc6a5', a600:'#b2622d', a700:'#8c491a', a800:'#643312', a900:'#402310', s2:'#7a8a5e', s200:'#e1eecc', s300:'#ccdbb2', s500:'#8fa073', s600:'#728157', s800:'#3d472b', s900:'#272e1b', surface:'#ebddc5', cream:'#fff7ef', divider:'rgba(32,30,29,.16)' };
+  icon(name, size, color) {
+    const m = `url(https://unpkg.com/lucide-static@0.462.0/icons/${name}.svg) center / contain no-repeat`;
+    return { display:'inline-block', width:size, height:size, background:color, WebkitMask:m, mask:m, flex:'none' };
+  }
+  isHigh(r) { return r.sys >= 140 || r.dia >= 90; }
+  fmtD(d) { return `${+d.slice(5,7)}月${+d.slice(8,10)}日`; }
+  wd(d) { return ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'][new Date(d + 'T00:00:00').getDay()]; }
+  avgOf(list, k) { const v = list.filter(r => r[k] != null); return v.length ? Math.round(v.reduce((a,r) => a + r[k], 0) / v.length) : null; }
+  toastMsg(m) { clearTimeout(this._t); this.setState({ toast: m }); this._t = setTimeout(() => this.setState({ toast: '' }), 2400); }
+  num(k) { return e => this.setState({ [k]: e.target.value.replace(/\D/g, '').slice(0, 3) }); }
+  pillOf(high) { const C = this.C; return { display:'inline-flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:999, background: high ? C.a200 : C.s200, color: high ? C.a800 : C.s800, fontSize:12, fontWeight:700, whiteSpace:'nowrap' }; }
+  chip(sel) { const C = this.C; return sel
+    ? { padding:'9px 18px', borderRadius:999, background:C.a, color:C.cream, fontSize:13, fontWeight:600, cursor:'pointer' }
+    : { padding:'9px 18px', borderRadius:999, background:C.n100, border:`1px solid ${C.divider}`, color:C.n700, fontSize:13, cursor:'pointer' }; }
+  seg(active, accent) { const C = this.C; const base = { flex:1, height:40, borderRadius:999, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, cursor:'pointer' };
+    if (!active) return { ...base, color:C.n600 };
+    return accent ? { ...base, background:C.a, color:C.cream, fontWeight:700 } : { ...base, background:C.surface, boxShadow:'0 1px 2px rgba(46,43,37,.14)', color:C.a800, fontWeight:700 }; }
+  toggleSym(l) {
+    let s = [...this.state.symptoms];
+    if (l === '没有,挺好的') s = ['没有,挺好的'];
+    else { s = s.filter(x => x !== '没有,挺好的'); s = s.includes(l) ? s.filter(x => x !== l) : [...s, l]; if (!s.length) s = ['没有,挺好的']; }
+    this.setState({ symptoms: s });
+  }
+  renderVals() {
+    const st = this.state, C = this.C, today = '2026-07-26';
+    const showTrendTab = this.props.showTrendTab ?? true;
+    const name = (this.props.greetingName || '').trim();
+    const recs = [...st.records].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const latest = recs[recs.length - 1];
+    const latestHigh = this.isHigh(latest);
+    const todayRecs = recs.filter(r => r.date === today);
+    const recSet = new Set(recs.map(r => r.date));
+    const highSet = new Set(recs.filter(r => this.isHigh(r)).map(r => r.date));
+    let streak = 0;
+    for (let d = 26; d >= 1; d--) { if (recSet.has(`2026-07-${String(d).padStart(2,'0')}`)) streak++; else break; }
+    const weekDots = [20,21,22,23,24,25,26].map(d => ({ style: recSet.has(`2026-07-${d}`)
+      ? { width:10, height:10, borderRadius:'50%', background:C.s600 }
+      : { width:10, height:10, borderRadius:'50%', border:`1.5px solid ${C.s500}`, boxSizing:'border-box' } }));
+    // add form
+    const g = [['r1s','r1d','r1p'], ['r2s','r2d','r2p']].map(ks => ks.map(k => parseInt(st[k], 10) || 0));
+    const comp = g.filter(a => a[0] > 0 && a[1] > 0);
+    const relBad = comp.some(a => a[1] >= a[0]);
+    const okComp = comp.filter(a => a[1] < a[0]);
+    const hasAvg = okComp.length >= 1;
+    const avgS = hasAvg ? Math.round(okComp.reduce((x,a) => x + a[0], 0) / okComp.length) : 0;
+    const avgD = hasAvg ? Math.round(okComp.reduce((x,a) => x + a[1], 0) / okComp.length) : 0;
+    const pulses = g.map(a => a[2]).filter(v => v > 0);
+    const avgP = pulses.length ? Math.round(pulses.reduce((x,v) => x + v, 0) / pulses.length) : null;
+    const canSave = okComp.length >= 2 && !relBad;
+    const saveHint = canSave ? '' : (relBad ? '低压要小于高压,检查一下再保存' : '把两组的高压和低压都填好,就可以保存啦');
+    const scenes = ['晨起','睡前','居家安静','运动后','其他'];
+    const symptoms = ['没有,挺好的','头痛','头晕','心悸','胸闷或胸痛','视物模糊','其他'];
+    // calendar
+    const sel = st.selectedDate;
+    const calCells = [ {day:'', style:{width:38,height:38}, onClick:undefined}, {day:'', style:{width:38,height:38}, onClick:undefined}, {day:'', style:{width:38,height:38}, onClick:undefined} ];
+    for (let d = 1; d <= 31; d++) {
+      const ds = `2026-07-${String(d).padStart(2,'0')}`;
+      const base = { width:38, height:38, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14 };
+      if (!recSet.has(ds)) calCells.push({ day:String(d), style:{ ...base, color:C.n500 }, onClick:undefined });
+      else calCells.push({ day:String(d), onClick: () => this.setState({ selectedDate: ds }),
+        style: { ...base, fontWeight:700, cursor:'pointer',
+          background: ds === sel ? C.a600 : (highSet.has(ds) ? C.a300 : C.s300),
+          color: ds === sel ? C.cream : (highSet.has(ds) ? C.a900 : C.s900),
+          boxShadow: ds === sel ? '0 1px 2px rgba(46,43,37,.2)' : 'none' } });
+    }
+    const selRecs = recs.filter(r => r.date === sel);
+    const rowOf = r => ({ time:r.time, scene:r.scene, bp:`${r.sys}/${r.dia}`, pulseText: r.pulse != null ? String(r.pulse) : '--',
+      status: this.isHigh(r) ? '偏高' : '正常', pillStyle: this.pillOf(this.isHigh(r)), isRec:true });
+    // recent
+    const weekStart = '2026-07-20';
+    const perRecs = (st.period === 'week' ? recs.filter(r => r.date >= weekStart) : recs).slice().reverse();
+    const recentItems = []; let cur = '';
+    perRecs.forEach(r => { if (r.date !== cur) { cur = r.date; recentItems.push({ h: `${this.fmtD(r.date)} ${this.wd(r.date)}` }); } recentItems.push(rowOf(r)); });
+    const perList = st.period === 'week' ? recs.filter(r => r.date >= weekStart) : recs;
+    const highCount = perList.filter(r => this.isHigh(r)).length;
+    // trend
+    const tRecs = st.trendRange === '7' ? recs.filter(r => r.date >= weekStart) : recs;
+    const dayMap = new Map();
+    tRecs.forEach(r => { const e = dayMap.get(r.date) || { s:0, d:0, n:0 }; e.s += r.sys; e.d += r.dia; e.n++; dayMap.set(r.date, e); });
+    const days = [...dayMap.keys()].sort();
+    const X = i => days.length > 1 ? Math.round(45 + i * 270 / (days.length - 1)) : 180;
+    const Y = v => Math.round((150 - (v - 60) * 1.3) * 10) / 10;
+    const sysDots = days.map((dt, i) => ({ cx: X(i), cy: Y(dayMap.get(dt).s / dayMap.get(dt).n) }));
+    const diaDots = days.map((dt, i) => ({ cx: X(i), cy: Y(dayMap.get(dt).d / dayMap.get(dt).n) }));
+    const axisIdx = days.length > 2 ? [0, Math.floor((days.length - 1) / 2), days.length - 1] : days.map((_, i) => i);
+    const axisLabels = axisIdx.map(i => ({ x: X(i), t: `${+days[i].slice(5,7)}-${+days[i].slice(8,10)}` }));
+    const tAvgS = this.avgOf(tRecs, 'sys'), tAvgD = this.avgOf(tRecs, 'dia');
+    const hiRec = tRecs.reduce((a,r) => r.sys > a.sys ? r : a, tRecs[0]);
+    const loRec = tRecs.reduce((a,r) => r.sys < a.sys ? r : a, tRecs[0]);
+    const tHighCount = tRecs.filter(r => this.isHigh(r)).length;
+    let tChange;
+    if (st.trendRange === '7') {
+      const prev = recs.filter(r => r.date >= '2026-07-13' && r.date < weekStart);
+      if (!prev.length) tChange = '上一周数据不足,先安心记录。';
+      else {
+        const ds = tAvgS - this.avgOf(prev, 'sys'), dd = tAvgD - this.avgOf(prev, 'dia');
+        tChange = (ds <= 0 && dd <= 0) ? `比上一周低了 ${-ds}/${-dd},整体很平稳。`
+          : `比上一周高了一点(${ds > 0 ? '+' : ''}${ds}/${dd > 0 ? '+' : ''}${dd}),多留意休息。`;
+      }
+    } else tChange = tHighCount > 0 ? `其中 ${tHighCount} 次偏高,已在日历里标出。` : '没有偏高读数,记录得很规律。';
+    // nav
+    const tabs = [ { k:'home', l:'测量', i:'house' }, { k:'history', l:'历史', i:'history' },
+      ...(showTrendTab ? [{ k:'trend', l:'趋势', i:'chart-line' }] : []), { k:'settings', l:'设置', i:'settings' } ];
+    const navItems = tabs.map(t => { const act = !st.adding && st.tab === t.k; return {
+      label: t.l, onClick: () => this.setState({ tab: t.k, adding: false }),
+      wrapStyle: { flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:6, height:44, borderRadius:999, fontSize:13, cursor:'pointer',
+        background: act ? C.a200 : 'transparent', color: act ? C.a800 : C.n600, fontWeight: act ? 700 : 400 },
+      iconStyle: this.icon(t.i, 19, act ? C.a800 : C.n600) }; });
+    const settingsDef = [ ['user','用户资料','目标血压、年龄、性别等基础信息', C.a200, C.a800], ['bell','提醒设置','晨间/晚间测量提醒和提醒时间', C.s200, C.s800],
+      ['eye','显示设置','趋势图、高风险提醒和大字显示', C.a200, C.a800], ['folder','数据管理','导出 Excel、本地备份和清空数据', C.s200, C.s800],
+      ['info','应用说明与更新说明','查看应用功能、使用边界和版本变化', C.a200, C.a800] ];
+    return {
+      showHome: !st.adding && st.tab === 'home', showAdd: st.adding,
+      showHistory: !st.adding && st.tab === 'history', showTrend: !st.adding && st.tab === 'trend',
+      showSettings: !st.adding && st.tab === 'settings', showNav: !st.adding, toast: st.toast,
+      greeting: name ? `早上好,${name}` : '早上好',
+      latestTime: latest.date === today ? `今天 ${latest.time}` : `${this.fmtD(latest.date)} ${latest.time}`,
+      latestBP: `${latest.sys} / ${latest.dia}`,
+      latestStatus: latestHigh ? '这次偏高,注意休息' : '血压平稳,继续保持',
+      latestPillStyle: { ...this.pillOf(latestHigh), fontSize:13, padding:'6px 14px' },
+      latestPillIcon: this.icon(latestHigh ? 'triangle-alert' : 'circle-check', 15, latestHigh ? C.a800 : C.s800),
+      streak, weekDots,
+      todayCount: todayRecs.length,
+      todayAvg: todayRecs.length ? `${this.avgOf(todayRecs,'sys')} / ${this.avgOf(todayRecs,'dia')}` : '--',
+      todayComment: todayRecs.length ? '和昨天差不多,挺稳的。' : '今天还没测,想起来就记一笔。',
+      openAdd: () => this.setState({ adding: true }),
+      closeAdd: () => this.setState({ adding: false }),
+      goToday: () => this.setState({ tab:'history', viewMode:'cal', selectedDate: today }),
+      r1s: st.r1s, r1d: st.r1d, r1p: st.r1p, r2s: st.r2s, r2d: st.r2d, r2p: st.r2p, note: st.note,
+      setR1s: this.num('r1s'), setR1d: this.num('r1d'), setR1p: this.num('r1p'),
+      setR2s: this.num('r2s'), setR2d: this.num('r2d'), setR2p: this.num('r2p'),
+      setNote: e => this.setState({ note: e.target.value }),
+      sceneChips: scenes.map(l => ({ label:l, onClick: () => this.setState({ scene:l }), style: this.chip(l === st.scene) })),
+      symptomChips: symptoms.map(l => ({ label:l, onClick: () => this.toggleSym(l), style: this.chip(st.symptoms.includes(l)) })),
+      hasAvg, relBad,
+      avgTitle: okComp.length >= 2 ? '两组平均' : '第一组的结果',
+      avgBP: `${avgS} / ${avgD}`,
+      avgPulseText: avgP ? ` · 脉搏 ${avgP}` : '',
+      avgNote: (avgS >= 140 || avgD >= 90) ? '数值偏高,休息几分钟再复测一次会更放心。' : '数值很平稳,记得保持规律作息。',
+      saveHint, saveLabel: '保存这次记录',
+      saveStyle: { height:58, borderRadius:999, display:'flex', alignItems:'center', justifyContent:'center',
+        fontFamily:"Caprasimo,'ZCOOL KuaiLe',system-ui", fontSize:17, cursor: canSave ? 'pointer' : 'default',
+        background: canSave ? C.a : C.n300, color: canSave ? C.cream : C.n600 },
+      onSave: () => {
+        if (!canSave) { this.toastMsg(saveHint); return; }
+        const rec = { date: today, time: '09:30', sys: avgS, dia: avgD, pulse: avgP, scene: st.scene };
+        this.setState({ records: [...st.records, rec], adding: false, tab: 'home',
+          r1s:'', r1d:'', r1p:'', r2s:'', r2d:'', r2p:'', note:'', symptoms:['没有,挺好的'] });
+        this.toastMsg('保存好了,今天也辛苦啦');
+      },
+      isCal: st.viewMode === 'cal', isRecent: st.viewMode === 'recent',
+      setCal: () => this.setState({ viewMode:'cal' }), setRecent: () => this.setState({ viewMode:'recent' }),
+      calSegStyle: { ...this.seg(st.viewMode === 'cal'), height:44, fontSize:14 },
+      recentSegStyle: { ...this.seg(st.viewMode === 'recent'), height:44, fontSize:14 },
+      monthPillText: `7 月你已经记录了 ${recSet.size} 天,真不错`,
+      monthTap: () => this.toastMsg('原型里先只做了 7 月'),
+      calCells,
+      selDayTitle: `${this.fmtD(sel)} · 共 ${selRecs.length} 次测量`,
+      selDayAvg: selRecs.length ? `${this.avgOf(selRecs,'sys')} / ${this.avgOf(selRecs,'dia')}` : '--',
+      selDayRecords: selRecs.map(rowOf),
+      setWeek: () => this.setState({ period:'week' }), setMonth: () => this.setState({ period:'month' }),
+      weekSegStyle: { ...this.seg(st.period === 'week'), height:44, fontSize:14 },
+      monthSegStyle: { ...this.seg(st.period === 'month'), height:44, fontSize:14 },
+      recentTitle: st.period === 'week' ? '本周' : '本月',
+      recentRange: st.period === 'week' ? '2026年7月20日 至 7月26日' : '2026年7月1日 至 7月26日',
+      recentCount: perList.length,
+      recentAvg: `${this.avgOf(perList,'sys')} / ${this.avgOf(perList,'dia')}`,
+      recentPulse: this.avgOf(perList,'pulse') ?? '--',
+      recentHighText: highCount > 0 ? `有 ${highCount} 次偏高,已在日历里标出。` : '没有偏高读数,保持得很好。',
+      recentItems,
+      tTitle: st.trendRange === '7' ? '最近 7 天' : (st.trendRange === '30' ? '最近 30 天' : '全部记录里'),
+      tCount: tRecs.length, tAvg: `${tAvgS} / ${tAvgD}`, tChange,
+      tHigh: `${hiRec.sys}/${hiRec.dia}`, tLow: `${loRec.sys}/${loRec.dia}`,
+      rangeSeg: [['7','近 7 天'], ['30','近 30 天'], ['all','全部']].map(([k,l]) => ({ label:l,
+        onClick: () => this.setState({ trendRange:k }), style: this.seg(st.trendRange === k, true) })),
+      metricSeg: [['sys','收缩压'], ['dia','舒张压'], ['both','双曲线']].map(([k,l]) => ({ label:l,
+        onClick: () => this.setState({ metric:k }), style: this.seg(st.metric === k) })),
+      showSysLine: st.metric !== 'dia', showDiaLine: st.metric !== 'sys',
+      sysPts: sysDots.map(p => `${p.cx},${p.cy}`).join(' '),
+      diaPts: diaDots.map(p => `${p.cx},${p.cy}`).join(' '),
+      sysDots, diaDots, axisLabels,
+      navItems,
+      settingItems: settingsDef.map(([i, title, subtitle, bg, fg]) => ({ title, subtitle,
+        onClick: () => this.toastMsg('这一页原型里先略过啦'),
+        circleStyle: { width:46, height:46, borderRadius:'50%', background:bg, display:'flex', alignItems:'center', justifyContent:'center', flex:'none' },
+        iconStyle: this.icon(i, 22, fg) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

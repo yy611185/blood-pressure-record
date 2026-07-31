@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -25,7 +26,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
@@ -58,15 +59,28 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.example.bloodpressurerecord.R
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.Sage200
+import com.example.bloodpressurerecord.ui.theme.Sage300
+import com.example.bloodpressurerecord.ui.theme.Sage900
+import com.example.bloodpressurerecord.ui.theme.Terracotta300
+import com.example.bloodpressurerecord.ui.theme.Terracotta600
+import com.example.bloodpressurerecord.ui.theme.Terracotta700
+import com.example.bloodpressurerecord.ui.theme.Terracotta800
+import com.example.bloodpressurerecord.ui.theme.Terracotta900
+import com.example.bloodpressurerecord.ui.theme.WarmTextFaint
 import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import java.time.Instant
 import java.time.LocalDate
@@ -110,13 +124,22 @@ fun HistoryScreen(
         }
     }
 
+    val topBarScroll = rememberHideOnScrollState()
+    val listState = rememberLazyListState()
+    // 日历卡较高，快速回滚到列表顶部时部分设备不会再派发足够的反向滚动量。
+    // 以列表真实位置兜底复位，确保“历史记录”标题一定能重新显示。
+    LaunchedEffect(listState.canScrollBackward) {
+        if (!listState.canScrollBackward) topBarScroll.expand()
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .nestedScroll(topBarScroll.nestedScrollConnection)
     ) {
-        AppTopBar(title = stringResource(R.string.history_title))
+        AppTopBar(title = stringResource(R.string.history_title), hideOnScroll = topBarScroll)
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = AppDimensions.pageHorizontalPadding,
@@ -133,6 +156,14 @@ fun HistoryScreen(
             }
 
             if (uiState.viewMode == HistoryViewMode.CALENDAR) {
+                if (uiState.daySummaries.isNotEmpty()) {
+                    item {
+                        MonthEncouragementBar(
+                            month = uiState.displayedMonth.monthValue,
+                            recordedDays = uiState.daySummaries.size
+                        )
+                    }
+                }
                 item {
                 DataCard {
                     CalendarMonth(
@@ -243,6 +274,31 @@ fun HistoryScreen(
 }
 
 @Composable
+private fun MonthEncouragementBar(month: Int, recordedDays: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Sage200, MaterialTheme.shapes.large)
+            .padding(horizontal = AppSpacing.large, vertical = AppSpacing.medium),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Default.WbSunny,
+            contentDescription = null,
+            tint = Terracotta600,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(AppSpacing.small))
+        Text(
+            "$month 月你已经记录了 $recordedDays 天，真不错",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Sage900
+        )
+    }
+}
+
+@Composable
 private fun HistoryModeSelector(
     selected: HistoryViewMode,
     onSelected: (HistoryViewMode) -> Unit
@@ -282,10 +338,10 @@ private fun <T> SelectionRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                MaterialTheme.colorScheme.surfaceVariant,
+                MaterialTheme.colorScheme.surfaceContainerHighest,
                 MaterialTheme.shapes.large
             )
-            .padding(AppSpacing.xSmall),
+            .padding(5.dp),
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
     ) {
         options.forEach { (option, label) ->
@@ -293,8 +349,8 @@ private fun <T> SelectionRow(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = AppDimensions.minimumTouchTarget)
-                    .clip(MaterialTheme.shapes.medium)
+                    .heightIn(min = 44.dp)
+                    .clip(MaterialTheme.shapes.large)
                     .background(
                         if (isSelected) MaterialTheme.colorScheme.surface
                         else Color.Transparent
@@ -309,13 +365,13 @@ private fun <T> SelectionRow(
             ) {
                 Text(
                     label,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     color = if (isSelected) {
-                        MaterialTheme.colorScheme.primary
+                        Terracotta800
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
         }
@@ -388,14 +444,15 @@ private fun CalendarMonth(
     onChooseMonth: () -> Unit,
     onDateSelected: (LocalDate?) -> Unit
 ) {
+    // 与 CalendarMonthLayout 一致：周一开头。
     val weekLabels = listOf(
-        stringResource(R.string.weekday_sunday),
         stringResource(R.string.weekday_monday),
         stringResource(R.string.weekday_tuesday),
         stringResource(R.string.weekday_wednesday),
         stringResource(R.string.weekday_thursday),
         stringResource(R.string.weekday_friday),
-        stringResource(R.string.weekday_saturday)
+        stringResource(R.string.weekday_saturday),
+        stringResource(R.string.weekday_sunday)
     )
     val weeks = remember(month) {
         CalendarMonthLayout.cells(month).chunked(CalendarMonthLayout.COLUMN_COUNT)
@@ -479,6 +536,8 @@ private fun CalendarMonth(
                 }
             }
         }
+
+        CalendarLegend()
     }
 }
 
@@ -505,60 +564,80 @@ internal fun CalendarDay(
             if (selected) append("，已选择")
         }
     }
-    val background = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val contentColor = when {
-        selected -> MaterialTheme.colorScheme.onPrimaryContainer
-        enabled -> MaterialTheme.colorScheme.onSurface
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    // 暖阳设计：38dp 圆形日期，靠底色区分状态。
+    val background = when {
+        selected -> Terracotta600
+        summary?.containsHighRisk == true -> Terracotta300
+        enabled -> Sage300
+        else -> Color.Transparent
     }
-    var dayModifier = modifier
+    val contentColor = when {
+        selected -> Color(0xFFFFF7EF)
+        summary?.containsHighRisk == true -> Terracotta900
+        enabled -> Sage900
+        else -> WarmTextFaint
+    }
+    var cellModifier = modifier
         .heightIn(min = AppDimensions.calendarDayMinHeight)
-        .padding(2.dp)
-        .clip(MaterialTheme.shapes.small)
-        .background(background)
         .semantics {
             contentDescription = description
             role = Role.Button
             this.selected = selected
             if (!enabled) disabled()
         }
-    if (today) {
-        dayModifier = dayModifier.border(
-            BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-            MaterialTheme.shapes.small
-        )
-    }
     if (enabled) {
-        dayModifier = dayModifier.clickable(onClick = onClick)
+        cellModifier = cellModifier.clickable(onClick = onClick)
     }
 
-    Box(dayModifier, contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(cellModifier, contentAlignment = Alignment.Center) {
+        var circleModifier = Modifier
+            .size(AppDimensions.calendarDaySize)
+            .clip(CircleShape)
+            .background(background)
+        if (today) {
+            circleModifier = circleModifier.border(
+                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                CircleShape
+            )
+        }
+        Box(circleModifier, contentAlignment = Alignment.Center) {
             Text(
                 date.dayOfMonth.toString(),
                 style = MaterialTheme.typography.bodyMedium,
                 color = contentColor,
-                fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal
+                fontWeight = if (enabled || selected) FontWeight.Bold else FontWeight.Normal
             )
-            when {
-                summary?.containsHighRisk == true -> Icon(
-                    Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(10.dp)
-                )
-                summary != null -> Box(
-                    Modifier
-                        .size(5.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                )
-                today -> Text(
-                    "今",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
         }
+    }
+}
+
+/** 日历图例：有记录 / 含偏高读数 / 选中。 */
+@Composable
+internal fun CalendarLegend() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = AppSpacing.small),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.large)
+    ) {
+        LegendItem(color = Sage300, label = "有记录")
+        LegendItem(color = Terracotta300, label = "含偏高读数")
+        LegendItem(color = Terracotta600, label = "选中")
+    }
+}
+
+@Composable
+private fun LegendItem(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .background(color, CircleShape)
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -598,55 +677,56 @@ fun HistorySessionCard(
     showDate: Boolean = false
 ) {
     val visualStatus = bloodPressureVisualStatus(
-        category = when (session.categoryText) {
-            "正常" -> "NORMAL"
-            "偏高" -> "ELEVATED"
-            "1级偏高" -> "STAGE1"
-            "2级偏高" -> "STAGE2"
-            else -> session.categoryText
-        },
+        category = session.category,
         containsHighRiskReading = session.containsHighRiskReading
     )
+    // 暖阳设计 3c：紧凑行卡——左侧时间·场景与脉搏，右侧数值与状态药丸。
     DataCard(onClick = onClick) {
-        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    if (showDate) {
-                        "${session.measuredDate.format(DateTimeFormatter.ofPattern("MM-dd"))} " +
-                            session.measuredAtText
-                    } else {
-                        session.measuredAtText
-                    },
-                    style = MaterialTheme.typography.titleMedium
-                )
-                StatusChip(
-                    text = if (session.containsHighRiskReading) "含高风险读数" else session.categoryText,
-                    isAbnormal = visualStatus.name != "NORMAL",
-                    status = visualStatus
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        buildString {
+                            if (showDate) {
+                                append(session.measuredDate.format(DateTimeFormatter.ofPattern("MM-dd")))
+                                append(" ")
+                            }
+                            append(session.measuredAtText)
+                            append(" · ")
+                            append(session.scene)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "脉搏 ${session.avgPulseText} 次/分",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        session.avgBloodPressureText,
+                        fontSize = 22.sp,
+                        fontFamily = NumberFontFamily,
+                        color = Terracotta700
+                    )
+                    StatusChip(
+                        text = if (session.containsHighRiskReading) "含高风险读数" else session.categoryText,
+                        isAbnormal = visualStatus.name != "NORMAL",
+                        status = visualStatus
+                    )
+                }
             }
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    session.avgBloodPressureText.replace("/", " / "),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.width(AppSpacing.small))
-                Text("mmHg", style = MaterialTheme.typography.bodyMedium)
-            }
-            Text(
-                "脉搏 ${session.avgPulseText} 次/分 · ${session.scene}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             if (session.noteSummary != HistoryViewModel.NO_NOTE_TEXT) {
                 Text(
                     session.noteSummary,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )

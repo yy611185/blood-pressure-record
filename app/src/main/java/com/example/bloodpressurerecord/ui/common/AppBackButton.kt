@@ -54,7 +54,7 @@ fun AppBackButton(
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = "返回",
-                tint = Color(0xFF334155)
+                tint = MaterialTheme.colorScheme.onSurface
             )
         }
     }

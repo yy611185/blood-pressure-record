@@ -13,8 +13,13 @@ data class AppSettings(
     val morningReminderTime: String = "07:30",
     val eveningReminderEnabled: Boolean = false,
     val eveningReminderTime: String = "21:00",
-    val defaultScene: String = "居家安静",
-    val lastSuccessfulExportAt: Long? = null
+    /** 计算平均值时弃用第一组读数（家庭自测常用做法）。 */
+    val discardFirstReading: Boolean = false,
+    val lastSuccessfulExportAt: Long? = null,
+    /** 服药提醒总开关。默认开启：添加药品后立即生效，符合用户预期。 */
+    val medicationReminderEnabled: Boolean = true,
+    /** 服药提醒同步写入系统日历（需要日历读写权限）。 */
+    val medicationCalendarSyncEnabled: Boolean = false
 )
 
 class AppSettingsStore(
@@ -29,8 +34,11 @@ class AppSettingsStore(
             morningReminderTime = prefs[PreferenceKeys.MORNING_REMINDER_TIME] ?: "07:30",
             eveningReminderEnabled = prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] ?: false,
             eveningReminderTime = prefs[PreferenceKeys.EVENING_REMINDER_TIME] ?: "21:00",
-            defaultScene = prefs[PreferenceKeys.DEFAULT_SCENE] ?: "居家安静",
-            lastSuccessfulExportAt = prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT]
+            discardFirstReading = prefs[PreferenceKeys.DISCARD_FIRST_READING] ?: false,
+            lastSuccessfulExportAt = prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT],
+            medicationReminderEnabled = prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] ?: true,
+            medicationCalendarSyncEnabled =
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false
         )
     }
 
@@ -76,9 +84,9 @@ class AppSettingsStore(
         }
     }
 
-    suspend fun setDefaultScene(scene: String) {
+    suspend fun setDiscardFirstReading(enabled: Boolean) {
         context.appDataStore.edit { prefs ->
-            prefs[PreferenceKeys.DEFAULT_SCENE] = scene
+            prefs[PreferenceKeys.DISCARD_FIRST_READING] = enabled
         }
     }
 
@@ -86,5 +94,22 @@ class AppSettingsStore(
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT] = value
         }
+    }
+
+    suspend fun setMedicationReminderEnabled(enabled: Boolean) {
+        context.appDataStore.edit { prefs ->
+            prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
+        context.appDataStore.edit { prefs ->
+            prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] = enabled
+        }
+    }
+
+    /** 清空全部设置（含上次导出时间），恢复为默认值。 */
+    suspend fun clearAll() {
+        context.appDataStore.edit { prefs -> prefs.clear() }
     }
 }
