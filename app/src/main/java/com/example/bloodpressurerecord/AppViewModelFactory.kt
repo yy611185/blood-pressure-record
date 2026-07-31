@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
+import com.example.bloodpressurerecord.domain.time.dayTicks
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardViewModel
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
@@ -32,35 +33,48 @@ class AppViewModelFactory(
         savedStateHandle: SavedStateHandle
     ): T {
         val container = (application as BloodPressureApplication).appContainer
-        return when {
-            modelClass.isAssignableFrom(HomeViewModel::class.java) -> {
+        // 用精确类型匹配而非 isAssignableFrom：后者方向容易写反，
+        // 请求 ViewModel 基类时会错误命中第一个分支。
+        return when (modelClass) {
+            HomeViewModel::class.java -> {
                 HomeViewModel(
                     repository = container.bloodPressureRepository,
                     highRiskAlertEnabled = container.settingsRepository.observeSettings()
                         .map { it.appSettings.highRiskAlertEnabled },
+                    discardFirstReading = container.settingsRepository.observeSettings()
+                        .map { it.appSettings.discardFirstReading },
                     savedStateHandle = savedStateHandle
                 ) as T
             }
 
-            modelClass.isAssignableFrom(DashboardViewModel::class.java) -> {
-                DashboardViewModel(container.bloodPressureRepository) as T
+            DashboardViewModel::class.java -> {
+                DashboardViewModel(
+                    repository = container.bloodPressureRepository,
+                    medicationRepository = container.medicationRepository,
+                    todayTicks = dayTicks()
+                ) as T
             }
 
-            modelClass.isAssignableFrom(HistoryViewModel::class.java) -> {
+            HistoryViewModel::class.java -> {
                 HistoryViewModel(
                     repository = container.bloodPressureRepository,
-                    savedStateHandle = savedStateHandle
+                    savedStateHandle = savedStateHandle,
+                    todayTicks = dayTicks()
                 ) as T
             }
 
-            modelClass.isAssignableFrom(SettingsViewModel::class.java) -> {
-                SettingsViewModel(container.settingsRepository) as T
+            SettingsViewModel::class.java -> {
+                SettingsViewModel(
+                    repository = container.settingsRepository,
+                    medicationRepository = container.medicationRepository
+                ) as T
             }
 
-            modelClass.isAssignableFrom(TrendViewModel::class.java) -> {
+            TrendViewModel::class.java -> {
                 TrendViewModel(
                     trendRepository = container.trendRepository,
-                    settingsRepository = container.settingsRepository
+                    settingsRepository = container.settingsRepository,
+                    todayTicks = dayTicks()
                 ) as T
             }
 

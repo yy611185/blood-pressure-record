@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.domain.calculator
 
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -30,5 +31,46 @@ class AverageCalculatorTest {
         )
 
         assertNull(result.avgPulse)
+    }
+
+    @Test
+    fun `弃用第一组策略只对其余读数取平均`() {
+        val result = AverageCalculator.calculate(
+            listOf(
+                ReadingValue(systolic = 160, diastolic = 100, pulse = 90),
+                ReadingValue(systolic = 120, diastolic = 80, pulse = 70),
+                ReadingValue(systolic = 124, diastolic = 82, pulse = 72)
+            ),
+            strategy = AverageStrategy.DISCARD_FIRST
+        )
+
+        assertEquals(122, result.avgSystolic)
+        assertEquals(81, result.avgDiastolic)
+        assertEquals(71, result.avgPulse)
+    }
+
+    @Test
+    fun `弃用第一组策略在仅一组读数时退化为全部平均`() {
+        val result = AverageCalculator.calculate(
+            listOf(ReadingValue(systolic = 130, diastolic = 85, pulse = 75)),
+            strategy = AverageStrategy.DISCARD_FIRST
+        )
+
+        assertEquals(130, result.avgSystolic)
+        assertEquals(85, result.avgDiastolic)
+    }
+
+    @Test
+    fun `弃用第一组时两组读数使用第二组`() {
+        val result = AverageCalculator.calculate(
+            listOf(
+                ReadingValue(systolic = 150, diastolic = 95, pulse = 88),
+                ReadingValue(systolic = 126, diastolic = 82, pulse = 70)
+            ),
+            strategy = AverageStrategy.DISCARD_FIRST
+        )
+
+        assertEquals(126, result.avgSystolic)
+        assertEquals(82, result.avgDiastolic)
     }
 }

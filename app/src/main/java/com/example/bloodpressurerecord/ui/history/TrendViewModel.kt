@@ -14,9 +14,13 @@ import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import java.time.ZoneId
 import java.time.Instant
+import java.time.LocalDate
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -70,19 +74,29 @@ class TrendViewModel(
     private val trendRepository: TrendRepository,
     settingsRepository: SettingsRepository,
     private val clockMillis: () -> Long = System::currentTimeMillis,
-    private val zoneId: ZoneId = ZoneId.systemDefault()
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+    computeContext: CoroutineContext = Dispatchers.Default,
+    todayTicks: Flow<LocalDate> = flow {
+        emit(Instant.ofEpochMilli(clockMillis()).atZone(zoneId).toLocalDate())
+    }
 ) : ViewModel() {
     private val selectedRange = MutableStateFlow(TrendRange.DAYS_30)
     private val selectedMetric = MutableStateFlow(TrendMetricType.BOTH)
     private val details = MutableStateFlow<TrendDayDetails?>(null)
 
-    private val seriesState = selectedRange.flatMapLatest { range ->
-        val queryStartedAt = clockMillis()
-        val start = TrendSeriesCalculator.rangeStart(range, queryStartedAt, zoneId)
+    // 查询边界随“今天”滚动：上界取当天结束（半开区间），
+    // 打开页面后新增的记录能实时进入折线，跨零点后 7/30 天窗口自动前移。
+    private val seriesState = combine(
+        selectedRange,
+        todayTicks
+    ) { range, today -> range to today }.flatMapLatest { (range, today) ->
+        val anchorMillis = today.atStartOfDay(zoneId).toInstant().toEpochMilli()
+        val start = TrendSeriesCalculator.rangeStart(range, anchorMillis, zoneId)
+        val endExclusive = today.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
         val previousStart = previousRangeStart(range, start)
         combine(
-            trendRepository.observeRecords(start, queryStartedAt + 1),
-            trendRepository.observeStatistics(start, queryStartedAt + 1),
+            trendRepository.observeRecords(start, endExclusive),
+            trendRepository.observeStatistics(start, endExclusive),
             if (previousStart == null) {
                 kotlinx.coroutines.flow.flowOf(PeriodStatistics())
             } else {
@@ -107,7 +121,7 @@ class TrendViewModel(
                 targetSystolic = targetSystolic,
                 targetDiastolic = targetDiastolic
             )
-        }.flowOn(Dispatchers.Default)
+        }.flowOn(computeContext)
     }
 
     val uiState: StateFlow<TrendUiState> = combine(

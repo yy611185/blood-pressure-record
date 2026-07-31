@@ -14,9 +14,8 @@ class SettingsNavigationRouteTest {
             AppDestination.SettingsDataManagement.route,
             AppDestination.SettingsInfo.route,
             AppDestination.SettingsInfoAppGuide.route,
-            AppDestination.SettingsInfoReleaseNotes.route,
-            AppDestination.SettingsDisclaimer.route
+            AppDestination.SettingsInfoReleaseNotes.route
         )
-        assertTrue(routes.size == 9)
+        assertTrue(routes.size == 8)
     }
 }

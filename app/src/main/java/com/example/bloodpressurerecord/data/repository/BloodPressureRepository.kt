@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.data.repository
 
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import kotlinx.coroutines.flow.Flow
 
 data class CalendarSessionSummary(
@@ -51,7 +52,9 @@ data class SaveSessionInput(
     val scene: String,
     val note: String?,
     val symptoms: List<String>,
-    val readings: List<SessionReadingInput>
+    val readings: List<SessionReadingInput>,
+    /** 平均值计算策略；保存时用于派生平均值与分级。 */
+    val averageStrategy: AverageStrategy = AverageStrategy.ALL
 )
 
 data class SessionReading(
@@ -73,14 +76,12 @@ data class SessionRecord(
     val avgPulse: Int?,
     val category: String,
     val containsHighRiskReading: Boolean,
-    val readings: List<SessionReading>
+    val readings: List<SessionReading>,
+    val averageStrategy: AverageStrategy = AverageStrategy.ALL
 )
 
 interface BloodPressureRepository {
-    fun observeSessionCount(): Flow<Int>
-    fun observeSessions(): Flow<List<SessionRecord>>
     fun observeSession(sessionId: String): Flow<SessionRecord?>
-    fun observeLatestSession(): Flow<SessionRecord?>
     fun observeLatestSessionSummary(): Flow<LatestSessionSummary?>
     fun observeCalendarSessionSummaries(
         startInclusive: Long,
@@ -94,10 +95,6 @@ interface BloodPressureRepository {
         startInclusive: Long,
         endExclusive: Long
     ): Flow<PeriodStatistics>
-    fun observeSessionsInRange(
-        startInclusive: Long,
-        endExclusive: Long
-    ): Flow<List<SessionRecord>>
 
     suspend fun saveSession(input: SaveSessionInput): Result<String>
     suspend fun updateSession(sessionId: String, input: SaveSessionInput): Result<Unit>

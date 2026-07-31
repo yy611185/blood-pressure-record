@@ -1,15 +1,20 @@
 package com.example.bloodpressurerecord.ui.common
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -22,13 +27,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,16 +39,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.Terracotta700
+import com.example.bloodpressurerecord.ui.theme.Terracotta800
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -95,12 +103,20 @@ fun MeasurementDateTimePicker(
                 TextButton(onClick = { showDatePicker = false }) { Text("取消") }
             }
         ) {
-            DatePicker(state = dateState, title = { Text("选择测量日期") })
+            DatePicker(
+                state = dateState,
+                title = {
+                    Text(
+                        "选择测量日期",
+                        modifier = Modifier.padding(start = 24.dp, top = 16.dp)
+                    )
+                }
+            )
         }
     }
 
     if (showTimePicker) {
-        DigitalTimeInputDialog(
+        WheelTimePickerDialog(
             title = "选择测量时间",
             initialHour = localDateTime.hour,
             initialMinute = localDateTime.minute,
@@ -126,22 +142,21 @@ fun MeasurementDateTimePicker(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
     ) {
-        OutlinedButton(
+        // 药丸日期/时间按钮。之前用默认 OutlinedButton（24dp 内边距 + 24dp 图标），
+        // 在大字号下半宽按钮放不下完整日期导致文字被截断；
+        // 这里收紧内边距、缩小图标并让文字自动缩排，保证完整显示。
+        DateTimePillButton(
+            icon = Icons.Default.CalendarMonth,
+            text = localDateTime.toLocalDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日")),
             onClick = { showDatePicker = true },
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(Icons.Default.CalendarMonth, contentDescription = null)
-            Spacer(Modifier.width(AppSpacing.xSmall))
-            Text(localDateTime.toLocalDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日")))
-        }
-        OutlinedButton(
+            modifier = Modifier.weight(1.25f)
+        )
+        DateTimePillButton(
+            icon = Icons.Default.Schedule,
+            text = localDateTime.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")),
             onClick = { showTimePicker = true },
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(Icons.Default.Schedule, contentDescription = null)
-            Spacer(Modifier.width(AppSpacing.xSmall))
-            Text(localDateTime.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")))
-        }
+            modifier = Modifier.weight(0.75f)
+        )
     }
     dateTimeError?.let {
         Text(
@@ -152,42 +167,41 @@ fun MeasurementDateTimePicker(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DigitalTimeInputDialog(
-    title: String,
-    initialHour: Int,
-    initialMinute: Int,
-    onDismiss: () -> Unit,
-    onConfirm: (hour: Int, minute: Int) -> Unit
+private fun DateTimePillButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val timeState = rememberTimePickerState(
-        initialHour = initialHour.coerceIn(0, 23),
-        initialMinute = initialMinute.coerceIn(0, 59),
-        is24Hour = true
-    )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            TimeInput(
-                state = timeState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics {
-                        contentDescription = "24小时制时间输入，小时和分钟"
-                    }
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(timeState.hour, timeState.minute) }
-            ) { Text("确定") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
+    Row(
+        modifier = modifier
+            .height(50.dp)
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.large)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Terracotta700,
+            modifier = Modifier.size(17.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Visible,
+            softWrap = false
+        )
+    }
 }
 
 @Composable
@@ -211,7 +225,7 @@ fun MeasurementReadingCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("第${index + 1}组", style = MaterialTheme.typography.titleMedium)
+                Text("第 ${index + 1} 组", style = MaterialTheme.typography.titleMedium)
                 if (removable) {
                     IconButton(
                         onClick = onRemove,
@@ -228,14 +242,14 @@ fun MeasurementReadingCard(
                 NumberField(
                     value = reading.systolic,
                     onValueChange = onSystolicChange,
-                    label = "收缩压",
+                    label = "收缩压（高压）",
                     imeAction = ImeAction.Next,
                     modifier = Modifier.weight(1f)
                 )
                 NumberField(
                     value = reading.diastolic,
                     onValueChange = onDiastolicChange,
-                    label = "舒张压",
+                    label = "舒张压（低压）",
                     imeAction = ImeAction.Next,
                     isError = relationError,
                     modifier = Modifier.weight(1f)
@@ -250,9 +264,16 @@ fun MeasurementReadingCard(
             }
             if (relationError) {
                 Text(
-                    "舒张压必须低于收缩压",
+                    "低压要小于高压，检查一下再保存",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (index == 0) {
+                Text(
+                    "建议连续测两次，间隔 1-2 分钟，取平均更准。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -268,20 +289,45 @@ private fun NumberField(
     modifier: Modifier = Modifier,
     isError: Boolean = false
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { next ->
-            if (next.all(Char::isDigit) && next.length <= 3) onValueChange(next)
-        },
-        label = { Text(label, maxLines = 1) },
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Number,
-            imeAction = imeAction
-        ),
-        isError = isError,
-        singleLine = true,
-        modifier = modifier
-    )
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Visible
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = { next ->
+                if (next.all(Char::isDigit) && next.length <= 3) onValueChange(next)
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = imeAction
+            ),
+            isError = isError,
+            singleLine = true,
+            shape = RoundedCornerShape(20.dp),
+            textStyle = TextStyle(
+                fontSize = 24.sp,
+                textAlign = TextAlign.Center,
+                color = Terracotta800
+            ),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            label = null,
+            placeholder = null
+        )
+    }
 }
 
 @Composable
@@ -290,17 +336,27 @@ fun SessionSaveBottomBar(
     disabledReason: String,
     isSaving: Boolean,
     buttonText: String,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    /** 嵌入滚动页面时使用完整圆角；默认仍作为固定底栏，仅保留顶部圆角。 */
+    embedded: Boolean = false
 ) {
+    val containerShape = if (embedded) {
+        MaterialTheme.shapes.medium
+    } else {
+        RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(
+                MaterialTheme.colorScheme.surface,
+                containerShape
+            )
             .navigationBarsPadding()
             .imePadding()
             .padding(
-                horizontal = AppDimensions.bottomActionPadding,
-                vertical = AppSpacing.small
+                horizontal = if (embedded) AppSpacing.medium else AppDimensions.bottomActionPadding,
+                vertical = AppSpacing.medium
             ),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
     ) {
@@ -315,7 +371,7 @@ fun SessionSaveBottomBar(
             text = if (isSaving) "正在保存…" else buttonText,
             onClick = onSave,
             enabled = canSave && !isSaving,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().height(AppDimensions.saveButtonHeight)
         )
     }
 }

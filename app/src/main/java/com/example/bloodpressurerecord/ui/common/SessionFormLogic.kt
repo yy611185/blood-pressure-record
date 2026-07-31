@@ -4,7 +4,7 @@ import com.example.bloodpressurerecord.data.repository.SessionReadingInput
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.calculator.ReadingValidationError
-import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 
 data class SessionReadingInputUi(
@@ -28,6 +28,11 @@ data class SessionValidationResult(
 )
 
 object SessionFormLogic {
+    /**
+     * 表单允许的最大读数组数（交互体验上限）。
+     * 必须 ≤ [MeasurementInputRules.MAX_READING_COUNT]（存储与导入的硬上限），
+     * 旧备份中超过本值、不超过硬上限的记录仍可正常导入与展示。
+     */
     const val UI_MAX_READING_COUNT = 10
 
     fun saveDisabledReason(readings: List<SessionReadingInputUi>): String? {
@@ -36,7 +41,8 @@ object SessionFormLogic {
 
     fun recomputeDerived(
         readings: List<SessionReadingInputUi>,
-        requiredCount: Int = 2
+        requiredCount: Int = 2,
+        strategy: AverageStrategy = AverageStrategy.ALL
     ): SessionDerivedResult {
         val validReadings = readings.mapNotNull { ui ->
             val sys = ui.systolic.toIntOrNull()
@@ -51,19 +57,20 @@ object SessionFormLogic {
         if (validReadings.size < requiredCount) {
             return SessionDerivedResult(null, null, null, "待计算")
         }
-        val derived = MeasurementDerivation.derive(validReadings)
+        val derived = MeasurementDerivation.derive(validReadings, strategy)
         return SessionDerivedResult(
             avgSystolic = derived.average.avgSystolic,
             avgDiastolic = derived.average.avgDiastolic,
             avgPulse = derived.average.avgPulse,
-            categoryLabel = derived.category.toChineseLabel(),
+            categoryLabel = CategoryPresentation.label(derived.category),
             containsHighRiskReading = derived.containsHighRiskReading
         )
     }
 
     fun validateAndBuildReadings(
         readings: List<SessionReadingInputUi>,
-        requiredCount: Int = 2
+        requiredCount: Int = 2,
+        strategy: AverageStrategy = AverageStrategy.ALL
     ): SessionValidationResult {
         val list = mutableListOf<SessionReadingInput>()
         readings.forEachIndexed { index, reading ->
@@ -74,7 +81,7 @@ object SessionFormLogic {
             parsed.reading?.let { list += it }
         }
         if (list.size < requiredCount) {
-            return SessionValidationResult(error = "至少填写两组有效读数后才能保存。")
+            return SessionValidationResult(error = "把两组的高压和低压都填好，就可以保存啦")
         }
         if (list.size > UI_MAX_READING_COUNT) {
             return SessionValidationResult(
@@ -84,7 +91,7 @@ object SessionFormLogic {
         val values = list.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
         return SessionValidationResult(
             readings = list,
-            containsHighRiskReading = MeasurementDerivation.derive(values).containsHighRiskReading
+            containsHighRiskReading = MeasurementDerivation.derive(values, strategy).containsHighRiskReading
         )
     }
 
@@ -147,17 +154,9 @@ object SessionFormLogic {
         ReadingValidationError.DIASTOLIC_OUT_OF_RANGE ->
             "舒张压须在 ${MeasurementInputRules.DIASTOLIC_RANGE.first}–${MeasurementInputRules.DIASTOLIC_RANGE.last} 之间。"
         ReadingValidationError.DIASTOLIC_NOT_LOWER_THAN_SYSTOLIC ->
-            "舒张压必须低于收缩压。"
+            "低压要小于高压，检查一下再保存。"
         ReadingValidationError.PULSE_OUT_OF_RANGE ->
             "脉搏须在 ${MeasurementInputRules.PULSE_RANGE.first}–${MeasurementInputRules.PULSE_RANGE.last} 之间。"
-    }
-
-    private fun BloodPressureCategory.toChineseLabel(): String = when (this) {
-        BloodPressureCategory.NORMAL -> "正常"
-        BloodPressureCategory.ELEVATED -> "偏高（ELEVATED）"
-        BloodPressureCategory.STAGE1 -> "1期偏高（STAGE1）"
-        BloodPressureCategory.STAGE2 -> "2期偏高（STAGE2）"
-        BloodPressureCategory.SEVERE -> "重度偏高（SEVERE）"
     }
 
     private data class ParsedReading(

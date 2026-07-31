@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.example.bloodpressurerecord.BuildConfig
 import com.example.bloodpressurerecord.data.datastore.AppSettings
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -22,8 +23,8 @@ enum class ReminderType(
     val notificationId: Int,
     val title: String
 ) {
-    MORNING("com.example.bloodpressurerecord.REMINDER_MORNING", 7101, 8101, "晨间血压提醒"),
-    EVENING("com.example.bloodpressurerecord.REMINDER_EVENING", 7102, 8102, "晚间血压提醒");
+    MORNING("${BuildConfig.APPLICATION_ID}.REMINDER_MORNING", 7101, 8101, "晨间血压提醒"),
+    EVENING("${BuildConfig.APPLICATION_ID}.REMINDER_EVENING", 7102, 8102, "晚间血压提醒");
 
     companion object {
         fun fromAction(action: String?): ReminderType? = entries.firstOrNull { it.action == action }
@@ -68,11 +69,26 @@ class ReminderScheduler(
             return
         }
         val triggerAt = ReminderTimeCalculator.nextTriggerMillis(timeText, now(), zoneId) ?: return
-        alarmManager.setAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            triggerAt,
-            pendingIntent
-        )
+        // 血压提醒对时间敏感：优先使用精确闹钟；用户在系统里撤销精确闹钟权限时
+        // 回退到非精确闹钟，保证提醒仍然会到达。
+        if (canScheduleExactAlarms()) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAt,
+                pendingIntent
+            )
+        } else {
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAt,
+                pendingIntent
+            )
+        }
+    }
+
+    private fun canScheduleExactAlarms(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            alarmManager.canScheduleExactAlarms()
     }
 
     private fun pendingIntent(type: ReminderType): PendingIntent {
@@ -140,10 +156,10 @@ object ReminderNotifications {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "血压测量提醒",
+                "健康提醒",
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "晨间和晚间血压测量提醒"
+                description = "血压测量和服药提醒"
             }
         )
     }

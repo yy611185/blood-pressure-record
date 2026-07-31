@@ -11,6 +11,7 @@ import com.example.bloodpressurerecord.data.db.entity.BloodPressureMeasurementEn
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import java.time.Instant
 import java.time.ZoneId
@@ -88,11 +89,13 @@ class BackupExportService(
         legacyMeasurements: List<BloodPressureMeasurementEntity>,
         legacyRecordRows: List<LegacyBloodPressureRecordRow>
     ): List<BackupMeasurementRow> {
-        return buildList {
-            addAll(sessions.map(::toMeasurementRow))
-            addAll(legacyMeasurements.map(::toMeasurementRow))
-            addAll(legacyRecordRows.map(::toMeasurementRow))
-        }.sortedBy { it.measuredAt }
+        // 新表记录优先。旧版本导入后可能同时残留在 legacy 表中，按 record_id 去重，
+        // 防止同一条记录在同机反复导出/导入后倍增。
+        val rowsById = linkedMapOf<String, BackupMeasurementRow>()
+        sessions.map(::toMeasurementRow).forEach { rowsById.putIfAbsent(it.recordId, it) }
+        legacyMeasurements.map(::toMeasurementRow).forEach { rowsById.putIfAbsent(it.recordId, it) }
+        legacyRecordRows.map(::toMeasurementRow).forEach { rowsById.putIfAbsent(it.recordId, it) }
+        return rowsById.values.sortedBy { it.measuredAt }
     }
 
     private fun toMeasurementRow(item: MeasurementSessionWithReadings): BackupMeasurementRow {
@@ -106,12 +109,6 @@ class BackupExportService(
                     pulse = reading.pulse
                 )
             }
-        val readingValues = sortedReadings.map {
-            ReadingValue(it.systolic, it.diastolic, it.pulse)
-        }
-        val recomputed = readingValues.takeIf { it.isNotEmpty() }
-            ?.let(MeasurementDerivation::derive)
-
         return BackupMeasurementRow(
             recordId = session.id,
             measuredAt = formatDateTime(session.measuredAt),
@@ -119,11 +116,13 @@ class BackupExportService(
             time = formatTime(session.measuredAt),
             groupCount = sortedReadings.size,
             readings = sortedReadings,
-            avgSystolic = recomputed?.average?.avgSystolic ?: session.avgSystolic,
-            avgDiastolic = recomputed?.average?.avgDiastolic ?: session.avgDiastolic,
-            avgPulse = recomputed?.average?.avgPulse ?: session.avgPulse,
-            level = recomputed?.category?.name ?: session.category,
-            highAlert = recomputed?.containsHighRiskReading ?: session.containsHighRiskReading,
+            // 这里必须导出保存时的派生值，不能按默认 ALL 策略重新计算。
+            avgSystolic = session.avgSystolic,
+            avgDiastolic = session.avgDiastolic,
+            avgPulse = session.avgPulse,
+            averageStrategy = session.averageStrategy,
+            level = session.category,
+            highAlert = session.containsHighRiskReading,
             scene = session.scene,
             symptomsJson = session.symptomsJson,
             note = session.note,
@@ -143,6 +142,7 @@ class BackupExportService(
             avgSystolic = item.systolic,
             avgDiastolic = item.diastolic,
             avgPulse = item.pulse,
+            averageStrategy = AverageStrategy.ALL.name,
             level = item.level,
             highAlert = MeasurementDerivation.derive(
                 listOf(ReadingValue(item.systolic, item.diastolic, item.pulse))
@@ -166,6 +166,7 @@ class BackupExportService(
             avgSystolic = item.systolic,
             avgDiastolic = item.diastolic,
             avgPulse = item.pulse,
+            averageStrategy = AverageStrategy.ALL.name,
             level = item.level.orEmpty(),
             highAlert = MeasurementDerivation.derive(
                 listOf(ReadingValue(item.systolic, item.diastolic, item.pulse))
@@ -182,7 +183,7 @@ class BackupExportService(
         "文件用途" to "用于家庭血压记录的本地备份与换机迁移。",
         "数据来源" to "数据仅来自本机本地数据库，不包含云端或服务器数据。",
         "注意事项" to "请尽量不要修改工作表名称和列名，以便未来版本稳定导回。",
-        "隐私说明" to "导出文件只会保存到你选择的位置，不会上传服务器；Android 系统自动备份已关闭。",
+        "隐私说明" to "导出文件只会交给你选择的 Android 文件位置或文件提供方（可能包含你主动选择的云盘）；应用不会自行上传服务器，Android 系统自动备份已关闭。",
         "备份责任" to "卸载前请主动导出备份；未导出的本地数据可能丢失，应用无法保证数据永不丢失。",
         "医疗声明" to "本文件仅供健康记录参考，不替代专业医疗诊断或治疗建议。"
     )
@@ -208,6 +209,7 @@ class BackupExportService(
             BackupUserProfileItem("display_show_target_line", settings.showTrendChart.toString()),
             BackupUserProfileItem("large_text_enabled", settings.largeTextEnabled.toString()),
             BackupUserProfileItem("high_risk_alert_enabled", settings.highRiskAlertEnabled.toString()),
+            BackupUserProfileItem("discard_first_reading", settings.discardFirstReading.toString()),
             BackupUserProfileItem("show_trend_chart", settings.showTrendChart.toString()),
             BackupUserProfileItem("morning_reminder_enabled", settings.morningReminderEnabled.toString()),
             BackupUserProfileItem("morning_reminder_time", settings.morningReminderTime),
@@ -249,6 +251,6 @@ class BackupExportService(
     }
 
     companion object {
-        const val EXPORT_FORMAT_VERSION = 2
+        const val EXPORT_FORMAT_VERSION = 3
     }
 }

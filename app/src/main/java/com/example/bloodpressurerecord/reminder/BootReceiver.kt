@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.reminder
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,10 @@ class BootReceiver : BroadcastReceiver() {
                 val appContext = context.applicationContext
                 val settings = AppSettingsStore(appContext).settingsFlow.first()
                 ReminderScheduler(appContext).apply(settings)
+                (appContext as? BloodPressureApplication)
+                    ?.appContainer
+                    ?.medicationReminderCoordinator
+                    ?.resyncAlarms()
             } finally {
                 pendingResult.finish()
             }

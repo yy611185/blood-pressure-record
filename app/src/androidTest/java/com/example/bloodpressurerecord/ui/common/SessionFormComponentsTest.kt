@@ -44,16 +44,16 @@ class SessionFormComponentsTest {
 
         composeRule.onNodeWithText("09:30").performClick()
         composeRule.onNodeWithText("选择测量时间").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("24小时制时间输入，小时和分钟")
+        composeRule.onNodeWithContentDescription("24小时制时间选择，滑动滚轮选择小时和分钟")
             .assertIsDisplayed()
     }
 
     @Test
-    fun digital_time_cancel_does_not_submit() {
+    fun wheel_time_cancel_does_not_submit() {
         var submitted = false
         composeRule.setContent {
             BloodPressureRecordTheme {
-                DigitalTimeInputDialog(
+                WheelTimePickerDialog(
                     title = "选择时间",
                     initialHour = 0,
                     initialMinute = 0,
@@ -68,11 +68,11 @@ class SessionFormComponentsTest {
     }
 
     @Test
-    fun digital_time_confirm_submits_initial_24_hour_value_once() {
+    fun wheel_time_confirm_submits_initial_24_hour_value_once() {
         var submitted: Pair<Int, Int>? = null
         composeRule.setContent {
             BloodPressureRecordTheme {
-                DigitalTimeInputDialog(
+                WheelTimePickerDialog(
                     title = "选择时间",
                     initialHour = 23,
                     initialMinute = 59,

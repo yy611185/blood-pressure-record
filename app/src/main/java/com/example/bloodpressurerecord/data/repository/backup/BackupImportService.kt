@@ -8,6 +8,7 @@ import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -20,6 +21,7 @@ import java.time.format.ResolverStyle
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 
 object BackupImportLimits {
     const val MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -33,6 +35,7 @@ enum class BackupImportErrorCode {
     INVALID_READING_COUNT,
     INVALID_READING,
     DUPLICATE_READING_ORDER,
+    INVALID_AVERAGE_STRATEGY,
     SETTINGS_NOT_RESTORED
 }
 
@@ -77,7 +80,7 @@ class BackupImportService(
             prepareRecord(source, zone, errors)
         }
         val skippedCount = document.measurements.size - preparedRecords.size
-        if (preparedRecords.isEmpty()) {
+        if (preparedRecords.isEmpty() && document.measurements.isNotEmpty()) {
             return@withContext BackupImportResult(
                 insertedCount = 0,
                 replacedCount = 0,
@@ -113,7 +116,8 @@ class BackupImportService(
                         gender = profile["sex"].nonBlank(),
                         targetSystolic = profile["target_sys"].toIntOrNullSafe(),
                         targetDiastolic = profile["target_dia"].toIntOrNullSafe(),
-                        updatedAt = preparedRecords.maxOf { it.session.updatedAt }
+                        updatedAt = preparedRecords.maxOfOrNull { it.session.updatedAt }
+                            ?: System.currentTimeMillis()
                     )
                 )
             }
@@ -193,9 +197,33 @@ class BackupImportService(
             return null
         }
 
-        val derived = MeasurementDerivation.derive(readingValues)
+        val explicitStrategy = source.backupAverageStrategy?.let { raw ->
+            AverageStrategy.entries.firstOrNull { it.name == raw.trim().uppercase() }
+                ?: run {
+                    errors += source.error(
+                        BackupImportErrorCode.INVALID_AVERAGE_STRATEGY,
+                        "平均策略字段无效。"
+                    )
+                    return null
+                }
+        }
+
+        // v3 直接使用显式策略；v2 为兼容旧备份，按收缩压、舒张压和脉搏三项平均值反推。
+        val allDerived = MeasurementDerivation.derive(readingValues, AverageStrategy.ALL)
+        val strategy = if (explicitStrategy != null) {
+            explicitStrategy
+        } else if (matchesBackupAverages(source, allDerived)) {
+            AverageStrategy.ALL
+        } else {
+            MeasurementDerivation.derive(readingValues, AverageStrategy.DISCARD_FIRST)
+                .takeIf { matchesBackupAverages(source, it) }
+                ?.let { AverageStrategy.DISCARD_FIRST }
+                ?: AverageStrategy.ALL
+        }
+        val derived = MeasurementDerivation.derive(readingValues, strategy)
         val createdAt = parseDateTime(source.createdAt, zoneId) ?: measuredAt
         val updatedAt = parseDateTime(source.updatedAt, zoneId) ?: createdAt
+        val (symptomsJson, symptomsCorrected) = normalizeSymptomsJson(source.symptomsJson)
         val corrected = source.backupGroupCount != readingValues.size ||
             source.backupAvgSystolic != derived.average.avgSystolic ||
             source.backupAvgDiastolic != derived.average.avgDiastolic ||
@@ -203,17 +231,19 @@ class BackupImportService(
             source.backupLevel?.uppercase() != derived.category.name ||
             source.backupHighAlert != derived.containsHighRiskReading ||
             parseDateTime(source.createdAt, zoneId) == null ||
-            parseDateTime(source.updatedAt, zoneId) == null
+            parseDateTime(source.updatedAt, zoneId) == null ||
+            symptomsCorrected
 
         val session = MeasurementSessionEntity(
             id = source.recordId,
             measuredAt = measuredAt,
             scene = source.scene ?: "备份导入",
             note = source.note,
-            symptomsJson = source.symptomsJson,
+            symptomsJson = symptomsJson,
             avgSystolic = derived.average.avgSystolic,
             avgDiastolic = derived.average.avgDiastolic,
             avgPulse = derived.average.avgPulse,
+            averageStrategy = strategy.name,
             category = derived.category.name,
             containsHighRiskReading = derived.containsHighRiskReading,
             createdAt = createdAt,
@@ -238,6 +268,8 @@ class BackupImportService(
             ?.let { appSettingsStore.setLargeTextEnabled(it) }
         values["high_risk_alert_enabled"]?.toBooleanStrictOrNull()
             ?.let { appSettingsStore.setHighRiskAlertEnabled(it) }
+        values["discard_first_reading"]?.toBooleanStrictOrNull()
+            ?.let { appSettingsStore.setDiscardFirstReading(it) }
         (values["show_trend_chart"] ?: values["display_show_target_line"])
             ?.toBooleanStrictOrNull()
             ?.let { appSettingsStore.setShowTrendChart(it) }
@@ -266,6 +298,37 @@ class BackupImportService(
         message: String
     ): BackupImportError {
         return BackupImportError(code, sourceRowNumber, "第 $sourceRowNumber 行：$message")
+    }
+
+    private fun matchesBackupAverages(
+        source: BackupImportMeasurement,
+        derived: com.example.bloodpressurerecord.domain.calculator.MeasurementDerivedValues
+    ): Boolean {
+        return source.backupAvgSystolic == derived.average.avgSystolic &&
+            source.backupAvgDiastolic == derived.average.avgDiastolic &&
+            source.backupAvgPulse == derived.average.avgPulse
+    }
+
+    /**
+     * 症状列以 JSON 数组为标准格式。合法数组会规范化后入库；
+     * 手工编辑成纯文本时按常见分隔符拆成症状列表并计入“自动修正”，
+     * 不再原样写库后在读取端被静默丢弃。
+     */
+    private fun normalizeSymptomsJson(raw: String?): Pair<String?, Boolean> {
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return null to false
+        val parsed = runCatching {
+            val array = JSONArray(text)
+            List(array.length()) { index -> array.getString(index).trim() }
+                .filter { it.isNotEmpty() }
+        }.getOrNull()
+        if (parsed != null) {
+            return (if (parsed.isEmpty()) null else JSONArray(parsed).toString()) to false
+        }
+        val items = text.split('、', '，', ',', '；', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        return (if (items.isEmpty()) null else JSONArray(items).toString()) to true
     }
 
     private fun deterministicReadingId(recordId: String, orderIndex: Int): String {

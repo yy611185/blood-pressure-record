@@ -9,6 +9,7 @@ import com.example.bloodpressurerecord.data.repository.SessionSummary
 import com.example.bloodpressurerecord.domain.time.EpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toLocalDate
+import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -56,6 +58,7 @@ data class HistorySessionItemUi(
     val avgBloodPressureText: String,
     val avgPulseText: String,
     val scene: String,
+    val category: String,
     val categoryText: String,
     val noteSummary: String,
     val containsHighRiskReading: Boolean
@@ -76,7 +79,8 @@ class HistoryViewModel(
     private val repository: BloodPressureRepository,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     private val zoneId: ZoneId = ZoneId.systemDefault(),
-    private val todayProvider: () -> LocalDate = { LocalDate.now(zoneId) }
+    private val todayProvider: () -> LocalDate = { LocalDate.now(zoneId) },
+    todayTicks: Flow<LocalDate> = flow { emit(todayProvider()) }
 ) : ViewModel() {
     private val viewMode = MutableStateFlow(
         savedStateHandle.get<String>(KEY_VIEW_MODE)
@@ -145,11 +149,13 @@ class HistoryViewModel(
         }
     }
 
+    // “本周 / 本月”的边界跟随日期流重算，跨零点或跨周后不再停留在旧范围。
     private val recentResult: Flow<RecentResult> = combine(
         recentPeriod,
-        recentRefresh
-    ) { period, _ -> period }.flatMapLatest { period ->
-        val range = HistoryDateRanges.recent(period, todayProvider(), zoneId)
+        recentRefresh,
+        todayTicks
+    ) { period, _, today -> period to today }.flatMapLatest { (period, today) ->
+        val range = HistoryDateRanges.recent(period, today, zoneId)
         combine(
             repository.observeSessionSummariesInRange(
                 range.startInclusive,
@@ -292,11 +298,6 @@ class HistoryViewModel(
         }
     }
 
-    fun showToday(selectWhenRecorded: Boolean = true) {
-        val today = todayProvider()
-        if (selectWhenRecorded) openDateWhenAvailable(today) else showMonth(YearMonth.from(today))
-    }
-
     fun openDateWhenAvailable(date: LocalDate) {
         setViewMode(HistoryViewMode.CALENDAR)
         pendingRequestedDate = date
@@ -345,19 +346,11 @@ class HistoryViewModel(
             avgBloodPressureText = "${record.avgSystolic}/${record.avgDiastolic}",
             avgPulseText = record.avgPulse?.toString() ?: "--",
             scene = record.scene,
-            categoryText = record.category.toChineseCategory(),
+            category = record.category,
+            categoryText = CategoryPresentation.label(record.category),
             noteSummary = record.noteSummary?.takeIf { it.isNotBlank() } ?: NO_NOTE_TEXT,
             containsHighRiskReading = record.containsHighRiskReading
         )
-    }
-
-    private fun String.toChineseCategory(): String = when (uppercase()) {
-        "NORMAL" -> "正常"
-        "ELEVATED" -> "偏高"
-        "STAGE1" -> "1级偏高"
-        "STAGE2" -> "2级偏高"
-        "SEVERE" -> "严重偏高"
-        else -> this
     }
 
     private data class MonthResult(

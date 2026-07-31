@@ -31,9 +31,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.common.AppTopBar
+import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
+import com.example.bloodpressurerecord.ui.common.MeasurementTags
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
 import com.example.bloodpressurerecord.ui.common.SessionSaveBottomBar
 import com.example.bloodpressurerecord.ui.common.StatusChip
@@ -41,8 +44,6 @@ import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 
-private val editScenes = listOf("晨起", "睡前", "居家安静", "运动后", "其他")
-private val editSymptoms = listOf("无症状", "头痛", "头晕", "心悸", "胸闷或胸痛", "视物模糊", "其他")
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -104,8 +105,12 @@ fun EditSessionScreen(
         )
     }
 
+    val topBarScroll = rememberHideOnScrollState()
     Scaffold(
-        topBar = { AppTopBar(title = "编辑测量", onBack = requestBack) },
+        modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
+        topBar = {
+            AppTopBar(title = "编辑测量", onBack = requestBack, hideOnScroll = topBarScroll)
+        },
         bottomBar = {
             if (!state.loading) {
                 SessionSaveBottomBar(
@@ -138,11 +143,19 @@ fun EditSessionScreen(
             )
 
             Text("测量场景", style = MaterialTheme.typography.titleMedium)
+            // 旧记录的历史场景标签不在标准时段列表时追加显示，保证选中态可见。
+            val sceneOptions = remember(state.scene) {
+                if (state.scene in MeasurementTags.scenes) {
+                    MeasurementTags.scenes
+                } else {
+                    MeasurementTags.scenes + state.scene
+                }
+            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
             ) {
-                editScenes.forEach { scene ->
+                sceneOptions.forEach { scene ->
                     FilterChip(
                         selected = state.scene == scene,
                         onClick = { viewModel.updateScene(scene) },
@@ -208,11 +221,25 @@ fun EditSessionScreen(
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
             ) {
-                editSymptoms.forEach { symptom ->
+                MeasurementTags.symptoms.forEach { symptom ->
                     FilterChip(
                         selected = symptom in state.selectedSymptoms,
                         onClick = { viewModel.toggleSymptom(symptom) },
                         label = { Text(symptom) }
+                    )
+                }
+            }
+
+            Text("影响血压的情况", style = MaterialTheme.typography.titleMedium)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
+            ) {
+                MeasurementTags.factors.forEach { factor ->
+                    FilterChip(
+                        selected = factor in state.selectedFactors,
+                        onClick = { viewModel.toggleFactor(factor) },
+                        label = { Text(factor) }
                     )
                 }
             }

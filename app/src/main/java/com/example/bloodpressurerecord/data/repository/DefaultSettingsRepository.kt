@@ -25,7 +25,11 @@ class DefaultSettingsRepository(
     private val database: AppDatabase,
     private val userProfileDao: UserProfileDao,
     private val measurementSessionDao: MeasurementSessionDao,
-    private val measurementDao: BloodPressureMeasurementDao
+    private val measurementDao: BloodPressureMeasurementDao,
+    /** 服药提醒重排回调（闹钟 + 日历），由 AppContainer 注入避免直接依赖。 */
+    private val medicationResync: (suspend () -> Unit)? = null,
+    /** 导入、清空等批量变更后刷新桌面小部件。 */
+    private val onDataChanged: (() -> Unit)? = null
 ) : SettingsRepository {
     override fun observeSettings(): Flow<SettingsBundle> = combine(
         appSettingsStore.settingsFlow,
@@ -49,6 +53,10 @@ class DefaultSettingsRepository(
         appSettingsStore.setShowTrendChart(enabled)
     }
 
+    override suspend fun setDiscardFirstReading(enabled: Boolean) {
+        appSettingsStore.setDiscardFirstReading(enabled)
+    }
+
     override suspend fun setMorningReminderEnabled(enabled: Boolean) {
         appSettingsStore.setMorningReminderEnabled(enabled)
         rescheduleReminders()
@@ -67,6 +75,30 @@ class DefaultSettingsRepository(
     override suspend fun setEveningReminderTime(value: String) {
         appSettingsStore.setEveningReminderTime(value)
         rescheduleReminders()
+    }
+
+    override suspend fun setMedicationReminderEnabled(enabled: Boolean) {
+        val previous = appSettingsStore.settingsFlow.first().medicationReminderEnabled
+        appSettingsStore.setMedicationReminderEnabled(enabled)
+        try {
+            medicationResync?.invoke()
+        } catch (throwable: Throwable) {
+            appSettingsStore.setMedicationReminderEnabled(previous)
+            runCatching { medicationResync?.invoke() }
+            throw throwable
+        }
+    }
+
+    override suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
+        val previous = appSettingsStore.settingsFlow.first().medicationCalendarSyncEnabled
+        appSettingsStore.setMedicationCalendarSyncEnabled(enabled)
+        try {
+            medicationResync?.invoke()
+        } catch (throwable: Throwable) {
+            appSettingsStore.setMedicationCalendarSyncEnabled(previous)
+            runCatching { medicationResync?.invoke() }
+            throw throwable
+        }
     }
 
     override suspend fun saveUserProfile(profile: UserProfile) {
@@ -92,7 +124,16 @@ class DefaultSettingsRepository(
                 database.openHelper.writableDatabase.execSQL("DELETE FROM blood_pressure_records")
             }
             userProfileDao.deleteAll()
+            database.medicationDao().deleteAllLogs()
+            database.medicationDao().deleteAllTimes()
+            database.medicationDao().deleteAllMedications()
         }
+        // “清空全部数据”应同时重置 DataStore 设置（含提醒与上次导出时间），
+        // 否则界面仍显示旧的导出记录和提醒配置。
+        appSettingsStore.clearAll()
+        rescheduleReminders()
+        medicationResync?.invoke()
+        onDataChanged?.invoke()
     }
 
     override suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String> = runCatching {
@@ -107,13 +148,6 @@ class DefaultSettingsRepository(
                 appVersion = currentAppVersion()
             )
             
-            if (payload.measurements.isEmpty()) {
-                error(
-                    "未读取到可导出的历史测量记录。\n" +
-                        payload.diagnostics.toUserMessage() +
-                        "\n请先确认历史页已有保存记录；如果历史页有数据但这里仍为 0，请反馈此诊断信息。"
-                )
-            }
             val outputStream = context.contentResolver.openOutputStream(uri)
                 ?: error("无法写入所选文件，请重新选择保存位置")
 
@@ -132,12 +166,13 @@ class DefaultSettingsRepository(
                 }
             }
             appSettingsStore.setLastSuccessfulExportAt(System.currentTimeMillis())
-            "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n${payload.diagnostics.toUserMessage()}\n文件仅保存在本地，不会上传。"
+            "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n${payload.diagnostics.toUserMessage()}\n文件已交给你选择的保存位置。"
         }
     }
 
     override suspend fun refreshReminders() {
         rescheduleReminders()
+        medicationResync?.invoke()
     }
 
     override suspend fun importBackupXlsxFromUri(uri: Uri): Result<String> = runCatching {
@@ -151,6 +186,8 @@ class DefaultSettingsRepository(
                 ).importXlsx(stream)
             }
             rescheduleReminders()
+            medicationResync?.invoke()
+            onDataChanged?.invoke()
             result.toUserMessage()
         }
     }

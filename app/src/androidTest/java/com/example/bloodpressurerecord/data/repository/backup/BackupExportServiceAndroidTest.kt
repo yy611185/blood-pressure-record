@@ -153,6 +153,40 @@ class BackupExportServiceAndroidTest {
     }
 
     @Test
+    fun version3RoundTrip_preservesDiscardFirstStrategyAndStoredAverages() = runTest {
+        val sessionId = "discard-first-roundtrip"
+        val bytes = exportSingleSession(
+            sessionId = sessionId,
+            values = listOf(
+                Triple(160, 100, 90),
+                Triple(120, 80, 60),
+                Triple(122, 82, 62)
+            ),
+            strategy = com.example.bloodpressurerecord.domain.model.AverageStrategy.DISCARD_FIRST
+        )
+
+        XSSFWorkbook(ByteArrayInputStream(bytes)).use { workbook ->
+            assertEquals(
+                "DISCARD_FIRST",
+                workbook.getSheet("测量记录").getRow(1).getCell(15).stringCellValue
+            )
+        }
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+
+        BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        ).importXlsx(ByteArrayInputStream(bytes))
+        val restored = database.measurementSessionDao().getSessionWithReadings(sessionId)?.session
+
+        assertEquals("DISCARD_FIRST", restored?.averageStrategy)
+        assertEquals(121, restored?.avgSystolic)
+        assertEquals(81, restored?.avgDiastolic)
+        assertEquals(61, restored?.avgPulse)
+    }
+
+    @Test
     fun import_recalculatesTamperedAverageAndRiskFromRawReadings() = runTest {
         val sessionId = "tampered-derived"
         val bytes = exportSingleSession(
@@ -346,12 +380,15 @@ class BackupExportServiceAndroidTest {
 
     private suspend fun exportSingleSession(
         sessionId: String,
-        values: List<Triple<Int, Int, Int>>
+        values: List<Triple<Int, Int, Int>>,
+        strategy: com.example.bloodpressurerecord.domain.model.AverageStrategy =
+            com.example.bloodpressurerecord.domain.model.AverageStrategy.ALL
     ): ByteArray {
         val averages = com.example.bloodpressurerecord.domain.calculator.AverageCalculator.calculate(
             values.map {
                 com.example.bloodpressurerecord.domain.model.ReadingValue(it.first, it.second, it.third)
-            }
+            },
+            strategy
         )
         database.measurementSessionDao().insertSessionWithReadings(
             MeasurementSessionEntity(
@@ -363,6 +400,7 @@ class BackupExportServiceAndroidTest {
                 avgSystolic = averages.avgSystolic,
                 avgDiastolic = averages.avgDiastolic,
                 avgPulse = averages.avgPulse,
+                averageStrategy = strategy.name,
                 category = com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
                     .calculate(averages.avgSystolic, averages.avgDiastolic).name,
                 containsHighRiskReading = false,

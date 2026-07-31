@@ -5,7 +5,7 @@ import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
 
-internal const val TARGET_PACKAGE = "com.example.bloodpressurerecord"
+internal const val TARGET_PACKAGE = "com.yang.bloodpressure"
 private const val UI_TIMEOUT_MILLIS = 5_000L
 
 internal fun MacrobenchmarkScope.startDashboard() {

@@ -10,8 +10,6 @@ import org.apache.poi.xssf.usermodel.XSSFSheet
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 
 class BackupFileWriter {
-    private var templateLoadError: Throwable? = null
-
     fun writeXlsx(
         payload: BackupExportPayload,
         outputStream: OutputStream,
@@ -34,13 +32,9 @@ class BackupFileWriter {
         }
     }
 
-    fun getTemplateLoadError(): Throwable? = templateLoadError
-
     private fun createWorkbook(templateInputStream: InputStream?): XSSFWorkbook {
-        templateLoadError = null
         return if (templateInputStream != null) {
             runCatching { XSSFWorkbook(templateInputStream) }
-                .onFailure { templateLoadError = it }
                 .getOrElse { XSSFWorkbook() }
         } else {
             XSSFWorkbook()
@@ -172,7 +166,8 @@ class BackupFileWriter {
             item.symptomsJson,
             item.note,
             item.createdAt,
-            item.updatedAt
+            item.updatedAt,
+            item.averageStrategy
         )
     }
 
@@ -213,7 +208,8 @@ class BackupFileWriter {
             "symptoms_json",
             "note",
             "created_at",
-            "updated_at"
+            "updated_at",
+            "average_strategy"
         )
         val READING_COLUMNS = listOf(
             "record_id",

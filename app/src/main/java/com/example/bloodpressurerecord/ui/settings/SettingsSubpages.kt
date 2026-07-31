@@ -1,7 +1,9 @@
 package com.example.bloodpressurerecord.ui.settings
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -17,9 +19,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Update
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -47,8 +51,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.bloodpressurerecord.reminder.ReminderAuthorization
 import com.example.bloodpressurerecord.reminder.ReminderAuthorizationStatus
 import com.example.bloodpressurerecord.reminder.ReminderType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.common.AppTopBar
-import com.example.bloodpressurerecord.ui.common.DigitalTimeInputDialog
+import com.example.bloodpressurerecord.ui.common.WheelTimePickerDialog
+import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import java.time.LocalTime
 
 @Composable
@@ -101,21 +107,38 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         mutableStateOf(ReminderAuthorization.status(context))
     }
     var pendingEnable by remember { mutableStateOf<ReminderType?>(null) }
+    var pendingEnableMedication by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         authorizationStatus = ReminderAuthorization.status(context)
         val type = pendingEnable
+        val medicationPending = pendingEnableMedication
         pendingEnable = null
+        pendingEnableMedication = false
         if (granted && authorizationStatus == ReminderAuthorizationStatus.GRANTED) {
             when (type) {
                 ReminderType.MORNING -> viewModel.setMorningReminderEnabled(true)
                 ReminderType.EVENING -> viewModel.setEveningReminderEnabled(true)
                 null -> Unit
             }
+            if (medicationPending) viewModel.setMedicationReminderEnabled(true)
         } else {
             viewModel.showReminderAuthorizationRequired(
                 "通知权限未授予，提醒尚未启用。可前往系统通知设置授权。"
+            )
+        }
+    }
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val granted = grants[Manifest.permission.READ_CALENDAR] == true &&
+            grants[Manifest.permission.WRITE_CALENDAR] == true
+        if (granted) {
+            viewModel.setMedicationCalendarSyncEnabled(true)
+        } else {
+            viewModel.showReminderAuthorizationRequired(
+                "日历权限未授予，暂时无法把服药提醒写入系统日历。"
             )
         }
     }
@@ -185,10 +208,7 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         ReminderTimePickerButton(
             label = "晨间提醒时间",
             timeText = uiState.morningReminderTime,
-            onTimeSelected = {
-                viewModel.updateMorningTime(it)
-                viewModel.saveReminderTimes()
-            }
+            onTimeSelected = viewModel::updateMorningTime
         )
         SettingsSwitchRow(
             "晚间提醒",
@@ -200,16 +220,226 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         ReminderTimePickerButton(
             label = "晚间提醒时间",
             timeText = uiState.eveningReminderTime,
-            onTimeSelected = {
-                viewModel.updateEveningTime(it)
-                viewModel.saveReminderTimes()
-            }
+            onTimeSelected = viewModel::updateEveningTime
         )
-        Button(onClick = viewModel::saveReminderTimes, modifier = Modifier.fillMaxWidth()) {
-            Text("保存提醒设置")
+        Text(
+            "选择时间后会自动保存并更新提醒。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        HorizontalDivider()
+        Text("服药提醒", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "为每种降压药设置每天的服药时间，到点提醒，吃完在首页打个勾。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        SettingsSwitchRow(
+            "启用服药提醒",
+            uiState.medicationReminderEnabled
+        ) { enabled ->
+            if (enabled) {
+                authorizationStatus = ReminderAuthorization.status(context)
+                when (authorizationStatus) {
+                    ReminderAuthorizationStatus.GRANTED ->
+                        viewModel.setMedicationReminderEnabled(true)
+                    ReminderAuthorizationStatus.RUNTIME_PERMISSION_REQUIRED -> {
+                        pendingEnableMedication = true
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                    ReminderAuthorizationStatus.SYSTEM_DISABLED -> {
+                        viewModel.showReminderAuthorizationRequired(
+                            "系统通知已关闭，服药提醒尚未启用。请先前往系统通知设置开启。"
+                        )
+                    }
+                }
+            } else {
+                viewModel.setMedicationReminderEnabled(false)
+            }
         }
+        SettingsSwitchRow(
+            "同步到系统日历",
+            uiState.medicationCalendarSyncEnabled
+        ) { enabled ->
+            if (enabled) {
+                val hasCalendarPermission =
+                    ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.READ_CALENDAR
+                    ) == PackageManager.PERMISSION_GRANTED &&
+                        ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.WRITE_CALENDAR
+                        ) == PackageManager.PERMISSION_GRANTED
+                if (hasCalendarPermission) {
+                    viewModel.setMedicationCalendarSyncEnabled(true)
+                } else {
+                    calendarPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.READ_CALENDAR,
+                            Manifest.permission.WRITE_CALENDAR
+                        )
+                    )
+                }
+            } else {
+                viewModel.setMedicationCalendarSyncEnabled(false)
+            }
+        }
+        Text(
+            "开启后会在系统日历中创建每日重复的服药日程（含日历提醒），与应用内提醒互为双保险；关闭时自动清理。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        var editorState by remember { mutableStateOf<MedicationEditorState?>(null) }
+        uiState.medications.forEach { med ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "${med.medication.name} ${med.medication.dosage}".trim(),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            if (med.times.isEmpty()) {
+                                "未设置服药时间"
+                            } else {
+                                "每天 " + med.times.map { it.timeText }.sorted().joinToString("、")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = {
+                        editorState = MedicationEditorState(
+                            id = med.medication.id,
+                            name = med.medication.name,
+                            dosage = med.medication.dosage,
+                            times = med.times.map { it.timeText }.sorted()
+                        )
+                    }) { Text("编辑") }
+                    TextButton(onClick = { viewModel.deleteMedication(med.medication.id) }) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = {
+                editorState = MedicationEditorState(
+                    id = null, name = "", dosage = "", times = emptyList()
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("添加药品")
+        }
+
+        editorState?.let { editor ->
+            MedicationEditorDialog(
+                initial = editor,
+                onDismiss = { editorState = null },
+                onConfirm = { name, dosage, times ->
+                    if (editor.id == null) {
+                        viewModel.addMedication(name, dosage, times)
+                    } else {
+                        viewModel.updateMedication(editor.id, name, dosage, times)
+                    }
+                    editorState = null
+                }
+            )
+        }
+
         SettingsMessage(uiState.message)
     }
+}
+
+private data class MedicationEditorState(
+    val id: Long?,
+    val name: String,
+    val dosage: String,
+    val times: List<String>
+)
+
+@Composable
+private fun MedicationEditorDialog(
+    initial: MedicationEditorState,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, dosage: String, times: List<String>) -> Unit
+) {
+    var name by remember { mutableStateOf(initial.name) }
+    var dosage by remember { mutableStateOf(initial.dosage) }
+    var times by remember { mutableStateOf(initial.times) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    if (showTimePicker) {
+        WheelTimePickerDialog(
+            title = "选择服药时间",
+            initialHour = 8,
+            initialMinute = 0,
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute ->
+                val text = "%02d:%02d".format(hour, minute)
+                times = (times + text).distinct().sorted()
+                showTimePicker = false
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial.id == null) "添加药品" else "编辑药品") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("药品名称") },
+                    placeholder = { Text("如：氨氯地平") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = dosage,
+                    onValueChange = { dosage = it },
+                    label = { Text("每次数量") },
+                    placeholder = { Text("如：1片") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("每日服药时间（可多个）", style = MaterialTheme.typography.bodySmall)
+                times.forEach { time ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(time, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { times = times - time }) {
+                            Text("删除", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showTimePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("添加时间")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name, dosage, times) }) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -222,7 +452,7 @@ private fun ReminderTimePickerButton(
     var showPicker by remember { mutableStateOf(false) }
     val initial = runCatching { LocalTime.parse(timeText) }.getOrDefault(LocalTime.NOON)
     if (showPicker) {
-        DigitalTimeInputDialog(
+        WheelTimePickerDialog(
             title = label,
             initialHour = initial.hour,
             initialMinute = initial.minute,
@@ -248,6 +478,17 @@ fun SettingsDisplayScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         SettingsSwitchRow("显示趋势图", uiState.showTrendChart, viewModel::setShowTrendChart)
         SettingsSwitchRow("启用高风险提醒", uiState.highRiskAlertEnabled, viewModel::setHighRiskAlertEnabled)
         SettingsSwitchRow("大字号显示", uiState.isLargeTextEnabled, viewModel::setLargeTextEnabled)
+        SettingsSwitchRow(
+            "平均值不计第一组读数",
+            uiState.discardFirstReading,
+            viewModel::setDiscardFirstReading
+        )
+        Text(
+            "家庭自测第一次读数常偏高。开启后，新保存的记录计算平均值时会弃用第一组" +
+                "（仅一组时仍按全部计算）；高风险提醒始终检查每一组原始读数。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -306,27 +547,19 @@ fun SettingsInfoReleaseNotesScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun SettingsInfoMeasurementTipsScreen(onBack: () -> Unit) {
-    SettingsAppGuideScreen(onBack)
-}
-
-@Composable
-fun SettingsDisclaimerScreen(onBack: () -> Unit) {
-    SettingsAppGuideScreen(onBack)
-}
-
-@Composable
 private fun SettingsSubPageShell(
     title: String,
     onBack: () -> Unit,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val topBarScroll = rememberHideOnScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .nestedScroll(topBarScroll.nestedScrollConnection)
     ) {
-        AppTopBar(title = title, onBack = onBack)
+        AppTopBar(title = title, onBack = onBack, hideOnScroll = topBarScroll)
         Column(
             modifier = Modifier
                 .fillMaxSize()

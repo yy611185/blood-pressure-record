@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.data.repository.backup
 
 import java.io.InputStream
 import java.math.BigDecimal
+import org.apache.poi.openxml4j.util.ZipSecureFile
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
 import org.apache.poi.ss.usermodel.Sheet
@@ -31,7 +32,8 @@ data class BackupImportMeasurement(
     val note: String?,
     val createdAt: String?,
     val updatedAt: String?,
-    val readings: List<BackupImportReading>
+    val readings: List<BackupImportReading>,
+    val backupAverageStrategy: String? = null
 )
 
 data class BackupImportDocument(
@@ -47,6 +49,10 @@ class BackupFileReader {
     private val formatter = DataFormatter()
 
     fun readXlsx(inputStream: InputStream): BackupImportDocument {
+        // 10 MB 的文件上限只限制压缩后字节；恶意 xlsx 解压后可膨胀上百倍导致 OOM。
+        // 这里显式限制解压比例与解压后的单条目大小，超限时 POI 抛异常并中止导入。
+        ZipSecureFile.setMinInflateRatio(MIN_INFLATE_RATIO)
+        ZipSecureFile.setMaxEntrySize(MAX_UNCOMPRESSED_ENTRY_BYTES)
         val workbook = try {
             XSSFWorkbook(inputStream)
         } catch (throwable: Exception) {
@@ -74,11 +80,9 @@ class BackupFileReader {
             }
             val measurements = readMeasurements(
                 measurementSheet,
-                readingRows.groupBy { it.recordId }
+                readingRows.groupBy { it.recordId },
+                formatVersion = version
             )
-            if (measurements.isEmpty()) {
-                throw BackupFormatException("备份文件中没有可导入的测量记录")
-            }
             if (measurements.size > BackupImportLimits.MAX_RECORDS) {
                 throw BackupFormatException("测量记录总数超过允许上限")
             }
@@ -103,7 +107,8 @@ class BackupFileReader {
 
     private fun readMeasurements(
         sheet: Sheet,
-        readingRows: Map<String, List<RawReadingRow>>
+        readingRows: Map<String, List<RawReadingRow>>,
+        formatVersion: Int
     ): List<BackupImportMeasurement> {
         val columns = sheet.headerColumns()
         requireColumns(
@@ -136,6 +141,14 @@ class BackupFileReader {
                 backupAvgSystolic = row.strictInt(columns, "avg_sys"),
                 backupAvgDiastolic = row.strictInt(columns, "avg_dia"),
                 backupAvgPulse = row.strictInt(columns, "avg_pulse"),
+                backupAverageStrategy = row.optionalText(columns, "average_strategy")
+                    .also {
+                        if (formatVersion >= 3 && it == null) {
+                            throw BackupFormatException(
+                                "测量记录第 ${rowIndex + 1} 行缺少 average_strategy"
+                            )
+                        }
+                    },
                 backupLevel = row.optionalText(columns, "level"),
                 backupHighAlert = row.strictBoolean(columns, "high_alert"),
                 scene = row.optionalText(columns, "scene"),
@@ -261,6 +274,15 @@ class BackupFileReader {
         private const val SHEET_READINGS = "原始读数"
         private const val SHEET_PROFILE = "用户资料"
         private const val SHEET_META = "导出信息"
-        private val SUPPORTED_FORMAT_VERSIONS = setOf(2)
+        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3)
+
+        /** 最多允许压缩比 1:100（POI 默认值，显式声明避免被其他代码放宽）。 */
+        private const val MIN_INFLATE_RATIO = 0.01
+
+        /**
+         * 解压后单个 zip 条目上限。按 5,000 条记录 × 20 组读数的合法最大备份估算，
+         * 工作表 XML 不应超过此值；恶意构造的超大条目会被 POI 拒绝。
+         */
+        private const val MAX_UNCOMPRESSED_ENTRY_BYTES = 64L * 1024 * 1024
     }
 }

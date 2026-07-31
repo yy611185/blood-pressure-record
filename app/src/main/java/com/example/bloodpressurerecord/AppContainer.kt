@@ -5,15 +5,21 @@ import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.DefaultBloodPressureRepository
+import com.example.bloodpressurerecord.data.repository.DefaultMedicationRepository
+import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.DefaultSettingsRepository
 import com.example.bloodpressurerecord.data.repository.DefaultTrendRepository
 import com.example.bloodpressurerecord.data.repository.TrendRepository
+import com.example.bloodpressurerecord.reminder.MedicationReminderCoordinator
+import com.example.bloodpressurerecord.widget.AppWidgetUpdater
 
 interface AppContainer {
     val bloodPressureRepository: BloodPressureRepository
     val settingsRepository: SettingsRepository
     val trendRepository: TrendRepository
+    val medicationRepository: MedicationRepository
+    val medicationReminderCoordinator: MedicationReminderCoordinator
 }
 
 class DefaultAppContainer(context: Context) : AppContainer {
@@ -23,8 +29,20 @@ class DefaultAppContainer(context: Context) : AppContainer {
 
     override val bloodPressureRepository: BloodPressureRepository by lazy {
         DefaultBloodPressureRepository(
-            sessionDao = database.measurementSessionDao()
+            sessionDao = database.measurementSessionDao(),
+            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
         )
+    }
+
+    override val medicationRepository: MedicationRepository by lazy {
+        DefaultMedicationRepository(
+            dao = database.medicationDao(),
+            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
+        )
+    }
+
+    override val medicationReminderCoordinator: MedicationReminderCoordinator by lazy {
+        MedicationReminderCoordinator(appContext, medicationRepository)
     }
 
     override val settingsRepository: SettingsRepository by lazy {
@@ -34,7 +52,9 @@ class DefaultAppContainer(context: Context) : AppContainer {
             database = database,
             userProfileDao = database.userProfileDao(),
             measurementSessionDao = database.measurementSessionDao(),
-            measurementDao = database.measurementDao()
+            measurementDao = database.measurementDao(),
+            medicationResync = { medicationReminderCoordinator.resyncAll() },
+            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
         )
     }
 
