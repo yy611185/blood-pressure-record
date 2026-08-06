@@ -15,7 +15,9 @@ import kotlin.math.roundToInt
 
 object TrendSeriesCalculator {
     const val CHART_SAFE_MIN = 40
-    const val CHART_SAFE_MAX = 260
+    /** 输入规则允许的最高收缩压；261–300 必须仍可在趋势图中看见。 */
+    const val CHART_SAFE_MAX = 300
+    private const val CHART_AXIS_MAX = 320
 
     fun rangeStart(range: TrendRange, nowMillis: Long, zoneId: ZoneId): Long {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zoneId).toLocalDate()
@@ -83,18 +85,20 @@ object TrendSeriesCalculator {
     ): TrendYAxis {
         val values = buildList {
             points.forEach { point ->
-                add(point.systolic.coerceIn(CHART_SAFE_MIN, CHART_SAFE_MAX))
-                add(point.diastolic.coerceIn(CHART_SAFE_MIN, CHART_SAFE_MAX))
+                // 仅把超出输入规则的历史脏值限制到合法边界；合法的 261–300
+                // 不再被旧的 260 上限吞掉。
+                add(point.systolic.coerceIn(40, CHART_SAFE_MAX))
+                add(point.diastolic.coerceIn(20, 200))
             }
             add(90)
             add(140)
-            targetSystolic?.takeIf { it in CHART_SAFE_MIN..CHART_SAFE_MAX }?.let(::add)
-            targetDiastolic?.takeIf { it in CHART_SAFE_MIN..CHART_SAFE_MAX }?.let(::add)
+            targetSystolic?.takeIf { it in 40..CHART_SAFE_MAX }?.let(::add)
+            targetDiastolic?.takeIf { it in 20..200 }?.let(::add)
         }
         val rawMin = values.minOrNull() ?: 80
         val rawMax = values.maxOrNull() ?: 160
         val min = (floor((rawMin - 10) / 10.0) * 10).toInt().coerceAtLeast(20)
-        val max = (ceil((rawMax + 10) / 10.0) * 10).toInt().coerceAtMost(280)
+        val max = (ceil((rawMax + 10) / 10.0) * 10).toInt().coerceAtMost(CHART_AXIS_MAX)
         val span = (max - min).coerceAtLeast(20)
         val tickStep = when {
             span <= 70 -> 10

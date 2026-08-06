@@ -88,8 +88,28 @@ class TrendSeriesCalculatorTest {
 
         val series = TrendSeriesCalculator.build(records, TrendRange.DAYS_7, now, zone)
 
-        assertTrue(series.yAxis.max <= 280)
+        assertTrue(series.yAxis.max <= 320)
         assertTrue(series.yAxis.min >= 20)
+    }
+
+    @Test
+    fun yAxis_contains_high_systolic_points_and_targets_without_expanding_for_invalid_values() {
+        val values = listOf(261, 280, 300)
+        val points = values.mapIndexed { index, systolic ->
+            record("high-$systolic", millis("2026-07-${20 + index}", 8), systolic, 80)
+        } + record("invalid", millis("2026-07-23", 9), 999, 500)
+
+        val axis = TrendSeriesCalculator.calculateYAxis(
+            points = points.map { it.toTrendPoint() },
+            targetSystolic = 290,
+            targetDiastolic = 190
+        )
+
+        assertTrue(axis.min <= 80)
+        assertTrue(axis.max >= 300)
+        assertTrue(axis.max <= 320)
+        assertTrue(290 in axis.min..axis.max)
+        assertTrue(190 in axis.min..axis.max)
     }
 
     @Test
@@ -120,6 +140,20 @@ class TrendSeriesCalculatorTest {
     private fun record(id: String, measuredAt: Long, systolic: Int, diastolic: Int): TrendRecord {
         return TrendRecord(id, measuredAt, systolic, diastolic, 70, "NORMAL")
     }
+
+    private fun TrendRecord.toTrendPoint() = com.example.bloodpressurerecord.domain.model.TrendPoint(
+        id = id,
+        timestamp = measuredAt,
+        intervalStart = measuredAt,
+        intervalEndExclusive = measuredAt + 1,
+        systolic = systolic,
+        diastolic = diastolic,
+        pulse = pulse,
+        category = category,
+        containsHighRiskReading = containsHighRiskReading,
+        recordCount = 1,
+        aggregation = TrendAggregation.RAW
+    )
 
     private fun millis(date: String, hour: Int): Long {
         return LocalDate.parse(date).atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
