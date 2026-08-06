@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -19,6 +20,9 @@ sealed class AppDestination(
     data object Settings : AppDestination("settings", "设置", Icons.Outlined.Settings)
 
     data object AddMeasurement : AppDestination("record/add", "新增", Icons.Outlined.Add)
+
+    data object ScanCamera : AppDestination("scan/camera", "拍照识别", Icons.Outlined.PhotoCamera)
+    data object ScanReview : AppDestination("scan/review", "确认保存", Icons.Outlined.PhotoCamera)
 
     data object SettingsProfile : AppDestination("settings/profile", "用户资料", Icons.Outlined.Settings)
     data object SettingsReminder : AppDestination("settings/reminder", "提醒设置", Icons.Outlined.Settings)

@@ -35,8 +35,11 @@ object SessionFormLogic {
      */
     const val UI_MAX_READING_COUNT = 10
 
-    fun saveDisabledReason(readings: List<SessionReadingInputUi>): String? {
-        return validateAndBuildReadings(readings, requiredCount = 2).error
+    fun saveDisabledReason(
+        readings: List<SessionReadingInputUi>,
+        requiredCount: Int = 2
+    ): String? {
+        return validateAndBuildReadings(readings, requiredCount = requiredCount).error
     }
 
     fun recomputeDerived(
@@ -81,7 +84,13 @@ object SessionFormLogic {
             parsed.reading?.let { list += it }
         }
         if (list.size < requiredCount) {
-            return SessionValidationResult(error = "把两组的高压和低压都填好，就可以保存啦")
+            return SessionValidationResult(
+                error = if (requiredCount == 2) {
+                    "把两组的高压和低压都填好，就可以保存啦"
+                } else {
+                    "请至少填写 $requiredCount 组完整的高压和低压"
+                }
+            )
         }
         if (list.size > UI_MAX_READING_COUNT) {
             return SessionValidationResult(

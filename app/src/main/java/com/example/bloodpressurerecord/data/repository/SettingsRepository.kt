@@ -56,6 +56,10 @@ interface SettingsRepository {
 
     suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean)
 
+    suspend fun setSaveScanPhotosEnabled(enabled: Boolean)
+
+    suspend fun clearScanPhotos(olderThanDays: Int?): Result<String>
+
     suspend fun refreshReminders()
 
     suspend fun saveUserProfile(profile: UserProfile)

@@ -19,7 +19,9 @@ data class AppSettings(
     /** 服药提醒总开关。默认开启：添加药品后立即生效，符合用户预期。 */
     val medicationReminderEnabled: Boolean = true,
     /** 服药提醒同步写入系统日历（需要日历读写权限）。 */
-    val medicationCalendarSyncEnabled: Boolean = false
+    val medicationCalendarSyncEnabled: Boolean = false,
+    /** 拍照识别后是否保存照片到 App 私有目录（默认不保存）。*/
+    val saveScanPhotosEnabled: Boolean = false
 )
 
 class AppSettingsStore(
@@ -38,7 +40,8 @@ class AppSettingsStore(
             lastSuccessfulExportAt = prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT],
             medicationReminderEnabled = prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] ?: true,
             medicationCalendarSyncEnabled =
-                prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false,
+            saveScanPhotosEnabled = prefs[PreferenceKeys.SAVE_SCAN_PHOTOS] ?: false
         )
     }
 
@@ -105,6 +108,12 @@ class AppSettingsStore(
     suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setSaveScanPhotosEnabled(enabled: Boolean) {
+        context.appDataStore.edit { prefs ->
+            prefs[PreferenceKeys.SAVE_SCAN_PHOTOS] = enabled
         }
     }
 

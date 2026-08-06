@@ -27,6 +27,9 @@ data class SettingsUiState(
     val eveningReminderTime: String = "21:00",
     val medicationReminderEnabled: Boolean = true,
     val medicationCalendarSyncEnabled: Boolean = false,
+    val saveScanPhotosEnabled: Boolean = false,
+    val showScanPhotoCleanupConfirm: Boolean = false,
+    val pendingScanPhotoCleanupDays: Int? = null,
     val medications: List<MedicationWithTimes> = emptyList(),
     val name: String = "",
     val ageText: String = "",
@@ -85,6 +88,7 @@ class SettingsViewModel(
                         medicationReminderEnabled = bundle.appSettings.medicationReminderEnabled,
                         medicationCalendarSyncEnabled =
                             bundle.appSettings.medicationCalendarSyncEnabled,
+                        saveScanPhotosEnabled = bundle.appSettings.saveScanPhotosEnabled,
                         name = profileName,
                         ageText = profileAge,
                         gender = profileGender,
@@ -164,6 +168,54 @@ class SettingsViewModel(
                 .onFailure { throwable ->
                     _uiState.update {
                         it.copy(message = "日历同步失败：${throwable.message ?: "请稍后重试"}")
+                    }
+                }
+        }
+    }
+
+    fun setSaveScanPhotosEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setSaveScanPhotosEnabled(enabled) }
+    }
+
+    fun requestScanPhotoCleanup(olderThanDays: Int?) {
+        _uiState.update {
+            it.copy(showScanPhotoCleanupConfirm = true, pendingScanPhotoCleanupDays = olderThanDays)
+        }
+    }
+
+    fun dismissScanPhotoCleanup() {
+        _uiState.update {
+            it.copy(showScanPhotoCleanupConfirm = false, pendingScanPhotoCleanupDays = null)
+        }
+    }
+
+    fun confirmScanPhotoCleanup() {
+        val days = _uiState.value.pendingScanPhotoCleanupDays
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDataActionRunning = true,
+                    showScanPhotoCleanupConfirm = false,
+                    message = "正在清理识别照片..."
+                )
+            }
+            repository.clearScanPhotos(days)
+                .onSuccess { message ->
+                    _uiState.update {
+                        it.copy(
+                            isDataActionRunning = false,
+                            pendingScanPhotoCleanupDays = null,
+                            message = message
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            isDataActionRunning = false,
+                            pendingScanPhotoCleanupDays = null,
+                            message = "清理失败：${throwable.message ?: "请稍后重试"}"
+                        )
                     }
                 }
         }

@@ -124,6 +124,12 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // 5.4.0 之前的 OOXML 解析存在重复 ZIP 条目安全问题；备份导入必须使用修复版本。
     implementation("org.apache.poi:poi-ooxml:5.5.1")
+    // ?????CameraX + ML Kit ???????bundled ???? INTERNET ???
+    implementation("androidx.camera:camera-core:1.4.2")
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     baselineProfile(project(":baselineprofile"))
 
     testImplementation("junit:junit:4.13.2")

@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.data.repository
 
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import kotlinx.coroutines.flow.Flow
 
@@ -54,7 +55,9 @@ data class SaveSessionInput(
     val symptoms: List<String>,
     val readings: List<SessionReadingInput>,
     /** 平均值计算策略；保存时用于派生平均值与分级。 */
-    val averageStrategy: AverageStrategy = AverageStrategy.ALL
+    val averageStrategy: AverageStrategy = AverageStrategy.ALL,
+    /** 最少读数组数；拍照识别允许 1 组，手动录入保持 2 组。 */
+    val minReadings: Int = MeasurementInputRules.MIN_READING_COUNT
 )
 
 data class SessionReading(

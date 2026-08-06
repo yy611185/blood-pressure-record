@@ -18,6 +18,8 @@ class DefaultBloodPressureRepository(
     private val sessionDao: MeasurementSessionDao,
     /** 数据变化后的回调（用于刷新桌面小部件等）。 */
     private val onDataChanged: (() -> Unit)? = null,
+    /** 删除记录后的回调（用于级联删除识别照片等）。 */
+    private val onSessionDeleted: ((String) -> Unit)? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) : BloodPressureRepository {
 
@@ -117,6 +119,7 @@ class DefaultBloodPressureRepository(
 
     override suspend fun deleteSession(sessionId: String): Result<Unit> = runCatching {
         check(sessionDao.deleteSessionById(sessionId) == 1) { "记录不存在，无法删除" }
+        onSessionDeleted?.invoke(sessionId)
         onDataChanged?.invoke()
     }
 
@@ -161,8 +164,8 @@ class DefaultBloodPressureRepository(
         updatedAt: Long
     ): MeasurementSessionEntity {
         val readingValues = input.readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
-        require(MeasurementInputRules.validateReadings(readingValues) == null) {
-            "每次测量必须包含 ${MeasurementInputRules.MIN_READING_COUNT} 至 " +
+        require(readingValues.size in input.minReadings..MeasurementInputRules.MAX_READING_COUNT) {
+            "每次测量必须包含 ${input.minReadings} 至 " +
                 "${MeasurementInputRules.MAX_READING_COUNT} 组读数"
         }
         readingValues.forEachIndexed { index, reading ->

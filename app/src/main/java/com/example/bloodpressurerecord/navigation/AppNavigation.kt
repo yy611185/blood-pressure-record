@@ -53,6 +53,9 @@ import com.example.bloodpressurerecord.ui.home.DashboardScreen
 import com.example.bloodpressurerecord.ui.home.DashboardViewModel
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.record.AddMeasurementScreen
+import com.example.bloodpressurerecord.ui.scan.ScanCameraScreen
+import com.example.bloodpressurerecord.ui.scan.ScanReviewScreen
+import com.example.bloodpressurerecord.ui.scan.ScanViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsDataManagementScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
@@ -180,6 +183,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 DashboardScreen(
                     viewModel = dashboardVm,
                     onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
+                    onScanMeasurement = { navController.navigate(AppDestination.ScanCamera.route) },
                     onOpenMedicationSettings = {
                         navController.navigate(AppDestination.SettingsReminder.route)
                     },
@@ -202,6 +206,27 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     viewModel = homeVm,
                     onBack = { navController.popBackStack() },
                     onSaved = { navController.popBackStack() }
+                )
+            }
+            composable(AppDestination.ScanCamera.route) {
+                val scanVm: ScanViewModel = viewModel(factory = factory)
+                ScanCameraScreen(
+                    viewModel = scanVm,
+                    onBack = { navController.popBackStack() },
+                    onEnterReview = { navController.navigate(AppDestination.ScanReview.route) }
+                )
+            }
+            composable(AppDestination.ScanReview.route) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(AppDestination.ScanCamera.route)
+                }
+                val scanVm: ScanViewModel = viewModel(parentEntry, factory = factory)
+                ScanReviewScreen(
+                    viewModel = scanVm,
+                    onBack = { navController.popBackStack() },
+                    onSaved = {
+                        navController.popBackStack(AppDestination.ScanCamera.route, inclusive = true)
+                    }
                 )
             }
             composable(AppDestination.History.route) { backStack ->

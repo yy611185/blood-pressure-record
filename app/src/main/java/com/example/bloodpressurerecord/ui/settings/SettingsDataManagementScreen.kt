@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -204,6 +205,28 @@ fun SettingsDataManagementScreen(
         )
     }
 
+    if (uiState.showScanPhotoCleanupConfirm) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissScanPhotoCleanup,
+            title = { Text("清理识别照片") },
+            text = {
+                Text(
+                    if (uiState.pendingScanPhotoCleanupDays == null) {
+                        "此操作会删除 App 私有目录中保存的全部识别照片，且无法撤销。"
+                    } else {
+                        "将删除 ${uiState.pendingScanPhotoCleanupDays} 天前保存的识别照片，且无法撤销。"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmScanPhotoCleanup) { Text("确认清理") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissScanPhotoCleanup) { Text("取消") }
+            }
+        )
+    }
+
     if (uiState.showClearConfirm) {
         AlertDialog(
             onDismissRequest = viewModel::dismissClearAll,
@@ -295,6 +318,43 @@ fun SettingsDataManagementScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            DataCard {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("保存识别照片", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "开启后，拍照识别的照片会保存在 App 私有目录，不会进入相册；默认不保存。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.saveScanPhotosEnabled,
+                            onCheckedChange = viewModel::setSaveScanPhotosEnabled
+                        )
+                    }
+                    AppSecondaryButton(
+                        text = "清理 30 天前的识别照片",
+                        onClick = {
+                            if (!uiState.isDataActionRunning) viewModel.requestScanPhotoCleanup(30)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    AppSecondaryButton(
+                        text = "清理全部识别照片",
+                        onClick = {
+                            if (!uiState.isDataActionRunning) viewModel.requestScanPhotoCleanup(null)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
 
             AppDangerButton(
                 text = "清空所有本地数据",

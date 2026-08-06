@@ -36,3 +36,6 @@ keystore/*
 Thumbs.db
 *.swp
 *~
+
+# Real-device sample photos (privacy)
+scan_samples/

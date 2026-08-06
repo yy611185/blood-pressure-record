@@ -2,6 +2,10 @@ package com.example.bloodpressurerecord
 
 import android.content.Context
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
+import com.example.bloodpressurerecord.data.scan.ScanPhotoSaver
+import com.example.bloodpressurerecord.data.scan.ScanPhotoStore
+import com.example.bloodpressurerecord.mlkit.MlKitOcrEngine
+import com.example.bloodpressurerecord.mlkit.OcrEngine
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.DefaultBloodPressureRepository
@@ -20,17 +24,27 @@ interface AppContainer {
     val trendRepository: TrendRepository
     val medicationRepository: MedicationRepository
     val medicationReminderCoordinator: MedicationReminderCoordinator
+    val ocrEngine: OcrEngine
+    val scanPhotoSaver: ScanPhotoSaver
 }
 
 class DefaultAppContainer(context: Context) : AppContainer {
     private val appContext = context.applicationContext
     private val database by lazy { AppDatabase.create(appContext) }
     private val appSettingsStore by lazy { AppSettingsStore(appContext) }
+    private val scanPhotoStore by lazy {
+        ScanPhotoStore(java.io.File(appContext.filesDir, "scan_photos"))
+    }
+
+    override val ocrEngine: OcrEngine by lazy { MlKitOcrEngine() }
+
+    override val scanPhotoSaver: ScanPhotoSaver by lazy { ScanPhotoSaver(scanPhotoStore) }
 
     override val bloodPressureRepository: BloodPressureRepository by lazy {
         DefaultBloodPressureRepository(
             sessionDao = database.measurementSessionDao(),
-            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
+            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) },
+            onSessionDeleted = { scanPhotoStore.deleteForSession(it) }
         )
     }
 
@@ -53,6 +67,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
             userProfileDao = database.userProfileDao(),
             measurementSessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),
+            scanPhotoStore = scanPhotoStore,
             medicationResync = { medicationReminderCoordinator.resyncAll() },
             onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
         )

@@ -13,6 +13,7 @@ import com.example.bloodpressurerecord.data.repository.backup.BackupImportServic
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import com.example.bloodpressurerecord.data.db.AppDatabase
+import com.example.bloodpressurerecord.data.scan.ScanPhotoStore
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +29,8 @@ class DefaultSettingsRepository(
     private val userProfileDao: UserProfileDao,
     private val measurementSessionDao: MeasurementSessionDao,
     private val measurementDao: BloodPressureMeasurementDao,
+    /** 识别照片存储（可空：未接入时清理入口返回不可用）。 */
+    private val scanPhotoStore: ScanPhotoStore? = null,
     /** 服药提醒重排回调（闹钟 + 日历），由 AppContainer 注入避免直接依赖。 */
     private val medicationResync: (suspend () -> Unit)? = null,
     /** 导入、清空等批量变更后刷新桌面小部件。 */
@@ -103,6 +106,26 @@ class DefaultSettingsRepository(
         }
     }
 
+    override suspend fun setSaveScanPhotosEnabled(enabled: Boolean) {
+        appSettingsStore.setSaveScanPhotosEnabled(enabled)
+    }
+
+    override suspend fun clearScanPhotos(olderThanDays: Int?): Result<String> = runCatching {
+        val store = scanPhotoStore ?: error("识别照片存储不可用")
+        val removed = if (olderThanDays == null) {
+            store.deleteAll()
+        } else {
+            store.deleteOlderThan(
+                System.currentTimeMillis() - olderThanDays * 24L * 60L * 60L * 1000L
+            )
+        }
+        if (olderThanDays == null) {
+            "识别照片已全部清理。"
+        } else {
+            "已清理 $olderThanDays 天前的识别照片（$removed 条记录）。"
+        }
+    }
+
     override suspend fun saveUserProfile(profile: UserProfile) {
         userProfileDao.upsert(
             UserProfileEntity(
@@ -149,6 +172,12 @@ class DefaultSettingsRepository(
         var settingsCleared = false
         var remindersRescheduled = true
         var widgetRefreshed = true
+
+        try {
+            scanPhotoStore?.deleteAll()
+        } catch (throwable: Throwable) {
+            warnings += "识别照片清理失败"
+        }
 
         // 数据库已清理后，后续 DataStore/提醒/小部件失败都要如实返回，
         // 不能把结果伪装成“数据没有删除”。

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
 import com.example.bloodpressurerecord.data.repository.MedicationSlot
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
+import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.StatusChip
@@ -58,6 +59,7 @@ import java.time.format.DateTimeFormatter
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onAddMeasurement: () -> Unit,
+    onScanMeasurement: () -> Unit = {},
     onViewTodayRecords: () -> Unit,
     onOpenMedicationSettings: () -> Unit = {}
 ) {
@@ -88,6 +90,12 @@ fun DashboardScreen(
             text = "记一次血压",
             icon = Icons.Default.Add,
             onClick = onAddMeasurement,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        AppSecondaryButton(
+            text = "📷 拍照识别",
+            onClick = onScanMeasurement,
             modifier = Modifier.fillMaxWidth()
         )
 
