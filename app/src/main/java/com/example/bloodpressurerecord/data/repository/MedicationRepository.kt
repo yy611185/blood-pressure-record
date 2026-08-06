@@ -27,6 +27,9 @@ interface MedicationRepository {
 
     suspend fun getSlotsForDay(date: LocalDate): List<MedicationSlot>
 
+    /** 返回数据库中全部时间点的 id，用于清理已经删除的旧闹钟。 */
+    suspend fun getAllTimeIds(): List<Long> = emptyList()
+
     suspend fun setTaken(medicationId: Long, timeId: Long, date: LocalDate, taken: Boolean)
 
     suspend fun addMedication(name: String, dosage: String, times: List<String>): Result<Long>
@@ -59,6 +62,8 @@ class DefaultMedicationRepository(
 
     override suspend fun getSlotsForDay(date: LocalDate): List<MedicationSlot> =
         buildSlots(dao.getMedicationsWithTimes(), dao.getLogsForDay(date.toEpochDay()))
+
+    override suspend fun getAllTimeIds(): List<Long> = dao.getAllTimeIds()
 
     private fun buildSlots(
         meds: List<MedicationWithTimes>,

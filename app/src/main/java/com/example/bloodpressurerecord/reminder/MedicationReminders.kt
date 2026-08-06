@@ -32,17 +32,26 @@ class MedicationReminderScheduler(
 ) {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
-    fun apply(enabled: Boolean, slots: List<MedicationSlot>) {
+    fun apply(
+        enabled: Boolean,
+        slots: List<MedicationSlot>,
+        allTimeIds: Collection<Long> = slots.map { it.timeId }
+    ) {
         ReminderNotifications.ensureChannel(context)
-        val authorized = ReminderAuthorization.status(context) == ReminderAuthorizationStatus.GRANTED
-        slots.forEach { slot ->
-            val pendingIntent = pendingIntent(slot.timeId)
-            if (!enabled || !authorized) {
+        val slotsById = slots.associateBy { it.timeId }
+        (allTimeIds + slotsById.keys).distinct().forEach { timeId ->
+            val pendingIntent = pendingIntent(timeId)
+            val slot = slotsById[timeId]
+            if (!enabled || slot == null) {
                 alarmManager.cancel(pendingIntent)
                 return@forEach
             }
             val triggerAt = ReminderTimeCalculator
-                .nextTriggerMillis(slot.timeText, now(), zoneId) ?: return@forEach
+                .nextTriggerMillis(slot.timeText, now(), zoneId)
+                ?: run {
+                    alarmManager.cancel(pendingIntent)
+                    return@forEach
+                }
             if (canScheduleExactAlarms()) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent
@@ -84,16 +93,26 @@ class MedicationReminderCoordinator(
     private val context: Context,
     private val medicationRepository: MedicationRepository
 ) {
+    private val calendarSync = MedicationCalendarSync(context)
+
     suspend fun resyncAlarms() {
         val settings = AppSettingsStore(context).settingsFlow.first()
         val slots = medicationRepository.getSlotsForDay(LocalDate.now())
-        MedicationReminderScheduler(context).apply(settings.medicationReminderEnabled, slots)
+        MedicationReminderScheduler(context).apply(
+            enabled = settings.medicationReminderEnabled,
+            slots = slots,
+            allTimeIds = medicationRepository.getAllTimeIds()
+        )
     }
 
     suspend fun resyncAll() {
         val settings = AppSettingsStore(context).settingsFlow.first()
         val slots = medicationRepository.getSlotsForDay(LocalDate.now())
-        MedicationReminderScheduler(context).apply(settings.medicationReminderEnabled, slots)
-        MedicationCalendarSync(context).rebuild(slots, settings.medicationCalendarSyncEnabled)
+        MedicationReminderScheduler(context).apply(
+            enabled = settings.medicationReminderEnabled,
+            slots = slots,
+            allTimeIds = medicationRepository.getAllTimeIds()
+        )
+        calendarSync.rebuild(slots, settings.medicationCalendarSyncEnabled)
     }
 }
