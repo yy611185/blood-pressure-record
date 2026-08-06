@@ -11,6 +11,27 @@ import org.junit.Test
 
 class MeasurementTimeTest {
     @Test
+    fun `未来测量时间只允许两分钟设备误差`() {
+        val now = Instant.parse("2026-08-06T04:00:00Z").toEpochMilli()
+
+        assertEquals(
+            null,
+            MeasurementTimestampValidator.validate(
+                now + MeasurementTimestampValidator.FUTURE_TOLERANCE_MILLIS,
+                now
+            )
+        )
+        assertEquals(
+            MeasurementTimestampValidator.FUTURE_MEASUREMENT_TIME_MESSAGE,
+            MeasurementTimestampValidator.validate(
+                now + MeasurementTimestampValidator.FUTURE_TOLERANCE_MILLIS + 1,
+                now
+            )
+        )
+        assertEquals(null, MeasurementTimestampValidator.validate(now - 1, now))
+    }
+
+    @Test
     fun `普通日期使用自然日半开区间`() {
         val range = LocalDate.of(2026, 7, 25)
             .toEpochMillisRange(ZoneId.of("Asia/Taipei"))

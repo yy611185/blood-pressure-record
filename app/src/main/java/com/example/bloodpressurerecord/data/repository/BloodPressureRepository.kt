@@ -77,7 +77,10 @@ data class SessionRecord(
     val category: String,
     val containsHighRiskReading: Boolean,
     val readings: List<SessionReading>,
-    val averageStrategy: AverageStrategy = AverageStrategy.ALL
+    val averageStrategy: AverageStrategy = AverageStrategy.ALL,
+    /** 用于恢复/撤销时保留原始记录的时间元数据。旧调用方可使用默认值。 */
+    val createdAt: Long = 0L,
+    val updatedAt: Long = 0L
 )
 
 interface BloodPressureRepository {

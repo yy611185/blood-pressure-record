@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
@@ -68,6 +69,9 @@ interface MeasurementSessionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReadings(readings: List<MeasurementReadingEntity>)
+
+    @Update
+    suspend fun updateSessionEntity(session: MeasurementSessionEntity): Int
 
     @Transaction
     suspend fun insertSessionWithReadings(
@@ -211,16 +215,17 @@ interface MeasurementSessionDao {
     suspend fun deleteReadingsBySessionIds(sessionIds: List<String>)
 
     @Query("DELETE FROM measurement_sessions WHERE id = :sessionId")
-    suspend fun deleteSessionById(sessionId: String)
+    suspend fun deleteSessionById(sessionId: String): Int
 
     @Transaction
     suspend fun updateSessionWithReadings(
         session: MeasurementSessionEntity,
         readings: List<MeasurementReadingEntity>
-    ) {
+    ): Boolean {
+        if (updateSessionEntity(session) != 1) return false
         deleteReadingsBySessionId(session.id)
-        insertSession(session)
         insertReadings(readings)
+        return true
     }
 
     @Query("DELETE FROM measurement_readings")

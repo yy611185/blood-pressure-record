@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.bloodpressurerecord.data.db.AppDatabase
+import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -154,5 +155,33 @@ class DefaultBloodPressureRepositoryTest {
         ).getOrThrow()
 
         assertFalse(repository.observeSession(sessionId).first()!!.containsHighRiskReading)
+    }
+
+    @Test
+    fun repository_rejects_future_measurement_time() = runBlocking {
+        val fixedNow = 1_700_000_000_000L
+        val guardedRepository = DefaultBloodPressureRepository(
+            sessionDao = database.measurementSessionDao(),
+            nowMillis = { fixedNow }
+        )
+
+        val result = guardedRepository.saveSession(
+            SaveSessionInput(
+                measuredAt = fixedNow + MeasurementTimestampValidator.FUTURE_TOLERANCE_MILLIS + 1,
+                scene = "晨起",
+                note = null,
+                symptoms = emptyList(),
+                readings = listOf(
+                    SessionReadingInput(120, 80, 70),
+                    SessionReadingInput(122, 82, 72)
+                )
+            )
+        )
+
+        assertTrue(result.isFailure)
+        assertEquals(
+            MeasurementTimestampValidator.FUTURE_MEASUREMENT_TIME_MESSAGE,
+            result.exceptionOrNull()?.message
+        )
     }
 }

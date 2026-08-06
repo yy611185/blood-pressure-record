@@ -8,6 +8,7 @@ import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
+import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -16,7 +17,8 @@ import java.util.UUID
 class DefaultBloodPressureRepository(
     private val sessionDao: MeasurementSessionDao,
     /** 数据变化后的回调（用于刷新桌面小部件等）。 */
-    private val onDataChanged: (() -> Unit)? = null
+    private val onDataChanged: (() -> Unit)? = null,
+    private val nowMillis: () -> Long = System::currentTimeMillis
 ) : BloodPressureRepository {
 
     override fun observeSession(sessionId: String): Flow<SessionRecord?> {
@@ -80,8 +82,9 @@ class DefaultBloodPressureRepository(
     }
 
     override suspend fun saveSession(input: SaveSessionInput): Result<String> = runCatching {
+        requireValidMeasurementTime(input.measuredAt)
         val sessionId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
+        val now = nowMillis()
         val session = buildSessionEntity(
             sessionId = sessionId,
             input = input,
@@ -95,9 +98,10 @@ class DefaultBloodPressureRepository(
     }
 
     override suspend fun updateSession(sessionId: String, input: SaveSessionInput): Result<Unit> = runCatching {
+        requireValidMeasurementTime(input.measuredAt)
         val existing = sessionDao.getSessionWithReadings(sessionId)
             ?: error("记录不存在，无法编辑")
-        val now = System.currentTimeMillis()
+        val now = nowMillis()
         val session = buildSessionEntity(
             sessionId = sessionId,
             input = input,
@@ -105,16 +109,19 @@ class DefaultBloodPressureRepository(
             updatedAt = now
         )
         val readings = buildReadingEntities(sessionId, input.readings)
-        sessionDao.updateSessionWithReadings(session, readings)
+        check(sessionDao.updateSessionWithReadings(session, readings)) {
+            "记录不存在，无法编辑"
+        }
         onDataChanged?.invoke()
     }
 
     override suspend fun deleteSession(sessionId: String): Result<Unit> = runCatching {
-        sessionDao.deleteSessionById(sessionId)
+        check(sessionDao.deleteSessionById(sessionId) == 1) { "记录不存在，无法删除" }
         onDataChanged?.invoke()
     }
 
     override suspend fun restoreSession(session: SessionRecord): Result<Unit> = runCatching {
+        requireValidMeasurementTime(session.measuredAt)
         val orderedReadings = session.readings.sortedBy { it.orderIndex }.map {
             SessionReadingInput(it.systolic, it.diastolic, it.pulse)
         }
@@ -129,8 +136,9 @@ class DefaultBloodPressureRepository(
         val entity = buildSessionEntity(
             sessionId = session.id,
             input = input,
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis()
+            createdAt = session.createdAt.takeIf { it > 0L } ?: nowMillis(),
+            updatedAt = session.updatedAt.takeIf { it > 0L } ?: session.createdAt.takeIf { it > 0L }
+                ?: nowMillis()
         )
         val readings = session.readings.sortedBy { it.orderIndex }.mapIndexed { index, reading ->
             MeasurementReadingEntity(
@@ -181,6 +189,12 @@ class DefaultBloodPressureRepository(
         )
     }
 
+    private fun requireValidMeasurementTime(measuredAt: Long) {
+        require(MeasurementTimestampValidator.validate(measuredAt, nowMillis()) == null) {
+            MeasurementTimestampValidator.FUTURE_MEASUREMENT_TIME_MESSAGE
+        }
+    }
+
     private fun buildReadingEntities(
         sessionId: String,
         inputs: List<SessionReadingInput>
@@ -211,6 +225,8 @@ class DefaultBloodPressureRepository(
             averageStrategy = session.averageStrategy.toAverageStrategy(),
             category = session.category,
             containsHighRiskReading = session.containsHighRiskReading,
+            createdAt = session.createdAt,
+            updatedAt = session.updatedAt,
             readings = readings.sortedBy { it.orderIndex }.map {
                 SessionReading(
                     id = it.id,

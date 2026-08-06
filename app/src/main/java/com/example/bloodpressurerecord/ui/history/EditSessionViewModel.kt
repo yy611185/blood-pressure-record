@@ -14,6 +14,7 @@ import com.example.bloodpressurerecord.ui.common.SessionFormDraft
 import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
+import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +57,8 @@ class EditSessionViewModel(
     private val sessionId: String,
     private val repository: BloodPressureRepository,
     discardFirstReading: Flow<Boolean> = flowOf(false),
-    savedStateHandle: SavedStateHandle = SavedStateHandle()
+    savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val nowMillis: () -> Long = System::currentTimeMillis
 ) : ViewModel() {
     private val discardFirstEnabled = discardFirstReading.stateIn(
         scope = viewModelScope,
@@ -231,6 +233,10 @@ class EditSessionViewModel(
         val measuredAt = DateTimeInputFormatter.parse(state.measuredAtText)
         if (measuredAt == null) {
             _uiState.update { it.copy(message = "测量时间格式不正确，请使用 yyyy-MM-dd HH:mm") }
+            return
+        }
+        MeasurementTimestampValidator.validate(measuredAt, nowMillis())?.let { message ->
+            _uiState.update { it.copy(message = message) }
             return
         }
         val validate = SessionFormLogic.validateAndBuildReadings(

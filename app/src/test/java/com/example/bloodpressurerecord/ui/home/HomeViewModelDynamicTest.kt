@@ -7,6 +7,8 @@ import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.data.repository.SessionRecord
 import com.example.bloodpressurerecord.data.repository.SessionSummary
+import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
+import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -16,6 +18,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelDynamicTest {
@@ -119,6 +122,31 @@ class HomeViewModelDynamicTest {
         assertTrue(!vm.uiState.value.saved)
         assertTrue(vm.uiState.value.formMessageIsError)
         assertTrue(vm.uiState.value.formMessage.startsWith("保存失败"))
+    }
+
+    @Test
+    fun future_measurement_time_is_rejected_before_save() = runTest {
+        val fixedNow = Instant.parse("2026-08-06T04:00:00Z").toEpochMilli()
+        val repo = FakeRepository()
+        val vm = HomeViewModel(repo, nowMillis = { fixedNow })
+        vm.updateMeasuredAtText(
+            DateTimeInputFormatter.format(
+                fixedNow + MeasurementTimestampValidator.FUTURE_TOLERANCE_MILLIS + 60_000
+            )
+        )
+        vm.updateReading1Systolic("120")
+        vm.updateReading1Diastolic("80")
+        vm.updateReading2Systolic("125")
+        vm.updateReading2Diastolic("82")
+
+        vm.onSaveClicked()
+
+        assertEquals(0, repo.savedCount)
+        assertEquals(
+            MeasurementTimestampValidator.FUTURE_MEASUREMENT_TIME_MESSAGE,
+            vm.uiState.value.formMessage
+        )
+        assertTrue(vm.uiState.value.formMessageIsError)
     }
 
     @Test
