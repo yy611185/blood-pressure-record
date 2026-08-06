@@ -100,7 +100,7 @@ class MedicationCalendarSync(
     private fun findWritableCalendarId(): Long? {
         val resolver = context.contentResolver
         var fallback: Long? = null
-        resolver.query(
+        val cursor = resolver.query(
             CalendarContract.Calendars.CONTENT_URI,
             arrayOf(
                 CalendarContract.Calendars._ID,
@@ -111,7 +111,8 @@ class MedicationCalendarSync(
             null,
             null,
             null
-        )?.use { cursor ->
+        ) ?: error("无法读取可写日历列表")
+        cursor.use {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(0)
                 val access = cursor.getInt(1)
@@ -143,7 +144,11 @@ class MedicationCalendarSync(
         }
         val eventUri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
             ?: error("无法写入日历日程")
-        val eventId = ContentUris.parseId(eventUri)
+        val eventId = runCatching { ContentUris.parseId(eventUri) }.getOrElse { throwable ->
+            val deleted = context.contentResolver.delete(eventUri, null, null)
+            check(deleted == 1) { "无法回滚无效的日历日程" }
+            throw IllegalStateException("日历日程返回了无效 URI", throwable)
+        }
         val reminderUri = context.contentResolver.insert(
             CalendarContract.Reminders.CONTENT_URI,
             ContentValues().apply {

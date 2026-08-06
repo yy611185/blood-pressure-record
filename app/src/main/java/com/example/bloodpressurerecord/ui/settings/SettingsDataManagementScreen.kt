@@ -144,6 +144,20 @@ fun SettingsDataManagementScreen(
                             "校验提示 ${preview.errorCount} 条；被跳过的记录不会写入。",
                             color = MaterialTheme.colorScheme.error
                         )
+                        preview.errors.take(5).forEach { error ->
+                            Text(
+                                text = "• ${error.message}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        if (preview.errorCount > 5) {
+                            Text(
+                                text = "还有 ${preview.errorCount - 5} 条校验提示未展开。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(

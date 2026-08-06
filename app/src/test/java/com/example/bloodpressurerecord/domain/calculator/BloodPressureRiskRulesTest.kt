@@ -2,11 +2,23 @@ package com.example.bloodpressurerecord.domain.calculator
 
 import com.example.bloodpressurerecord.domain.model.AverageResult
 import com.example.bloodpressurerecord.domain.model.ReadingValue
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BloodPressureRiskRulesTest {
+    @Test
+    fun `3级分级不等于高风险提醒`() {
+        assertEquals(
+            com.example.bloodpressurerecord.domain.model.BloodPressureCategory.STAGE3,
+            BloodPressureRules.category(170, 115)
+        )
+        assertFalse(BloodPressureRules.isHighRisk(170, 115))
+        assertTrue(BloodPressureRules.isHighRisk(180, 110))
+        assertTrue(BloodPressureRules.isHighRisk(170, 120))
+    }
+
     @Test
     fun `单组高风险但平均值未达到仍标记高风险`() {
         val readings = listOf(

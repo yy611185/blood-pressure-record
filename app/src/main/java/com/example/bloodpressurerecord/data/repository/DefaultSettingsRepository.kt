@@ -10,6 +10,8 @@ import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportService
 import com.example.bloodpressurerecord.data.repository.backup.BackupFileWriter
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
@@ -115,25 +117,76 @@ class DefaultSettingsRepository(
         )
     }
 
-    override suspend fun clearAllData(): Result<Unit> = runCatching {
-        database.withTransaction {
-            measurementSessionDao.deleteAllReadings()
-            measurementSessionDao.deleteAllSessions()
-            measurementDao.deleteAll()
-            if (measurementDao.tableExists("blood_pressure_records") > 0) {
-                database.openHelper.writableDatabase.execSQL("DELETE FROM blood_pressure_records")
+    override suspend fun clearAllData(): Result<ClearAllDataResult> {
+        var databaseCleared = false
+        try {
+            database.withTransaction {
+                measurementSessionDao.deleteAllReadings()
+                measurementSessionDao.deleteAllSessions()
+                measurementDao.deleteAll()
+                if (measurementDao.tableExists("blood_pressure_records") > 0) {
+                    database.openHelper.writableDatabase.execSQL("DELETE FROM blood_pressure_records")
+                }
+                userProfileDao.deleteAll()
+                database.medicationDao().deleteAllLogs()
+                database.medicationDao().deleteAllTimes()
+                database.medicationDao().deleteAllMedications()
             }
-            userProfileDao.deleteAll()
-            database.medicationDao().deleteAllLogs()
-            database.medicationDao().deleteAllTimes()
-            database.medicationDao().deleteAllMedications()
+            databaseCleared = true
+        } catch (throwable: Throwable) {
+            return Result.success(
+                ClearAllDataResult(
+                    databaseCleared = false,
+                    settingsCleared = false,
+                    remindersRescheduled = false,
+                    widgetRefreshed = false,
+                    warnings = listOf("数据库清理失败：${throwable.message ?: "未知错误"}")
+                )
+            )
         }
-        // “清空全部数据”应同时重置 DataStore 设置（含提醒与上次导出时间），
-        // 否则界面仍显示旧的导出记录和提醒配置。
-        appSettingsStore.clearAll()
-        rescheduleReminders()
-        medicationResync?.invoke()
-        onDataChanged?.invoke()
+
+        val warnings = mutableListOf<String>()
+        var settingsCleared = false
+        var remindersRescheduled = true
+        var widgetRefreshed = true
+
+        // 数据库已清理后，后续 DataStore/提醒/小部件失败都要如实返回，
+        // 不能把结果伪装成“数据没有删除”。
+        try {
+            // 在清空 DataStore 前先用持久化的旧时间点 id 取消药物闹钟，
+            // 否则清空设置会丢失取消旧 PendingIntent 所需的 id。
+            medicationResync?.invoke()
+        } catch (throwable: Throwable) {
+            remindersRescheduled = false
+            warnings += "服药提醒同步失败"
+        }
+        try {
+            appSettingsStore.clearAll()
+            settingsCleared = true
+        } catch (throwable: Throwable) {
+            warnings += "设置重置失败"
+        }
+        try {
+            rescheduleReminders()
+        } catch (throwable: Throwable) {
+            remindersRescheduled = false
+            warnings += "血压提醒同步失败"
+        }
+        try {
+            onDataChanged?.invoke()
+        } catch (throwable: Throwable) {
+            widgetRefreshed = false
+            warnings += "桌面小部件刷新失败"
+        }
+        return Result.success(
+            ClearAllDataResult(
+                databaseCleared = databaseCleared,
+                settingsCleared = settingsCleared,
+                remindersRescheduled = remindersRescheduled,
+                widgetRefreshed = widgetRefreshed,
+                warnings = warnings
+            )
+        )
     }
 
     override suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String> = runCatching {
@@ -176,17 +229,41 @@ class DefaultSettingsRepository(
     }
 
     override suspend fun importBackupXlsxFromUri(uri: Uri): Result<String> = runCatching {
+        val preview = previewBackupXlsxFromUri(uri).getOrThrow()
+        commitBackupImport(
+            preview,
+            BackupImportOptions(
+                importMeasurements = true,
+                restoreUserProfile = true,
+                restoreDisplaySettings = true,
+                restoreReminderSettings = true
+            )
+        ).getOrThrow()
+    }
+
+    override suspend fun previewBackupXlsxFromUri(uri: Uri): Result<BackupImportPreview> = runCatching {
         withContext(Dispatchers.IO) {
             val inputStream = context.contentResolver.openInputStream(uri)
                 ?: error("无法读取所选文件")
-            val result = inputStream.use { stream ->
+            inputStream.use { stream ->
                 BackupImportService(
                     database = database,
                     appSettingsStore = appSettingsStore
-                ).importXlsx(stream)
+                ).previewXlsx(stream)
             }
-            rescheduleReminders()
-            medicationResync?.invoke()
+        }
+    }
+
+    override suspend fun commitBackupImport(
+        preview: BackupImportPreview,
+        options: BackupImportOptions
+    ): Result<String> = runCatching {
+        withContext(Dispatchers.IO) {
+            val result = BackupImportService(
+                database = database,
+                appSettingsStore = appSettingsStore
+            ).commitImport(preview, options)
+            if (options.restoreReminderSettings) rescheduleReminders()
             onDataChanged?.invoke()
             result.toUserMessage()
         }

@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.data.repository.backup
 
 import androidx.room.withTransaction
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
+import com.example.bloodpressurerecord.data.datastore.AppSettings
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
@@ -10,16 +11,17 @@ import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
+import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import java.io.FilterInputStream
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
-import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
@@ -28,10 +30,16 @@ object BackupImportLimits {
     const val MAX_RECORDS = 5_000
     const val MAX_TOTAL_READING_ROWS = MAX_RECORDS * MeasurementInputRules.MAX_READING_COUNT
     const val MAX_RECORD_ID_LENGTH = 200
+    const val MAX_ZIP_ENTRIES = 512
+    const val MAX_UNCOMPRESSED_ENTRY_BYTES = 64L * 1024 * 1024
+    const val MAX_TOTAL_UNCOMPRESSED_BYTES = 128L * 1024 * 1024
+    const val MAX_WORKSHEET_XML_ENTRIES = 64
+    const val MIN_INFLATE_RATIO = 0.01
 }
 
 enum class BackupImportErrorCode {
     INVALID_TIME,
+    FUTURE_MEASUREMENT_TIME,
     INVALID_READING_COUNT,
     INVALID_READING,
     DUPLICATE_READING_ORDER,
@@ -57,17 +65,71 @@ data class BackupImportResult(
         get() = errors.size
 
     fun toUserMessage(): String {
+        val settingsWarning = if (errors.any { it.code == BackupImportErrorCode.SETTINGS_NOT_RESTORED }) {
+            "选定内容已导入，但设置恢复失败。"
+        } else {
+            ""
+        }
         return "备份导入完成：新增 $insertedCount 条，覆盖 $replacedCount 条，" +
-            "自动修正 $correctedCount 条，跳过 $skippedCount 条，错误 $errorCount 条。"
+            "自动修正 $correctedCount 条，跳过 $skippedCount 条，错误 $errorCount 条。" +
+            settingsWarning
     }
 }
+
+data class BackupImportOptions(
+    val importMeasurements: Boolean = true,
+    val restoreUserProfile: Boolean = false,
+    val restoreDisplaySettings: Boolean = false,
+    val restoreReminderSettings: Boolean = false
+)
+
+class BackupImportPreview internal constructor(
+    val validRecordCount: Int,
+    val insertedCount: Int,
+    val replacedCount: Int,
+    val correctedCount: Int,
+    val skippedCount: Int,
+    val readingCount: Int,
+    val errors: List<BackupImportError>,
+    val changesName: Boolean,
+    val changesAgeAndGender: Boolean,
+    val changesTargetPressure: Boolean,
+    val changesDisplaySettings: Boolean,
+    val changesReminderTimes: Boolean,
+    val changesReminderEnabled: Boolean,
+    internal val preparedRecords: List<PreparedImportRecord>,
+    internal val userProfile: Map<String, String>
+) {
+    val errorCount: Int
+        get() = errors.size
+}
+
+internal data class PreparedImportRecord(
+    val session: MeasurementSessionEntity,
+    val readings: List<MeasurementReadingEntity>,
+    val wasCorrected: Boolean
+)
 
 class BackupImportService(
     private val database: AppDatabase,
     private val appSettingsStore: AppSettingsStore,
-    private val beforeRecordWrite: (Int) -> Unit = {}
+    private val beforeRecordWrite: (Int) -> Unit = {},
+    private val nowMillis: () -> Long = System::currentTimeMillis
 ) {
-    suspend fun importXlsx(inputStream: InputStream): BackupImportResult = withContext(Dispatchers.IO) {
+    /** 兼容旧调用方：完整导入等价于预览后勾选所有可恢复内容并提交。 */
+    suspend fun importXlsx(inputStream: InputStream): BackupImportResult {
+        return commitImport(
+            previewXlsx(inputStream),
+            BackupImportOptions(
+                importMeasurements = true,
+                restoreUserProfile = true,
+                restoreDisplaySettings = true,
+                restoreReminderSettings = true
+            )
+        )
+    }
+
+    suspend fun previewXlsx(inputStream: InputStream): BackupImportPreview = withContext(Dispatchers.IO) {
         val document = BackupFileReader().readXlsx(
             SizeLimitedInputStream(inputStream, BackupImportLimits.MAX_FILE_BYTES)
         )
@@ -76,38 +138,58 @@ class BackupImportService(
             ?: throw BackupFormatException("备份时区无效，未执行导入")
 
         val errors = mutableListOf<BackupImportError>()
+        val validationNow = nowMillis()
         val preparedRecords = document.measurements.mapNotNull { source ->
-            prepareRecord(source, zone, errors)
+            prepareRecord(source, zone, validationNow, errors)
         }
         val skippedCount = document.measurements.size - preparedRecords.size
-        if (preparedRecords.isEmpty() && document.measurements.isNotEmpty()) {
-            return@withContext BackupImportResult(
-                insertedCount = 0,
-                replacedCount = 0,
-                correctedCount = 0,
-                skippedCount = skippedCount,
-                readingCount = 0,
-                errors = errors.toList()
-            )
-        }
-
         val dao = database.measurementSessionDao()
         val existingIds = hashSetOf<String>()
         preparedRecords.map { it.session.id }
             .chunked(DATABASE_BATCH_SIZE)
             .forEach { ids -> existingIds += dao.getExistingSessionIds(ids) }
+        val currentProfile = database.userProfileDao().getProfile()
+        val currentSettings = appSettingsStore.settingsFlow.first()
+        BackupImportPreview(
+            validRecordCount = preparedRecords.size,
+            insertedCount = preparedRecords.count { it.session.id !in existingIds },
+            replacedCount = preparedRecords.count { it.session.id in existingIds },
+            correctedCount = preparedRecords.count { it.wasCorrected },
+            skippedCount = skippedCount,
+            readingCount = preparedRecords.sumOf { it.readings.size },
+            errors = errors.toList(),
+            changesName = document.userProfile["name"].nonBlank() != currentProfile?.name,
+            changesAgeAndGender = document.userProfile["age"].toIntOrNullSafe() != currentProfile?.age ||
+                document.userProfile["sex"].nonBlank() != currentProfile?.gender,
+            changesTargetPressure = document.userProfile["target_sys"].toIntOrNullSafe() !=
+                currentProfile?.targetSystolic ||
+                document.userProfile["target_dia"].toIntOrNullSafe() != currentProfile?.targetDiastolic,
+            changesDisplaySettings = displaySettingsDiffer(document.userProfile, currentSettings),
+            changesReminderTimes = reminderTimesDiffer(document.userProfile, currentSettings),
+            changesReminderEnabled = reminderEnabledDiffer(document.userProfile, currentSettings),
+            preparedRecords = preparedRecords,
+            userProfile = document.userProfile
+        )
+    }
+
+    suspend fun commitImport(
+        preview: BackupImportPreview,
+        options: BackupImportOptions
+    ): BackupImportResult = withContext(Dispatchers.IO) {
+        val errors = preview.errors.toMutableList()
+        val records = if (options.importMeasurements) preview.preparedRecords else emptyList()
         database.withTransaction {
-            preparedRecords.chunked(DATABASE_BATCH_SIZE).forEachIndexed { batchIndex, batch ->
+            records.chunked(DATABASE_BATCH_SIZE).forEachIndexed { batchIndex, batch ->
                 batch.indices.forEach { indexInBatch ->
                     beforeRecordWrite(batchIndex * DATABASE_BATCH_SIZE + indexInBatch)
                 }
                 val ids = batch.map { it.session.id }
-                dao.deleteReadingsBySessionIds(ids)
-                dao.insertSessions(batch.map { it.session })
-                dao.insertReadings(batch.flatMap { it.readings })
+                database.measurementSessionDao().deleteReadingsBySessionIds(ids)
+                database.measurementSessionDao().insertSessions(batch.map { it.session })
+                database.measurementSessionDao().insertReadings(batch.flatMap { it.readings })
             }
-
-            document.userProfile.takeIf { it.isNotEmpty() }?.let { profile ->
+            if (options.restoreUserProfile && preview.userProfile.isNotEmpty()) {
+                val profile = preview.userProfile
                 database.userProfileDao().upsert(
                     UserProfileEntity(
                         id = 1,
@@ -116,28 +198,34 @@ class BackupImportService(
                         gender = profile["sex"].nonBlank(),
                         targetSystolic = profile["target_sys"].toIntOrNullSafe(),
                         targetDiastolic = profile["target_dia"].toIntOrNullSafe(),
-                        updatedAt = preparedRecords.maxOfOrNull { it.session.updatedAt }
-                            ?: System.currentTimeMillis()
+                        updatedAt = records.maxOfOrNull { it.session.updatedAt } ?: nowMillis()
                     )
                 )
             }
         }
 
-        runCatching { restoreSettings(document.userProfile) }
-            .onFailure {
+        if (options.restoreDisplaySettings || options.restoreReminderSettings) {
+            runCatching {
+                appSettingsStore.restoreFromBackup(
+                    values = preview.userProfile,
+                    restoreDisplaySettings = options.restoreDisplaySettings,
+                    restoreReminderSettings = options.restoreReminderSettings
+                )
+            }.onFailure {
                 errors += BackupImportError(
                     code = BackupImportErrorCode.SETTINGS_NOT_RESTORED,
                     sourceRowNumber = null,
-                    message = "测量记录已导入，但部分显示或提醒设置未能恢复。"
+                    message = "选定内容已导入，但部分显示或提醒设置未能恢复。"
                 )
             }
+        }
 
         BackupImportResult(
-            insertedCount = preparedRecords.count { it.session.id !in existingIds },
-            replacedCount = preparedRecords.count { it.session.id in existingIds },
-            correctedCount = preparedRecords.count { it.wasCorrected },
-            skippedCount = skippedCount,
-            readingCount = preparedRecords.sumOf { it.readings.size },
+            insertedCount = if (options.importMeasurements) preview.insertedCount else 0,
+            replacedCount = if (options.importMeasurements) preview.replacedCount else 0,
+            correctedCount = if (options.importMeasurements) preview.correctedCount else 0,
+            skippedCount = preview.skippedCount,
+            readingCount = if (options.importMeasurements) preview.readingCount else 0,
             errors = errors.toList()
         )
     }
@@ -145,6 +233,7 @@ class BackupImportService(
     private fun prepareRecord(
         source: BackupImportMeasurement,
         zoneId: ZoneId,
+        validationNow: Long,
         errors: MutableList<BackupImportError>
     ): PreparedImportRecord? {
         val measuredAt = parseDateTime(source.measuredAt, zoneId)
@@ -152,6 +241,13 @@ class BackupImportService(
             errors += source.error(
                 BackupImportErrorCode.INVALID_TIME,
                 "测量记录的时间字段无效。"
+            )
+            return null
+        }
+        if (MeasurementTimestampValidator.validate(measuredAt, validationNow) != null) {
+            errors += source.error(
+                BackupImportErrorCode.FUTURE_MEASUREMENT_TIME,
+                MeasurementTimestampValidator.FUTURE_MEASUREMENT_TIME_MESSAGE
             )
             return null
         }
@@ -263,26 +359,6 @@ class BackupImportService(
         return PreparedImportRecord(session, readings, corrected)
     }
 
-    private suspend fun restoreSettings(values: Map<String, String>) {
-        values["large_text_enabled"]?.toBooleanStrictOrNull()
-            ?.let { appSettingsStore.setLargeTextEnabled(it) }
-        values["high_risk_alert_enabled"]?.toBooleanStrictOrNull()
-            ?.let { appSettingsStore.setHighRiskAlertEnabled(it) }
-        values["discard_first_reading"]?.toBooleanStrictOrNull()
-            ?.let { appSettingsStore.setDiscardFirstReading(it) }
-        (values["show_trend_chart"] ?: values["display_show_target_line"])
-            ?.toBooleanStrictOrNull()
-            ?.let { appSettingsStore.setShowTrendChart(it) }
-        values["morning_reminder_time"].validTime()
-            ?.let { appSettingsStore.setMorningReminderTime(it) }
-        values["evening_reminder_time"].validTime()
-            ?.let { appSettingsStore.setEveningReminderTime(it) }
-        values["morning_reminder_enabled"]?.toBooleanStrictOrNull()
-            ?.let { appSettingsStore.setMorningReminderEnabled(it) }
-        values["evening_reminder_enabled"]?.toBooleanStrictOrNull()
-            ?.let { appSettingsStore.setEveningReminderEnabled(it) }
-    }
-
     private fun parseDateTime(value: String?, zoneId: ZoneId): Long? {
         if (value.isNullOrBlank()) return null
         return runCatching {
@@ -291,6 +367,50 @@ class BackupImportService(
                 .toInstant()
                 .toEpochMilli()
         }.getOrNull()
+    }
+
+    private fun displaySettingsDiffer(
+        values: Map<String, String>,
+        current: AppSettings
+    ): Boolean {
+        return listOf(
+            values["large_text_enabled"]?.toBooleanStrictOrNull()
+                ?.let { it != current.largeTextEnabled },
+            values["high_risk_alert_enabled"]?.toBooleanStrictOrNull()
+                ?.let { it != current.highRiskAlertEnabled },
+            values["discard_first_reading"]?.toBooleanStrictOrNull()
+                ?.let { it != current.discardFirstReading },
+            (values["show_trend_chart"] ?: values["display_show_target_line"])
+                ?.toBooleanStrictOrNull()?.let { it != current.showTrendChart }
+        ).any { it == true }
+    }
+
+    private fun reminderTimesDiffer(
+        values: Map<String, String>,
+        current: AppSettings
+    ): Boolean {
+        return listOf(
+            values["morning_reminder_time"]?.takeIf(::isValidTime)
+                ?.let { it != current.morningReminderTime },
+            values["evening_reminder_time"]?.takeIf(::isValidTime)
+                ?.let { it != current.eveningReminderTime }
+        ).any { it == true }
+    }
+
+    private fun reminderEnabledDiffer(
+        values: Map<String, String>,
+        current: AppSettings
+    ): Boolean {
+        return listOf(
+            values["morning_reminder_enabled"]?.toBooleanStrictOrNull()
+                ?.let { it != current.morningReminderEnabled },
+            values["evening_reminder_enabled"]?.toBooleanStrictOrNull()
+                ?.let { it != current.eveningReminderEnabled }
+        ).any { it == true }
+    }
+
+    private fun isValidTime(value: String): Boolean {
+        return Regex("^(?:[01]\\d|2[0-3]):[0-5]\\d$").matches(value)
     }
 
     private fun BackupImportMeasurement.error(
@@ -339,15 +459,6 @@ class BackupImportService(
 
     private fun String?.nonBlank(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
     private fun String?.toIntOrNullSafe(): Int? = nonBlank()?.toIntOrNull()
-    private fun String?.validTime(): String? = nonBlank()?.takeIf {
-        runCatching { LocalTime.parse(it) }.isSuccess
-    }
-
-    private data class PreparedImportRecord(
-        val session: MeasurementSessionEntity,
-        val readings: List<MeasurementReadingEntity>,
-        val wasCorrected: Boolean
-    )
 
     companion object {
         private const val DATABASE_BATCH_SIZE = 250

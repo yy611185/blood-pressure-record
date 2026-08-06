@@ -101,7 +101,15 @@ class TrendViewModelTest {
         override suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) = Unit
         override suspend fun refreshReminders() = Unit
         override suspend fun saveUserProfile(profile: UserProfile) = Unit
-        override suspend fun clearAllData(): Result<Unit> = Result.success(Unit)
+        override suspend fun clearAllData(): Result<com.example.bloodpressurerecord.data.repository.ClearAllDataResult> =
+            Result.success(
+                com.example.bloodpressurerecord.data.repository.ClearAllDataResult(
+                    databaseCleared = true,
+                    settingsCleared = true,
+                    remindersRescheduled = true,
+                    widgetRefreshed = true
+                )
+            )
         override suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String> =
             Result.success("")
         override suspend fun importBackupXlsxFromUri(uri: Uri): Result<String> = Result.success("")

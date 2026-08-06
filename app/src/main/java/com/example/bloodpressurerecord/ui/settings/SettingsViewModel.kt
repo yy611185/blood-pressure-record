@@ -7,6 +7,8 @@ import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +37,11 @@ data class SettingsUiState(
     val showClearConfirm: Boolean = false,
     val showBackupExportConfirm: Boolean = false,
     val showBackupImportConfirm: Boolean = false,
+    val backupImportPreview: BackupImportPreview? = null,
+    val importMeasurementsSelected: Boolean = true,
+    val restoreUserProfileSelected: Boolean = false,
+    val restoreDisplaySettingsSelected: Boolean = false,
+    val restoreReminderSettingsSelected: Boolean = false,
     val isDataActionRunning: Boolean = false,
     val lastSuccessfulExportAt: Long? = null,
     val ageError: String? = null,
@@ -443,22 +450,44 @@ class SettingsViewModel(
     }
 
     fun dismissBackupImport() {
-        _uiState.update { it.copy(showBackupImportConfirm = false) }
+        _uiState.update {
+            it.copy(
+                showBackupImportConfirm = false,
+                backupImportPreview = null,
+                importMeasurementsSelected = true,
+                restoreUserProfileSelected = false,
+                restoreDisplaySettingsSelected = false,
+                restoreReminderSettingsSelected = false
+            )
+        }
     }
 
     fun importBackupXlsxFromUri(uri: Uri) {
+        previewBackupXlsxFromUri(uri)
+    }
+
+    fun previewBackupXlsxFromUri(uri: Uri) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     showBackupImportConfirm = false,
                     isDataActionRunning = true,
-                    message = "正在验证并导入备份..."
+                    message = "正在验证备份并生成导入预览..."
                 )
             }
-            repository.importBackupXlsxFromUri(uri)
-                .onSuccess { message ->
-                    isProfileDirty = false
-                    _uiState.update { it.copy(isDataActionRunning = false, message = message) }
+            repository.previewBackupXlsxFromUri(uri)
+                .onSuccess { preview ->
+                    _uiState.update {
+                        it.copy(
+                            isDataActionRunning = false,
+                            backupImportPreview = preview,
+                            importMeasurementsSelected = true,
+                            restoreUserProfileSelected = false,
+                            restoreDisplaySettingsSelected = false,
+                            restoreReminderSettingsSelected = false,
+                            message = "预览完成：不会自动写入数据，请确认导入范围。"
+                        )
+                    }
                 }
                 .onFailure { throwable ->
                     _uiState.update {
@@ -471,6 +500,57 @@ class SettingsViewModel(
         }
     }
 
+    fun setImportMeasurementsSelected(selected: Boolean) {
+        _uiState.update { it.copy(importMeasurementsSelected = selected) }
+    }
+
+    fun setRestoreUserProfileSelected(selected: Boolean) {
+        _uiState.update { it.copy(restoreUserProfileSelected = selected) }
+    }
+
+    fun setRestoreDisplaySettingsSelected(selected: Boolean) {
+        _uiState.update { it.copy(restoreDisplaySettingsSelected = selected) }
+    }
+
+    fun setRestoreReminderSettingsSelected(selected: Boolean) {
+        _uiState.update { it.copy(restoreReminderSettingsSelected = selected) }
+    }
+
+    fun commitBackupImport() {
+        val state = _uiState.value
+        val preview = state.backupImportPreview ?: return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isDataActionRunning = true, message = "正在提交导入，请稍候...")
+            }
+            repository.commitBackupImport(
+                preview = preview,
+                options = BackupImportOptions(
+                    importMeasurements = state.importMeasurementsSelected,
+                    restoreUserProfile = state.restoreUserProfileSelected,
+                    restoreDisplaySettings = state.restoreDisplaySettingsSelected,
+                    restoreReminderSettings = state.restoreReminderSettingsSelected
+                )
+            ).onSuccess { message ->
+                isProfileDirty = false
+                _uiState.update {
+                    it.copy(
+                        isDataActionRunning = false,
+                        backupImportPreview = null,
+                        message = message
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update {
+                    it.copy(
+                        isDataActionRunning = false,
+                        message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
+                    )
+                }
+            }
+        }
+    }
+
     fun dismissClearAll() {
         _uiState.update { it.copy(showClearConfirm = false) }
     }
@@ -479,13 +559,13 @@ class SettingsViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isDataActionRunning = true, message = "正在清空本地数据...") }
             repository.clearAllData()
-                .onSuccess {
+                .onSuccess { result ->
                     isProfileDirty = false
                     _uiState.update {
                         it.copy(
                             showClearConfirm = false,
                             isDataActionRunning = false,
-                            message = "全部数据已清空。"
+                            message = result.toUserMessage()
                         )
                     }
                 }

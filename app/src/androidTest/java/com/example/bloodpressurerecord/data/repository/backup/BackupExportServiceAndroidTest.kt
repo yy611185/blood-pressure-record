@@ -8,6 +8,8 @@ import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.test.runTest
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.junit.After
@@ -184,6 +186,64 @@ class BackupExportServiceAndroidTest {
         assertEquals(121, restored?.avgSystolic)
         assertEquals(81, restored?.avgDiastolic)
         assertEquals(61, restored?.avgPulse)
+    }
+
+    @Test
+    fun previewDoesNotWrite_andCommitUsesTheValidatedPreview() = runTest {
+        val bytes = exportSingleSession(
+            "preview-only",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+        val service = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        )
+
+        val preview = service.previewXlsx(ByteArrayInputStream(bytes))
+
+        assertEquals(1, preview.validRecordCount)
+        assertEquals(0, database.measurementSessionDao().countSessions())
+        val result = service.commitImport(
+            preview,
+            BackupImportOptions(
+                importMeasurements = true,
+                restoreUserProfile = false,
+                restoreDisplaySettings = false,
+                restoreReminderSettings = false
+            )
+        )
+
+        assertEquals(1, result.insertedCount)
+        assertEquals(1, database.measurementSessionDao().countSessions())
+    }
+
+    @Test
+    fun preview_skipsMeasurementBeyondFutureToleranceWithoutWriting() = runTest {
+        val bytes = exportSingleSession(
+            "future-import",
+            listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+        )
+        database.measurementSessionDao().deleteAllReadings()
+        database.measurementSessionDao().deleteAllSessions()
+        val future = mutateWorkbook(bytes) { workbook ->
+            workbook.getSheet("测量记录").getRow(1).getCell(1).setCellValue(
+                LocalDateTime.now()
+                    .plusMinutes(5)
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            )
+        }
+
+        val preview = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        ).previewXlsx(ByteArrayInputStream(future))
+
+        assertEquals(0, preview.validRecordCount)
+        assertEquals(1, preview.skippedCount)
+        assertEquals(BackupImportErrorCode.FUTURE_MEASUREMENT_TIME, preview.errors.single().code)
+        assertEquals(0, database.measurementSessionDao().countSessions())
     }
 
     @Test
