@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.example.bloodpressurerecord"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.yang.bloodpressure"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 28
         versionName = "1.8.1"
 

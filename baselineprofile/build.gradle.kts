@@ -6,11 +6,11 @@ plugins {
 
 android {
     namespace = "com.example.bloodpressurerecord.baselineprofile"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 28
-        targetSdk = 34
+        targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
