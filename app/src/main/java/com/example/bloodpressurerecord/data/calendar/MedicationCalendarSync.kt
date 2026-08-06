@@ -12,6 +12,8 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -25,6 +27,7 @@ class MedicationCalendarSync(
     private val context: Context,
     private val zoneId: ZoneId = ZoneId.systemDefault()
 ) {
+    private val rebuildMutex = Mutex()
 
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
@@ -39,48 +42,59 @@ class MedicationCalendarSync(
      * @return 成功创建的日程数；无权限或无可写日历时返回 null
      */
     suspend fun rebuild(slots: List<MedicationSlot>, enabled: Boolean): Int? =
-        withContext(Dispatchers.IO) {
+        rebuildMutex.withLock {
+            withContext(Dispatchers.IO) {
             if (!hasPermission()) return@withContext null
             // 删除失败时不能继续新增，否则每次同步都会产生重复日程。
             deleteOurEvents()
             if (!enabled) return@withContext 0
             val calendarId = findWritableCalendarId() ?: return@withContext null
             var created = 0
+            val createdEventIds = mutableListOf<Long>()
             try {
                 slots.forEach { slot ->
-                    insertDailyEvent(calendarId, slot)
+                    createdEventIds += insertDailyEvent(calendarId, slot)
                     created += 1
                 }
             } catch (throwable: Throwable) {
-                // 尽力回滚本轮已创建的日程，避免留下半套配置。
-                runCatching { deleteOurEvents() }
+                // 只回滚本轮创建的事件，避免把其他合法的本应用日程一并删除。
+                createdEventIds.asReversed().forEach { eventId ->
+                    runCatching { deleteEvent(eventId) }
+                }
                 throw throwable
             }
             created
+            }
         }
 
     private fun deleteOurEvents() {
         val resolver = context.contentResolver
-        val selection = "(${CalendarContract.Events.CUSTOM_APP_PACKAGE} = ?) OR " +
-            "(${CalendarContract.Events.TITLE} LIKE ? AND ${CalendarContract.Events.DESCRIPTION} = ?)"
-        val args = arrayOf(context.packageName, "服药提醒：%", EVENT_DESCRIPTION)
+        val selection = "${CalendarContract.Events.CUSTOM_APP_PACKAGE} = ? AND " +
+            "${CalendarContract.Events.DESCRIPTION} = ?"
+        val args = arrayOf(context.packageName, EVENT_DESCRIPTION)
         val ids = mutableListOf<Long>()
-        resolver.query(
+        val cursor = resolver.query(
             CalendarContract.Events.CONTENT_URI,
             arrayOf(CalendarContract.Events._ID),
             selection,
             args,
             null
-        )?.use { cursor ->
+        ) ?: error("无法读取本应用的日历日程")
+        cursor.use {
             while (cursor.moveToNext()) ids.add(cursor.getLong(0))
         }
         ids.forEach { id ->
-            resolver.delete(
-                ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
-                null,
-                null
-            )
+            deleteEvent(id)
         }
+    }
+
+    private fun deleteEvent(eventId: Long) {
+        val deleted = context.contentResolver.delete(
+            ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId),
+            null,
+            null
+        )
+        check(deleted == 1) { "无法删除本应用的日历日程 $eventId" }
     }
 
     private fun findWritableCalendarId(): Long? {
@@ -112,7 +126,7 @@ class MedicationCalendarSync(
         return fallback
     }
 
-    private fun insertDailyEvent(calendarId: Long, slot: MedicationSlot) {
+    private fun insertDailyEvent(calendarId: Long, slot: MedicationSlot): Long {
         val time = LocalTime.parse(slot.timeText)
         val start = LocalDate.now(zoneId).atTime(time).atZone(zoneId).toInstant().toEpochMilli()
         val values = ContentValues().apply {
@@ -130,7 +144,7 @@ class MedicationCalendarSync(
         val eventUri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
             ?: error("无法写入日历日程")
         val eventId = ContentUris.parseId(eventUri)
-        context.contentResolver.insert(
+        val reminderUri = context.contentResolver.insert(
             CalendarContract.Reminders.CONTENT_URI,
             ContentValues().apply {
                 put(CalendarContract.Reminders.EVENT_ID, eventId)
@@ -138,6 +152,11 @@ class MedicationCalendarSync(
                 put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
             }
         )
+        if (reminderUri == null) {
+            deleteEvent(eventId)
+            error("无法为日历日程写入提醒")
+        }
+        return eventId
     }
 
     companion object {
