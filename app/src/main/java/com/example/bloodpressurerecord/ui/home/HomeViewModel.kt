@@ -12,6 +12,7 @@ import com.example.bloodpressurerecord.ui.common.SessionFormDraft
 import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
+import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
@@ -53,7 +54,8 @@ class HomeViewModel(
     private val repository: BloodPressureRepository,
     highRiskAlertEnabled: Flow<Boolean> = flowOf(true),
     discardFirstReading: Flow<Boolean> = flowOf(false),
-    savedStateHandle: SavedStateHandle = SavedStateHandle()
+    savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val nowMillis: () -> Long = System::currentTimeMillis
 ) : ViewModel() {
     // 注意：discardFirstEnabled 必须先于 localState 初始化，
     // 因为恢复草稿时 recomputeDerived 会读取当前平均策略。
@@ -197,6 +199,10 @@ class HomeViewModel(
                     formMessageIsError = true
                 )
             }
+            return
+        }
+        MeasurementTimestampValidator.validate(measuredAt, nowMillis())?.let { message ->
+            localState.update { it.copy(formMessage = message, formMessageIsError = true) }
             return
         }
         val validate = SessionFormLogic.validateAndBuildReadings(
