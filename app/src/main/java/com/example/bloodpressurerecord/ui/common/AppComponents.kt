@@ -75,7 +75,8 @@ fun AppPrimaryButton(
 fun AppSecondaryButton(
     text: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null
 ) {
     Button(
         onClick = onClick,
@@ -87,6 +88,10 @@ fun AppSecondaryButton(
         ),
         elevation = ButtonDefaults.buttonElevation(0.dp)
     ) {
+        if (icon != null) {
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(modifier = Modifier.width(AppSpacing.small))
+        }
         Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
     }
 }

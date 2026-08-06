@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.Display
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -17,6 +18,8 @@ import androidx.compose.ui.unit.Density
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bloodpressurerecord.ui.LocalAppFontScale
 import com.example.bloodpressurerecord.navigation.BloodPressureAppRoot
+import com.example.bloodpressurerecord.ui.scan.ScanCameraActive
+import com.example.bloodpressurerecord.ui.scan.ScanVolumeKeyBus
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 
@@ -99,5 +102,18 @@ class MainActivity : ComponentActivity() {
                 preferredDisplayModeId = bestMode.modeId
             }
         }
+    }
+
+    /** 拍照识别取景页激活时，把音量键转成快门；其余情况交给系统。 */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val isVolumeKey = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+            event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        if (ScanCameraActive.isActive && isVolumeKey) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                ScanVolumeKeyBus.emitShutter()
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 }

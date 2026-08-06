@@ -99,6 +99,8 @@ class TrendViewModelTest {
         override suspend fun setEveningReminderTime(value: String) = Unit
         override suspend fun setMedicationReminderEnabled(enabled: Boolean) = Unit
         override suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) = Unit
+        override suspend fun setSaveScanPhotosEnabled(enabled: Boolean) = Unit
+        override suspend fun clearScanPhotos(olderThanDays: Int?) = Result.success("ok")
         override suspend fun refreshReminders() = Unit
         override suspend fun saveUserProfile(profile: UserProfile) = Unit
         override suspend fun clearAllData(): Result<com.example.bloodpressurerecord.data.repository.ClearAllDataResult> =

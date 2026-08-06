@@ -10,6 +10,7 @@ import com.example.bloodpressurerecord.domain.time.dayTicks
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardViewModel
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
+import com.example.bloodpressurerecord.ui.scan.ScanViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import kotlinx.coroutines.flow.map
@@ -67,6 +68,19 @@ class AppViewModelFactory(
                 SettingsViewModel(
                     repository = container.settingsRepository,
                     medicationRepository = container.medicationRepository
+                ) as T
+            }
+
+            ScanViewModel::class.java -> {
+                ScanViewModel(
+                    repository = container.bloodPressureRepository,
+                    ocrEngine = container.ocrEngine,
+                    photoSaver = container.scanPhotoSaver,
+                    saveScanPhotosEnabled = container.settingsRepository.observeSettings()
+                        .map { it.appSettings.saveScanPhotosEnabled },
+                    discardFirstReading = container.settingsRepository.observeSettings()
+                        .map { it.appSettings.discardFirstReading },
+                    savedStateHandle = savedStateHandle
                 ) as T
             }
 
