@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -67,7 +68,7 @@ fun SettingsDataManagementScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            viewModel.importBackupXlsxFromUri(uri)
+            viewModel.previewBackupXlsxFromUri(uri)
         } else {
             viewModel.dismissBackupImport()
         }
@@ -79,7 +80,9 @@ fun SettingsDataManagementScreen(
             title = { Text("导出 Excel 备份") },
             text = {
                 Text(
-                    "导出的文件只会保存到您选择的位置，不会上传服务器。文件包含使用说明、测量记录、用户资料和导出信息。"
+                    "导出的 Excel 文件未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置。" +
+                        "请勿保存到公共设备、不受信任的云盘或与他人共享的位置。文件只会保存到您选择的位置，" +
+                        "应用不会上传服务器。"
                 )
             },
             confirmButton = {
@@ -89,7 +92,7 @@ fun SettingsDataManagementScreen(
                         backupExportLauncher.launch(pendingExportFileName)
                     }
                 ) {
-                    Text("选择保存位置")
+                    Text("继续导出")
                 }
             },
             dismissButton = {
@@ -105,7 +108,7 @@ fun SettingsDataManagementScreen(
             onDismissRequest = viewModel::dismissBackupImport,
             title = { Text("导入 Excel 备份") },
             text = {
-                Text("相同 record_id 的记录会由备份内容覆盖；其他本机记录会保留。请确认文件来自可信来源。")
+                Text("先选择文件生成预览；预览阶段不会写入本机数据。确认后可选择导入记录、用户资料、显示设置和提醒设置。")
             },
             confirmButton = {
                 TextButton(
@@ -118,6 +121,68 @@ fun SettingsDataManagementScreen(
                         )
                     }
                 ) { Text("选择备份文件") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissBackupImport) { Text("取消") }
+            }
+        )
+    }
+
+    uiState.backupImportPreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissBackupImport,
+            title = { Text("确认导入范围") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "可用记录 ${preview.validRecordCount} 条，新增 ${preview.insertedCount} 条，" +
+                            "覆盖 ${preview.replacedCount} 条，自动修正 ${preview.correctedCount} 条，" +
+                            "跳过 ${preview.skippedCount} 条，原始读数 ${preview.readingCount} 组。"
+                    )
+                    if (preview.errorCount > 0) {
+                        Text(
+                            "校验提示 ${preview.errorCount} 条；被跳过的记录不会写入。",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = uiState.importMeasurementsSelected,
+                            onCheckedChange = viewModel::setImportMeasurementsSelected
+                        )
+                        Text("导入测量记录（覆盖同 record_id）")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = uiState.restoreUserProfileSelected,
+                            onCheckedChange = viewModel::setRestoreUserProfileSelected
+                        )
+                        Text("恢复用户资料" + if (preview.changesName || preview.changesAgeAndGender || preview.changesTargetPressure) "（有变化）" else "")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = uiState.restoreDisplaySettingsSelected,
+                            onCheckedChange = viewModel::setRestoreDisplaySettingsSelected
+                        )
+                        Text("恢复显示设置" + if (preview.changesDisplaySettings) "（有变化）" else "")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = uiState.restoreReminderSettingsSelected,
+                            onCheckedChange = viewModel::setRestoreReminderSettingsSelected
+                        )
+                        Text(
+                            "恢复提醒设置" +
+                                if (preview.changesReminderTimes || preview.changesReminderEnabled) "（有变化）" else ""
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !uiState.isDataActionRunning,
+                    onClick = viewModel::commitBackupImport
+                ) { Text("确认导入") }
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissBackupImport) { Text("取消") }
