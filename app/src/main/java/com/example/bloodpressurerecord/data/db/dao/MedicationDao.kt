@@ -66,6 +66,9 @@ interface MedicationDao {
     @Query("SELECT * FROM medication_times WHERE id = :timeId")
     suspend fun getTime(timeId: Long): MedicationTimeEntity?
 
+    @Query("SELECT id FROM medication_times")
+    suspend fun getAllTimeIds(): List<Long>
+
     @Query("SELECT * FROM medications WHERE id = :id")
     suspend fun getMedication(id: Long): MedicationEntity?
 

@@ -40,10 +40,6 @@ class ReminderScheduler(
 
     fun apply(settings: AppSettings) {
         ReminderNotifications.ensureChannel(context)
-        if (ReminderAuthorization.status(context) != ReminderAuthorizationStatus.GRANTED) {
-            cancelAll()
-            return
-        }
         scheduleOrCancel(
             type = ReminderType.MORNING,
             enabled = settings.morningReminderEnabled,
@@ -68,7 +64,12 @@ class ReminderScheduler(
             alarmManager.cancel(pendingIntent)
             return
         }
-        val triggerAt = ReminderTimeCalculator.nextTriggerMillis(timeText, now(), zoneId) ?: return
+        val triggerAt = ReminderTimeCalculator.nextTriggerMillis(timeText, now(), zoneId)
+            ?: run {
+                // 时间被改坏时也要清理旧闹钟，不能让已失效的配置继续触发。
+                alarmManager.cancel(pendingIntent)
+                return
+            }
         // 血压提醒对时间敏感：优先使用精确闹钟；用户在系统里撤销精确闹钟权限时
         // 回退到非精确闹钟，保证提醒仍然会到达。
         if (canScheduleExactAlarms()) {

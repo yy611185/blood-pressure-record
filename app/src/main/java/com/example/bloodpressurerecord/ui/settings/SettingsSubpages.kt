@@ -106,26 +106,13 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     var authorizationStatus by remember {
         mutableStateOf(ReminderAuthorization.status(context))
     }
-    var pendingEnable by remember { mutableStateOf<ReminderType?>(null) }
-    var pendingEnableMedication by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         authorizationStatus = ReminderAuthorization.status(context)
-        val type = pendingEnable
-        val medicationPending = pendingEnableMedication
-        pendingEnable = null
-        pendingEnableMedication = false
-        if (granted && authorizationStatus == ReminderAuthorizationStatus.GRANTED) {
-            when (type) {
-                ReminderType.MORNING -> viewModel.setMorningReminderEnabled(true)
-                ReminderType.EVENING -> viewModel.setEveningReminderEnabled(true)
-                null -> Unit
-            }
-            if (medicationPending) viewModel.setMedicationReminderEnabled(true)
-        } else {
+        if (!granted || authorizationStatus != ReminderAuthorizationStatus.GRANTED) {
             viewModel.showReminderAuthorizationRequired(
-                "通知权限未授予，提醒尚未启用。可前往系统通知设置授权。"
+                "提醒开关已启用，但通知权限未授予；应用内闹钟仍会继续安排，到点后不会显示系统通知。"
             )
         }
     }
@@ -156,20 +143,21 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 
     fun requestEnable(type: ReminderType) {
         authorizationStatus = ReminderAuthorization.status(context)
+        // “是否安排闹钟”和“是否允许显示通知”是两个独立状态。
+        when (type) {
+            ReminderType.MORNING -> viewModel.setMorningReminderEnabled(true)
+            ReminderType.EVENING -> viewModel.setEveningReminderEnabled(true)
+        }
         when (authorizationStatus) {
-            ReminderAuthorizationStatus.GRANTED -> when (type) {
-                ReminderType.MORNING -> viewModel.setMorningReminderEnabled(true)
-                ReminderType.EVENING -> viewModel.setEveningReminderEnabled(true)
-            }
+            ReminderAuthorizationStatus.GRANTED -> Unit
             ReminderAuthorizationStatus.RUNTIME_PERMISSION_REQUIRED -> {
-                pendingEnable = type
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
             ReminderAuthorizationStatus.SYSTEM_DISABLED -> {
                 viewModel.showReminderAuthorizationRequired(
-                    "系统通知已关闭，提醒尚未启用。请先前往系统通知设置开启。"
+                    "提醒已启用，但系统通知已关闭；应用内闹钟仍会继续安排。请前往系统通知设置开启通知。"
                 )
             }
         }
@@ -241,18 +229,17 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         ) { enabled ->
             if (enabled) {
                 authorizationStatus = ReminderAuthorization.status(context)
+                viewModel.setMedicationReminderEnabled(true)
                 when (authorizationStatus) {
-                    ReminderAuthorizationStatus.GRANTED ->
-                        viewModel.setMedicationReminderEnabled(true)
+                    ReminderAuthorizationStatus.GRANTED -> Unit
                     ReminderAuthorizationStatus.RUNTIME_PERMISSION_REQUIRED -> {
-                        pendingEnableMedication = true
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     }
                     ReminderAuthorizationStatus.SYSTEM_DISABLED -> {
                         viewModel.showReminderAuthorizationRequired(
-                            "系统通知已关闭，服药提醒尚未启用。请先前往系统通知设置开启。"
+                            "服药提醒已启用，但系统通知已关闭；应用内闹钟仍会继续安排。请前往系统通知设置开启通知。"
                         )
                     }
                 }
