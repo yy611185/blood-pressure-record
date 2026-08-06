@@ -35,11 +35,12 @@ class MedicationReminderScheduler(
     fun apply(
         enabled: Boolean,
         slots: List<MedicationSlot>,
-        allTimeIds: Collection<Long> = slots.map { it.timeId }
+        allTimeIds: Collection<Long> = slots.map { it.timeId },
+        scheduledTimeIds: Collection<Long> = emptyList()
     ) {
         ReminderNotifications.ensureChannel(context)
         val slotsById = slots.associateBy { it.timeId }
-        (allTimeIds + slotsById.keys).distinct().forEach { timeId ->
+        (allTimeIds + scheduledTimeIds + slotsById.keys).distinct().forEach { timeId ->
             val pendingIntent = pendingIntent(timeId)
             val slot = slotsById[timeId]
             if (!enabled || slot == null) {
@@ -87,32 +88,42 @@ class MedicationReminderScheduler(
  * - [resyncAlarms]：按当前药品与设置重排全部精确闹钟（启动/开机/闹钟触发后自续）。
  * - [resyncAll]：闹钟 + 系统日历日程全量重建（药品或开关变更时调用）。
  *
- * 已删除时间点的旧闹钟会在触发时因查不到记录而自然失效，无需枚举取消。
+ * 已删除时间点的旧闹钟会通过 DataStore 中保存的历史 id 主动取消。
  */
 class MedicationReminderCoordinator(
     private val context: Context,
     private val medicationRepository: MedicationRepository
 ) {
     private val calendarSync = MedicationCalendarSync(context)
+    private val appSettingsStore = AppSettingsStore(context)
 
     suspend fun resyncAlarms() {
-        val settings = AppSettingsStore(context).settingsFlow.first()
+        val settings = appSettingsStore.settingsFlow.first()
         val slots = medicationRepository.getSlotsForDay(LocalDate.now())
+        val allTimeIds = medicationRepository.getAllTimeIds()
         MedicationReminderScheduler(context).apply(
             enabled = settings.medicationReminderEnabled,
             slots = slots,
-            allTimeIds = medicationRepository.getAllTimeIds()
+            allTimeIds = allTimeIds,
+            scheduledTimeIds = appSettingsStore.scheduledMedicationTimeIds.first()
         )
+        appSettingsStore.setScheduledMedicationTimeIds(allTimeIds)
     }
 
     suspend fun resyncAll() {
-        val settings = AppSettingsStore(context).settingsFlow.first()
+        val settings = appSettingsStore.settingsFlow.first()
         val slots = medicationRepository.getSlotsForDay(LocalDate.now())
+        val allTimeIds = medicationRepository.getAllTimeIds()
         MedicationReminderScheduler(context).apply(
             enabled = settings.medicationReminderEnabled,
             slots = slots,
-            allTimeIds = medicationRepository.getAllTimeIds()
+            allTimeIds = allTimeIds,
+            scheduledTimeIds = appSettingsStore.scheduledMedicationTimeIds.first()
         )
-        calendarSync.rebuild(slots, settings.medicationCalendarSyncEnabled)
+        appSettingsStore.setScheduledMedicationTimeIds(allTimeIds)
+        val calendarResult = calendarSync.rebuild(slots, settings.medicationCalendarSyncEnabled)
+        if (settings.medicationCalendarSyncEnabled && calendarResult == null) {
+            error("日历同步未完成：缺少日历权限或无法访问日历提供方")
+        }
     }
 }

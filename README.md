@@ -39,6 +39,9 @@
 - 导出文件包含使用说明、测量记录、全部原始读数、用户资料和导出信息。
 - 文件交给用户选择的 Android 文件位置或文件提供方；应用不会自行上传服务器。
 - 即使暂无测量记录，也可导出用户资料与设置。
+- 导出的 Excel 当前未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置；请勿放入公共设备、不受信任的云盘或与他人共享的位置。
+- 导入会先生成预览和统计信息，确认后才写入；可分别选择测量记录、用户资料、显示设置和提醒设置。
+- 导入会拒绝明显的未来测量时间、重复记录 id、损坏或超过大小/解压安全上限的 xlsx；被跳过的记录不会写入。
 
 ## 技术栈
 
@@ -80,10 +83,12 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ### 环境要求
 
-- Android Studio Hedgehog 或更高版本
+- Android Studio Meerkat | 2024.3.1 Patch 1 或更高版本
 - JDK 17
-- Android SDK 35
-- Gradle 8.7
+- Android SDK Platform 36、Build Tools 36.0.0 或更高版本
+- Android Gradle Plugin 8.10.1
+- Gradle 8.11.1
+- `minSdk = 26`，`compileSdk/targetSdk = 36`
 
 ### 构建命令
 
@@ -164,10 +169,16 @@ Release 构建不会回退使用 Debug 密钥。构建前需设置以下环境�
 
 ```bash
 # 单元测试
-./gradlew test
+./gradlew testDebugUnitTest
 
-# 界面测试
-./gradlew connectedAndroidTest
+# Lint 与 Debug 构建
+./gradlew lintDebug assembleDebug
+
+# Release 构建（未配置正式密钥时只生成 unsigned 产物）
+./gradlew bundleRelease assembleRelease
+
+# 界面测试（需要已连接的模拟器或真机）
+./gradlew connectedDebugAndroidTest
 ```
 
 测试覆盖：
@@ -178,11 +189,27 @@ Release 构建不会回退使用 Debug 密钥。构建前需设置以下环境�
 - Repository 保存/读取
 - Excel 导出写入
 
+## 维护与兼容性约束
+
+- Room 当前版本为 v7；新增字段或表必须提供显式迁移，禁止 destructive migration/fallback。修改记录更新逻辑时不得用 `REPLACE` 重建现有 session。
+- Excel 导入必须继续兼容 v2/v3；改变字段、派生平均值或风险阈值前先更新对应往返测试和迁移说明。
+- Android 16 构建使用 API 36、AGP 8.10.1、Gradle 8.11.1、JDK 17。Release 没有正式签名环境时只能生成 unsigned 产物，不能回退 Debug 密钥。
+- 本应用保持本地优先、无登录、无服务器、无网络上传；不要为了备份或提醒引入网络权限。
+- 提醒闹钟安排与通知显示权限分离；没有通知权限时仍保留闹钟链，非法时间只取消对应类型，日历事件与提醒必须成套创建或回滚。
+- 血压分级与高风险提醒是两套规则：3 级分级不自动等于高风险提醒；修改阈值必须同步更新领域测试和历史迁移逻辑。
+- 依赖升级需同时检查 Gradle 依赖锁定/校验元数据和许可证；如果后续生成 `gradle/verification-metadata.xml`，CI 不得通过关闭校验来绕过哈希变化。
+- 发布前至少执行 `testDebugUnitTest`、`lintDebug`、`assembleDebug`、`assembleRelease`，并在具备设备时执行 `connectedDebugAndroidTest`；使用 `apksigner verify` 检查 APK 签名。
+
+API 36 构建需要本机接受 Android SDK Platform 36 和 Build Tools 36 的许可证。
+Release 构建只在同时提供正式签名环境变量时签名；未配置时不会回退使用 Debug
+密钥。
+
 ## 隐私声明
 
 - 应用不自建服务器，也不会主动上传血压记录。
 - Room、DataStore 和其他本地健康数据的 Android 系统自动备份已关闭。
 - 备份必须由用户在“数据管理”中主动导出，导出文件仅保存到用户选择的位置。
+- Excel 备份当前为明文格式；用户需要自行保护导出文件，后续加密格式设计见 [`docs/backup-encryption-design.md`](docs/backup-encryption-design.md)。
 - 卸载应用前未导出的数据可能丢失；应用无法保证本地数据永不丢失。
 
 ## 许可协议

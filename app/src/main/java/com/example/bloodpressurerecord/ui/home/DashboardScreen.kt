@@ -98,6 +98,7 @@ fun DashboardScreen(
 
         MedicationTodayCard(
             slots = state.medicationSlots,
+            pendingTimeIds = state.pendingMedicationTimeIds,
             onToggle = viewModel::toggleMedicationTaken,
             onOpenSettings = onOpenMedicationSettings
         )
@@ -107,6 +108,7 @@ fun DashboardScreen(
 @Composable
 private fun MedicationTodayCard(
     slots: List<MedicationSlot>,
+    pendingTimeIds: Set<Long>,
     onToggle: (MedicationSlot, Boolean) -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -177,6 +179,7 @@ private fun MedicationTodayCard(
                         )
                         Checkbox(
                             checked = slot.taken,
+                            enabled = slot.timeId !in pendingTimeIds,
                             onCheckedChange = { checked -> onToggle(slot, checked) }
                         )
                     }

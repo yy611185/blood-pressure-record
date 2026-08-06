@@ -27,7 +27,7 @@ interface MedicationRepository {
 
     suspend fun getSlotsForDay(date: LocalDate): List<MedicationSlot>
 
-    /** 返回数据库中全部时间点的 id，用于清理已经删除的旧闹钟。 */
+    /** 返回数据库中现有时间点的 id；调度器会与 DataStore 中的旧 id 合并清理。 */
     suspend fun getAllTimeIds(): List<Long> = emptyList()
 
     suspend fun setTaken(medicationId: Long, timeId: Long, date: LocalDate, taken: Boolean)

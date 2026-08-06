@@ -1,7 +1,11 @@
 package com.example.bloodpressurerecord.data.repository.backup
 
+import java.io.File
 import java.io.InputStream
 import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
+import java.util.Locale
+import java.util.zip.ZipFile
 import org.apache.poi.openxml4j.util.ZipSecureFile
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
@@ -49,59 +53,175 @@ class BackupFileReader {
     private val formatter = DataFormatter()
 
     fun readXlsx(inputStream: InputStream): BackupImportDocument {
-        // 10 MB 的文件上限只限制压缩后字节；恶意 xlsx 解压后可膨胀上百倍导致 OOM。
-        // 这里显式限制解压比例与解压后的单条目大小，超限时 POI 抛异常并中止导入。
-        ZipSecureFile.setMinInflateRatio(MIN_INFLATE_RATIO)
-        ZipSecureFile.setMaxEntrySize(MAX_UNCOMPRESSED_ENTRY_BYTES)
-        val workbook = try {
-            XSSFWorkbook(inputStream)
+        val tempFile = try {
+            File.createTempFile("blood-pressure-backup-", ".xlsx")
+        } catch (throwable: Exception) {
+            throw BackupFormatException("无法准备备份文件校验空间", throwable)
+        }
+        try {
+            tempFile.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val count = inputStream.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > BackupImportLimits.MAX_FILE_BYTES) {
+                        throw BackupFormatException("备份文件超过 10 MB 上限")
+                    }
+                    output.write(buffer, 0, count)
+                }
+            }
+            preflightZip(tempFile)
+            // 10 MB 的文件上限只限制压缩后字节；下面的中央目录和实际解压读取
+            // 共同限制条目数、单条目大小、总解压大小和压缩炸弹比例。
+            ZipSecureFile.setMinInflateRatio(BackupImportLimits.MIN_INFLATE_RATIO)
+            ZipSecureFile.setMaxEntrySize(BackupImportLimits.MAX_UNCOMPRESSED_ENTRY_BYTES)
+            val workbook = try {
+                XSSFWorkbook(tempFile)
+            } catch (throwable: Exception) {
+                throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", throwable)
+            }
+
+            return workbook.use {
+                val metaSheet = workbook.getSheet(SHEET_META)
+                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
+                val meta = metaSheet.readKeyValues()
+                val version = meta["export_format_version"]?.toIntOrNull()
+                    ?: throw BackupFormatException("缺少或无法识别备份格式版本")
+                if (version !in SUPPORTED_FORMAT_VERSIONS) {
+                    throw BackupFormatException("不支持的备份格式版本：$version")
+                }
+
+                val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
+                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
+                val readingsSheet = workbook.getSheet(SHEET_READINGS)
+                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
+
+                val readingRows = readReadingRows(readingsSheet)
+                if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
+                    throw BackupFormatException("原始读数总数超过允许上限")
+                }
+                val measurements = readMeasurements(
+                    measurementSheet,
+                    readingRows.groupBy { it.recordId },
+                    formatVersion = version
+                )
+                if (measurements.size > BackupImportLimits.MAX_RECORDS) {
+                    throw BackupFormatException("测量记录总数超过允许上限")
+                }
+                val duplicateIds = measurements.groupingBy { it.recordId }
+                    .eachCount()
+                    .filterValues { it > 1 }
+                if (duplicateIds.isNotEmpty()) {
+                    throw BackupFormatException("备份中存在重复 record_id，未执行导入")
+                }
+                val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
+                if (readingRows.any { it.recordId !in knownIds }) {
+                    throw BackupFormatException("原始读数引用了不存在的测量记录")
+                }
+
+                BackupImportDocument(
+                    measurements = measurements,
+                    userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
+                    meta = meta
+                )
+            }
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    /** 在交给 POI 解析前先按 ZIP 中央目录和实际解压字节做有界预检。 */
+    private fun preflightZip(file: File) {
+        try {
+            ZipFile(file).use { zip ->
+                val names = hashSetOf<String>()
+                var entryCount = 0
+                var worksheetXmlCount = 0
+                var totalUncompressed = 0L
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    entryCount += 1
+                    if (entryCount > BackupImportLimits.MAX_ZIP_ENTRIES) {
+                        throw BackupFormatException("xlsx 条目数量超过安全上限")
+                    }
+                    val normalizedName = entry.name.replace('\\', '/')
+                    if (!names.add(normalizedName)) {
+                        throw BackupFormatException("xlsx 包含重复条目：${entry.name}")
+                    }
+                    if (normalizedName.startsWith('/') ||
+                        normalizedName.split('/').any { it == ".." } ||
+                        normalizedName.contains('\u0000')
+                    ) {
+                        throw BackupFormatException("xlsx 包含不安全的条目路径")
+                    }
+                    if (normalizedName.startsWith("xl/worksheets/") &&
+                        normalizedName.endsWith(".xml", ignoreCase = true)
+                    ) {
+                        worksheetXmlCount += 1
+                        if (worksheetXmlCount > BackupImportLimits.MAX_WORKSHEET_XML_ENTRIES) {
+                            throw BackupFormatException("xlsx 工作表数量超过安全上限")
+                        }
+                    }
+
+                    val declaredSize = entry.size
+                    if (declaredSize > BackupImportLimits.MAX_UNCOMPRESSED_ENTRY_BYTES) {
+                        throw BackupFormatException("xlsx 单个条目解压后超过 64 MB")
+                    }
+                    val compressedSize = entry.compressedSize
+                    if (declaredSize > 0L && compressedSize == 0L) {
+                        throw BackupFormatException("xlsx 条目压缩比例异常")
+                    }
+                    if (declaredSize > 0L && compressedSize > 0L &&
+                        declaredSize.toDouble() / compressedSize.toDouble() >
+                        1.0 / BackupImportLimits.MIN_INFLATE_RATIO
+                    ) {
+                        throw BackupFormatException("xlsx 条目压缩比例超过安全上限")
+                    }
+
+                    var entryBytes = 0L
+                    val isXml = normalizedName.endsWith(".xml", ignoreCase = true)
+                    var xmlScanTail = ""
+                    zip.getInputStream(entry).use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            entryBytes += count
+                            totalUncompressed += count
+                            if (entryBytes > BackupImportLimits.MAX_UNCOMPRESSED_ENTRY_BYTES) {
+                                throw BackupFormatException("xlsx 单个条目解压后超过 64 MB")
+                            }
+                            if (totalUncompressed > BackupImportLimits.MAX_TOTAL_UNCOMPRESSED_BYTES) {
+                                throw BackupFormatException("xlsx 累计解压大小超过安全上限")
+                            }
+                            if (isXml) {
+                                val xmlChunk = String(buffer, 0, count, StandardCharsets.UTF_8)
+                                val xmlText = (xmlScanTail + xmlChunk).uppercase(Locale.ROOT)
+                                if (xmlText.contains("<!DOCTYPE") || xmlText.contains("<!ENTITY")) {
+                                    throw BackupFormatException("xlsx XML 包含不受支持的外部实体声明")
+                                }
+                                xmlScanTail = xmlText.takeLast(XML_TOKEN_OVERLAP)
+                            }
+                        }
+                    }
+                    if (entryBytes > 0L && compressedSize <= 0L) {
+                        throw BackupFormatException("xlsx 条目压缩比异常")
+                    }
+                    if (entryBytes > 0L && compressedSize > 0L &&
+                        entryBytes.toDouble() / compressedSize.toDouble() >
+                        1.0 / BackupImportLimits.MIN_INFLATE_RATIO
+                    ) {
+                        throw BackupFormatException("xlsx 条目压缩比超过安全上限")
+                    }
+                }
+            }
+        } catch (throwable: BackupFormatException) {
+            throw throwable
         } catch (throwable: Exception) {
             throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", throwable)
-        }
-
-        return workbook.use {
-            val metaSheet = workbook.getSheet(SHEET_META)
-                ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
-            val meta = metaSheet.readKeyValues()
-            val version = meta["export_format_version"]?.toIntOrNull()
-                ?: throw BackupFormatException("缺少或无法识别备份格式版本")
-            if (version !in SUPPORTED_FORMAT_VERSIONS) {
-                throw BackupFormatException("不支持的备份格式版本：$version")
-            }
-
-            val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
-                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
-            val readingsSheet = workbook.getSheet(SHEET_READINGS)
-                ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
-
-            val readingRows = readReadingRows(readingsSheet)
-            if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
-                throw BackupFormatException("原始读数总数超过允许上限")
-            }
-            val measurements = readMeasurements(
-                measurementSheet,
-                readingRows.groupBy { it.recordId },
-                formatVersion = version
-            )
-            if (measurements.size > BackupImportLimits.MAX_RECORDS) {
-                throw BackupFormatException("测量记录总数超过允许上限")
-            }
-            val duplicateIds = measurements.groupingBy { it.recordId }
-                .eachCount()
-                .filterValues { it > 1 }
-            if (duplicateIds.isNotEmpty()) {
-                throw BackupFormatException("备份中存在重复 record_id，未执行导入")
-            }
-            val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
-            if (readingRows.any { it.recordId !in knownIds }) {
-                throw BackupFormatException("原始读数引用了不存在的测量记录")
-            }
-
-            BackupImportDocument(
-                measurements = measurements,
-                userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
-                meta = meta
-            )
         }
     }
 
@@ -274,15 +394,8 @@ class BackupFileReader {
         private const val SHEET_READINGS = "原始读数"
         private const val SHEET_PROFILE = "用户资料"
         private const val SHEET_META = "导出信息"
+        private const val XML_TOKEN_OVERLAP = 8
         private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3)
 
-        /** 最多允许压缩比 1:100（POI 默认值，显式声明避免被其他代码放宽）。 */
-        private const val MIN_INFLATE_RATIO = 0.01
-
-        /**
-         * 解压后单个 zip 条目上限。按 5,000 条记录 × 20 组读数的合法最大备份估算，
-         * 工作表 XML 不应超过此值；恶意构造的超大条目会被 POI 拒绝。
-         */
-        private const val MAX_UNCOMPRESSED_ENTRY_BYTES = 64L * 1024 * 1024
     }
 }

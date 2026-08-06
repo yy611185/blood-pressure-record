@@ -20,4 +20,5 @@ object PreferenceKeys {
     val LAST_SUCCESSFUL_EXPORT_AT = longPreferencesKey("last_successful_export_at")
     val MEDICATION_REMINDER_ENABLED = booleanPreferencesKey("medication_reminder_enabled")
     val MEDICATION_CALENDAR_SYNC_ENABLED = booleanPreferencesKey("medication_calendar_sync_enabled")
+    val SCHEDULED_MEDICATION_TIME_IDS = stringPreferencesKey("scheduled_medication_time_ids")
 }

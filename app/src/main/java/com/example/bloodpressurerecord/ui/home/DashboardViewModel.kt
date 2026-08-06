@@ -12,6 +12,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -20,7 +21,10 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class DashboardUiState(
     val today: LocalDate = LocalDate.now(),
@@ -34,6 +38,8 @@ data class DashboardUiState(
     val weekRecorded: List<Boolean> = List(7) { false },
     /** 今日服药打卡行（按时间升序）。 */
     val medicationSlots: List<MedicationSlot> = emptyList(),
+    /** 正在写入的时间点；UI 应暂时禁用对应复选框，避免快速点击产生竞态。 */
+    val pendingMedicationTimeIds: Set<Long> = emptySet(),
     val loading: Boolean = true
 )
 
@@ -44,6 +50,8 @@ class DashboardViewModel(
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     todayTicks: Flow<LocalDate> = flow { emit(LocalDate.now(zoneId)) }
 ) : ViewModel() {
+    private val pendingMedicationCounts = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    private val medicationToggleMutex = Mutex()
 
     // “今日”范围跟随日期流重算，跨零点后自动切换到新的一天。
     val uiState: StateFlow<DashboardUiState> = todayTicks
@@ -75,7 +83,11 @@ class DashboardViewModel(
                     loading = false
                 )
             }
-        }.stateIn(
+        }
+        .combine(pendingMedicationCounts) { state, pendingCounts ->
+            state.copy(pendingMedicationTimeIds = pendingCounts.keys)
+        }
+        .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
             DashboardUiState()
@@ -84,8 +96,22 @@ class DashboardViewModel(
     /** 勾选/取消勾选某个服药时间点的“已服”状态。 */
     fun toggleMedicationTaken(slot: MedicationSlot, taken: Boolean) {
         val medRepo = medicationRepository ?: return
+        val date = LocalDate.now(zoneId)
+        pendingMedicationCounts.update { counts ->
+            counts + (slot.timeId to ((counts[slot.timeId] ?: 0) + 1))
+        }
         viewModelScope.launch {
-            medRepo.setTaken(slot.medicationId, slot.timeId, LocalDate.now(zoneId), taken)
+            try {
+                medicationToggleMutex.withLock {
+                    medRepo.setTaken(slot.medicationId, slot.timeId, date, taken)
+                }
+            } finally {
+                pendingMedicationCounts.update { counts ->
+                    val remaining = (counts[slot.timeId] ?: 1) - 1
+                    if (remaining <= 0) counts - slot.timeId
+                    else counts + (slot.timeId to remaining)
+                }
+            }
         }
     }
 

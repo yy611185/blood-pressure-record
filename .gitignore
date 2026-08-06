@@ -29,6 +29,7 @@ keystore/*
 # Release artifacts
 *.apk
 *.aab
+*.tgz
 
 # OS / editor
 .DS_Store
