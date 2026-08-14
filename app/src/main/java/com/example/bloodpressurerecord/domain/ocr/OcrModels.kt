@@ -31,5 +31,7 @@ data class OcrResult(
     val blocks: List<OcrBlock>,
     val source: OcrSource = OcrSource.ML_KIT,
     /** 多个预处理版本给出冲突结果时，强制要求人工核对。 */
-    val requiresReview: Boolean = false
+    val requiresReview: Boolean = false,
+    /** 预处理是否成功定位了血压计屏幕（黄色边框）。为 true 时坐标是 LCD 内坐标。 */
+    val lcdLocalized: Boolean = false
 )

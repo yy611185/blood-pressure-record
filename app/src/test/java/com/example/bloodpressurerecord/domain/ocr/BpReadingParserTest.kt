@@ -95,6 +95,49 @@ class BpReadingParserTest {
     }
 
     @Test
+    fun `two-row dia-plus-pulse pair is rejected when lcd was localized`() {
+        val r = OcrResult(
+            1000, 1000,
+            listOf(
+                block("83", 400f, 500f, 210f, 240f),
+                block("62", 420f, 800f, 200f, 200f)
+            ),
+            lcdLocalized = true
+        )
+        assertNull(BpReadingParser.parse(r))
+    }
+
+    @Test
+    fun `two-row sys-plus-dia pair is accepted when lcd was localized`() {
+        val r = OcrResult(
+            1000, 1000,
+            listOf(
+                block("121", 400f, 180f, 240f, 260f),
+                block("83", 400f, 480f, 210f, 240f)
+            ),
+            lcdLocalized = true
+        )
+        val c = BpReadingParser.parse(r)
+        assertNotNull(c)
+        assertEquals(121, c!!.systolic)
+        assertEquals(83, c.diastolic)
+        assertNull(c.pulse)
+        assertTrue(ReadingFlag.PARTIAL_STRUCTURE in c.flags)
+    }
+
+    @Test
+    fun `three-digit diastolic two-row reading is not rejected when not localized`() {
+        val r = result(
+            block("185", 400f, 700f, 240f, 240f),
+            block("120", 400f, 1000f, 210f, 240f)
+        )
+        val c = BpReadingParser.parse(r)
+        assertNotNull(c)
+        assertEquals(185, c!!.systolic)
+        assertEquals(120, c.diastolic)
+    }
+
+    @Test
     fun `standby screen returns null`() {
         val r = result(
             block("12:00", 400f, 120f, 160f, 70f),

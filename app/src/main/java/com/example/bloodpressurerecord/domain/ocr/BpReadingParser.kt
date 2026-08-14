@@ -25,6 +25,9 @@ object BpReadingParser {
     /** ML Kit 置信度阈值，低于该值标记 AMBIGUOUS_DIGIT。 */
     private const val CONFIDENCE_THRESHOLD = 0.55f
 
+    /** 屏幕已定位时，高压行中心允许的最高位置（占 LCD 高度的比例）。 */
+    private const val SYSTOLIC_ROW_MAX_CENTER_FRACTION = 0.45f
+
     /** 解析失败（1 行或 0 行、校验不过等）时返回 null，由调用方提示手动输入。 */
     fun parse(result: OcrResult): ReadingCandidate? {
         val candidates = result.blocks
@@ -49,14 +52,21 @@ object BpReadingParser {
             .sortedBy { it.centerY }
         if (readingRows.size < 2) return null
 
-        // 两行结果的歧义保护：支持的机型上收缩压是唯一的三位行（低压、脉搏均为两位）。
-        // 上行位数不大于下行时，多半是漏掉了收缩压、把“低压+脉搏”误配成“高压+低压”
-        // （实测：只识别到 83/62 会被当成高压 83、低压 62）。宁可不识别，也不把
-        // 错位读数带进确认页；重拍时完整摆正图通常能恢复三行结构。
-        if (readingRows.size == 2 &&
-            readingRows[0].digitsText.length <= readingRows[1].digitsText.length
-        ) {
-            return null
+        // 两行结果的歧义保护（实测故障：只识别到“低压+脉搏”时会被错配成
+        // “高压+低压”，例如 83/62 显示为高压 83、低压 62）：
+        // - 屏幕已定位（lcdLocalized）时用绝对位置：高压行必须位于 LCD 上部
+        //   （实测布局高压在顶部约 1/3，低压居中、脉搏在下）。
+        // - 未定位时用位数：两行都 ≤2 位且上行不多于下行，多半是低压+脉搏，
+        //   直接拒绝。三位数舒张压（≥100）的合法两行读数不受影响。
+        if (readingRows.size == 2) {
+            val first = readingRows[0]
+            val second = readingRows[1]
+            val mislabeled = if (result.lcdLocalized) {
+                first.centerY >= result.imageHeight * SYSTOLIC_ROW_MAX_CENTER_FRACTION
+            } else {
+                first.digitsText.length <= 2 && first.digitsText.length <= second.digitsText.length
+            }
+            if (mislabeled) return null
         }
 
         val systolic = readingRows[0].digitsText.toIntOrNull() ?: return null
