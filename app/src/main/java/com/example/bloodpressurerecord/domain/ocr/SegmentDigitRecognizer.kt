@@ -50,6 +50,12 @@ object SegmentDigitRecognizer {
         9 to intArrayOf(1, 1, 1, 1, 0, 1, 1)
     )
 
+    /** 连通域填充率超过该值视为实心噪声块而非数字笔画。 */
+    private const val SOLID_FILL_REJECT = 0.75f
+
+    /** 极窄竖条被当作“1”时给予的低置信度（低于引擎兜底门槛，且拖低所在行置信度）。 */
+    private const val NARROW_STROKE_CONFIDENCE = 0.55f
+
     fun recognize(image: BinaryImage): SegmentRecognition? {
         val baseRadius = max(1, min(image.width, image.height) / 360)
         val radii = listOf(baseRadius, baseRadius * 2, baseRadius * 3, baseRadius * 4)
@@ -212,9 +218,16 @@ object SegmentDigitRecognizer {
     }
 
     private fun classifyDigit(image: BinaryImage, bounds: Bounds): ClassifiedDigit? {
+        // 实心噪声块（图标、边框、LCD 底纹残留）填充率接近 1，先排除，避免被当成笔画。
+        val fillRatio = bounds.pixelArea.toFloat() / (bounds.width * bounds.height)
+        if (fillRatio > SOLID_FILL_REJECT) return null
+
         val aspectRatio = bounds.width.toFloat() / bounds.height
+        // 极窄竖条不再无条件判成“1”：真实照片掩码里有大量噪声窄条，旧逻辑把它们
+        // 全部当成高置信度数字 1，制造幽灵行（如 11/16/61）。现在给低置信度，
+        // 由行级门控与引擎侧置信度门槛淘汰；规则字形仍走下方 7 区模板匹配。
         if (aspectRatio < 0.26f) {
-            return ClassifiedDigit(1, 0.88f)
+            return ClassifiedDigit(1, NARROW_STROKE_CONFIDENCE)
         }
 
         val zones = arrayOf(
