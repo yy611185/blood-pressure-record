@@ -76,3 +76,16 @@ fun Bitmap.normalize(maxDimension: Int = 1600): Bitmap {
         true
     )
 }
+
+/** 生成确认页缩略图；原图需要保留时调用方自行处理，否则应 recycle 原图。 */
+fun Bitmap.thumbnail(maxDimension: Int = 480): Bitmap {
+    val longest = max(width, height)
+    if (longest <= maxDimension) return this
+    val scale = maxDimension.toFloat() / longest
+    return Bitmap.createScaledBitmap(
+        this,
+        (width * scale).roundToInt().coerceAtLeast(1),
+        (height * scale).roundToInt().coerceAtLeast(1),
+        true
+    )
+}

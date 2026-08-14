@@ -106,6 +106,16 @@ class ScanViewModel(
         }
     }
 
+    override fun onCleared() {
+        // 退出拍照流程（返回/放弃）时释放所有已拍组缩略图。
+        _uiState.value.groups.forEach { group ->
+            group.thumbnail?.let { bitmap ->
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+        super.onCleared()
+    }
+
     fun updateMeasuredAtText(value: String) {
         _uiState.update { it.copy(measuredAtText = value) }
     }
@@ -180,7 +190,17 @@ class ScanViewModel(
             val normalized = bitmap.normalize()
             if (normalized !== bitmap) bitmap.recycle()
             val result = ocrEngine.recognize(normalized)
-            onOcrReady(targetGroup, result, normalized)
+            // “保存识别照片”开启时才保留全尺寸图供落盘；默认只留 480px 缩略图，
+            // 避免每组 ~10MB 的全尺寸 Bitmap 长期占用内存。
+            val keepFull = savePhotosEnabled.value
+            val thumbnail = if (keepFull) {
+                normalized
+            } else {
+                val thumb = normalized.thumbnail()
+                if (thumb !== normalized) normalized.recycle()
+                thumb
+            }
+            onOcrReady(targetGroup, result, thumbnail)
         }
     }
 
@@ -215,7 +235,17 @@ class ScanViewModel(
                     flags = candidate.flags
                 )
                 val groups = if (state.groups.any { it.groupNumber == targetGroup }) {
-                    state.groups.map { if (it.groupNumber == targetGroup) group else it }
+                    state.groups.map { existing ->
+                        if (existing.groupNumber == targetGroup) {
+                            // 重拍替换：释放被替换组的旧缩略图，避免内存泄漏。
+                            existing.thumbnail?.let { old ->
+                                if (!old.isRecycled && old !== group.thumbnail) old.recycle()
+                            }
+                            group
+                        } else {
+                            existing
+                        }
+                    }
                 } else {
                     state.groups + group
                 }
@@ -330,6 +360,11 @@ class ScanViewModel(
                         message = if (photoWarning == null) "保存成功。" else "保存成功，但识别照片保存失败。",
                         saved = true
                     )
+                    state.groups.forEach { group ->
+                        group.thumbnail?.let { bitmap ->
+                            if (!bitmap.isRecycled) bitmap.recycle()
+                        }
+                    }
                 }
                 .onFailure { throwable ->
                     _uiState.update {
