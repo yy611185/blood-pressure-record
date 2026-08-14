@@ -8,7 +8,8 @@ import kotlin.math.min
 internal data class PreparedScanImages(
     /** 屏幕定位后的原始彩色图；没有可靠定位时就是调用方传入的 source。 */
     val recognitionSource: Bitmap,
-    private val ownsRecognitionSource: Boolean,
+    /** 是否成功定位了屏幕（黄色边框）；true 时 recognitionSource 是 LCD 裁剪。 */
+    val screenLocated: Boolean,
     /** 按推荐顺序送入 ML Kit；这些 Bitmap 均由预处理器创建，使用后需 recycle。 */
     val ocrVariants: List<Bitmap>,
     /** 全局阈值和局部自适应阈值，供 7 段专用识别器兜底。 */
@@ -16,7 +17,7 @@ internal data class PreparedScanImages(
 ) {
     fun recycle() {
         ocrVariants.forEach { if (!it.isRecycled) it.recycle() }
-        if (ownsRecognitionSource && !recognitionSource.isRecycled) recognitionSource.recycle()
+        if (screenLocated && !recognitionSource.isRecycled) recognitionSource.recycle()
     }
 }
 
@@ -56,7 +57,7 @@ internal object ScanImagePreprocessor {
 
         return PreparedScanImages(
             recognitionSource = recognitionSource,
-            ownsRecognitionSource = focused != null,
+            screenLocated = focused != null,
             ocrVariants = listOf(enhanced, globalBitmap, adaptiveBitmap),
             segmentMasks = listOf(
                 BinaryImage(width, height, globalMask),

@@ -54,7 +54,9 @@ class MlKitOcrEngine(
                 "channel=mlkit variants=${rawResults.size} parsed=${recognized.size} " +
                     "candidates=${recognized.joinToString { it.candidate.key() }}"
             )
-            chooseConsensus(recognized)?.let { return@withContext it }
+            chooseConsensus(recognized)?.let { consensus ->
+                return@withContext consensus.copy(lcdLocalized = prepared.screenLocated)
+            }
 
             val fallback = prepared.segmentMasks
                 .mapNotNull(SegmentDigitRecognizer::recognize)
@@ -64,12 +66,13 @@ class MlKitOcrEngine(
             fallback?.toOcrResult(
                 prepared.recognitionSource.width,
                 prepared.recognitionSource.height
-            )
+            )?.copy(lcdLocalized = prepared.screenLocated)
                 ?: OcrResult(
                     imageWidth = prepared.recognitionSource.width,
                     imageHeight = prepared.recognitionSource.height,
                     blocks = emptyList(),
-                    requiresReview = true
+                    requiresReview = true,
+                    lcdLocalized = prepared.screenLocated
                 ).also { Log.d(TAG, "channel=none all paths failed") }
         } finally {
             prepared.recycle()
