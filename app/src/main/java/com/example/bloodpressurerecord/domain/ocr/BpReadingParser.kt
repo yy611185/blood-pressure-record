@@ -49,6 +49,16 @@ object BpReadingParser {
             .sortedBy { it.centerY }
         if (readingRows.size < 2) return null
 
+        // 两行结果的歧义保护：支持的机型上收缩压是唯一的三位行（低压、脉搏均为两位）。
+        // 上行位数不大于下行时，多半是漏掉了收缩压、把“低压+脉搏”误配成“高压+低压”
+        // （实测：只识别到 83/62 会被当成高压 83、低压 62）。宁可不识别，也不把
+        // 错位读数带进确认页；重拍时完整摆正图通常能恢复三行结构。
+        if (readingRows.size == 2 &&
+            readingRows[0].digitsText.length <= readingRows[1].digitsText.length
+        ) {
+            return null
+        }
+
         val systolic = readingRows[0].digitsText.toIntOrNull() ?: return null
         val diastolic = readingRows[1].digitsText.toIntOrNull() ?: return null
         val pulse = readingRows.getOrNull(2)?.digitsText?.toIntOrNull()

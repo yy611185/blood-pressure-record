@@ -71,6 +71,30 @@ class BpReadingParserTest {
     }
 
     @Test
+    fun `two rows without dominant top row are rejected as mislabeled pair`() {
+        // 实测故障：只识别到低压 83 + 脉搏 62，被错配成高压 83 / 低压 62。
+        val r = result(
+            block("83", 400f, 700f, 210f, 240f),
+            block("62", 420f, 1000f, 200f, 200f)
+        )
+        assertNull(BpReadingParser.parse(r))
+    }
+
+    @Test
+    fun `two rows with dominant top row are still accepted`() {
+        val r = result(
+            block("121", 400f, 700f, 240f, 240f),
+            block("83", 400f, 1000f, 210f, 240f)
+        )
+        val c = BpReadingParser.parse(r)
+        assertNotNull(c)
+        assertEquals(121, c!!.systolic)
+        assertEquals(83, c.diastolic)
+        assertNull(c.pulse)
+        assertTrue(ReadingFlag.PARTIAL_STRUCTURE in c.flags)
+    }
+
+    @Test
     fun `standby screen returns null`() {
         val r = result(
             block("12:00", 400f, 120f, 160f, 70f),
