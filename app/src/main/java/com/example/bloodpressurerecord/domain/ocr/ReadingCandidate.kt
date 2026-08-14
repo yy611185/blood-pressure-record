@@ -4,11 +4,13 @@ package com.example.bloodpressurerecord.domain.ocr
 enum class ReadingFlag {
     /** OCR 置信度低，或同一行出现多个数字组（存在 8/3、5/6 等易混淆风险）。 */
     AMBIGUOUS_DIGIT,
+    /** OCR 引擎返回的字段置信度低于安全阈值。 */
+    LOW_CONFIDENCE,
     /** 数值接近校验边界 ±10。 */
     BOUNDARY,
     /** 只解析出 2 行（无脉搏）或行结构异常。 */
     PARTIAL_STRUCTURE,
-    /** 结果来自 7 段数码管兜底通道（P1 预留）。 */
+    /** 结果来自 7 段数码管专用兜底通道。 */
     FROM_FALLBACK
 }
 

@@ -67,10 +67,19 @@ object BpReadingParser {
             ) {
                 add(ReadingFlag.BOUNDARY)
             }
-            if (selectedBlocks.any { it.confidence != null && it.confidence < CONFIDENCE_THRESHOLD } ||
+            val lowConfidence = selectedBlocks.any {
+                it.block.confidence != null && it.block.confidence < CONFIDENCE_THRESHOLD
+            }
+            if (lowConfidence) {
+                add(ReadingFlag.LOW_CONFIDENCE)
+            }
+            if (lowConfidence || result.requiresReview || selectedBlocks.any { it.hadConfusableGlyph } ||
                 readingRows.any { it.blocks.size > 1 }
             ) {
                 add(ReadingFlag.AMBIGUOUS_DIGIT)
+            }
+            if (result.source == OcrSource.SEVEN_SEGMENT) {
+                add(ReadingFlag.FROM_FALLBACK)
             }
         }
         return ReadingCandidate(
@@ -81,18 +90,55 @@ object BpReadingParser {
         )
     }
 
+    /** 待机屏常见特征：时间 + 用户号/单个 0，没有两行有效血压读数。 */
+    fun looksLikeStandby(result: OcrResult): Boolean {
+        val texts = result.blocks.map { it.text.trim() }.filter { it.isNotEmpty() }
+        val hasTime = texts.any { TIME_PATTERN.containsMatchIn(it) }
+        val numericValues = texts.filterNot { TIME_PATTERN.containsMatchIn(it) }.mapNotNull { text ->
+            text.filter { it.isDigit() }.takeIf { it.isNotEmpty() }?.toIntOrNull()
+        }
+        return numericValues.size <= 2 && 0 in numericValues && (hasTime || numericValues.size == 1)
+    }
+
     /** 基本过滤 + 剥离非数字字符（如 “❤69” → “69”）。 */
-    private fun cleanBlock(block: OcrBlock): OcrBlock? {
+    private fun cleanBlock(block: OcrBlock): ParsedBlock? {
         val text = block.text.trim()
         if (text.isEmpty()) return null
         if (TIME_PATTERN.containsMatchIn(text)) return null
-        val digits = text.filter { it.isDigit() }
+        val compact = text.filterNot { it.isWhitespace() }
+        val confusableCharacters = "OoQqIiLl|SsBb"
+        val mayNormalizeGlyphs = text.any { it.isDigit() } ||
+            (compact.length <= 3 && compact.all { it in confusableCharacters })
+        var hadConfusableGlyph = false
+        val digits = buildString {
+            text.forEach { character ->
+                when {
+                    character.isDigit() -> append(character)
+                    mayNormalizeGlyphs && character in "OoQq" -> {
+                        append('0')
+                        hadConfusableGlyph = true
+                    }
+                    mayNormalizeGlyphs && character in "IiLl|" -> {
+                        append('1')
+                        hadConfusableGlyph = true
+                    }
+                    mayNormalizeGlyphs && character in "Ss" -> {
+                        append('5')
+                        hadConfusableGlyph = true
+                    }
+                    mayNormalizeGlyphs && character in "Bb" -> {
+                        append('8')
+                        hadConfusableGlyph = true
+                    }
+                }
+            }
+        }
         if (digits.isEmpty()) return null
-        return block.copy(text = digits)
+        return ParsedBlock(block = block.copy(text = digits), hadConfusableGlyph = hadConfusableGlyph)
     }
 
     /** 按 Y 坐标聚类成行：同一行内块的中心 Y 差不超过容差。 */
-    private fun clusterIntoRows(blocks: List<OcrBlock>): List<TextRow> {
+    private fun clusterIntoRows(blocks: List<ParsedBlock>): List<TextRow> {
         val rows = mutableListOf<MutableRow>()
         for (block in blocks) {
             val last = rows.lastOrNull()
@@ -105,7 +151,7 @@ object BpReadingParser {
         return rows.map { it.toRow() }
     }
 
-    private class MutableRow(val blocks: MutableList<OcrBlock>) {
+    private class MutableRow(val blocks: MutableList<ParsedBlock>) {
         fun tolerance(): Float {
             val maxHeight = blocks.maxOf { it.height }
             return max(4f, maxHeight * 0.45f)
@@ -114,15 +160,22 @@ object BpReadingParser {
         fun toRow(): TextRow = TextRow(blocks)
     }
 
-    private data class TextRow(val blocks: List<OcrBlock>) {
+    private data class TextRow(val blocks: List<ParsedBlock>) {
         val centerY: Float get() = blocks.map { it.centerY }.average().toFloat()
         val maxHeight: Float get() = blocks.maxOf { it.height }
         val digitsText: String
-            get() = blocks.sortedBy { it.left }.joinToString("") { it.text }
+            get() = blocks.sortedBy { it.left }.joinToString("") { it.digits }
     }
 
-    private val OcrBlock.digits: String
-        get() = text.filter { it.isDigit() }
+    private data class ParsedBlock(
+        val block: OcrBlock,
+        val hadConfusableGlyph: Boolean
+    ) {
+        val digits: String get() = block.text
+        val left: Float get() = block.left
+        val height: Float get() = block.height
+        val centerY: Float get() = block.centerY
+    }
 
     private fun nearBoundary(value: Int, range: IntRange): Boolean =
         value <= range.first + 10 || value >= range.last - 10

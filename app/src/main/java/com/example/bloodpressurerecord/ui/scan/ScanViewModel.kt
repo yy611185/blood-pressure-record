@@ -191,11 +191,18 @@ class ScanViewModel(
         thumbnail: Bitmap? = null
     ) {
         val candidate = BpReadingParser.parse(result)
+        if (candidate == null && thumbnail != null && !thumbnail.isRecycled) {
+            thumbnail.recycle()
+        }
         _uiState.update { state ->
             if (candidate == null) {
                 state.copy(
                     phase = ScanPhase.Camera,
-                    message = "未识别到血压读数，请重拍或手动输入。",
+                    message = if (BpReadingParser.looksLikeStandby(result)) {
+                        "请拍摄测量完成后的屏幕，当前画面像是待机界面。"
+                    } else {
+                        "未识别到血压读数，请重拍或改为手动输入。"
+                    },
                     messageIsError = true
                 )
             } else {

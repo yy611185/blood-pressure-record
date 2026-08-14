@@ -83,6 +83,9 @@ android {
 
     sourceSets {
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
+        // Real LCD photos supplied for OCR regression testing. They are packaged only in
+        // the instrumentation test APK and never increase the production APK size.
+        getByName("androidTest").assets.srcDir("$rootDir/测试照片")
     }
 }
 
