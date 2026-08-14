@@ -105,15 +105,25 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 拍照识别取景页激活时，把音量键转成快门；其余情况交给系统。 */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val isVolumeKey = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
-            event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val isVolumeKey = keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
         if (ScanCameraActive.isActive && isVolumeKey) {
-            if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount == 0) {
                 ScanVolumeKeyBus.emitShutter()
             }
             return true
         }
-        return super.dispatchKeyEvent(event)
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        val isVolumeKey = keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        return if (ScanCameraActive.isActive && isVolumeKey) {
+            true
+        } else {
+            super.onKeyUp(keyCode, event)
+        }
     }
 }

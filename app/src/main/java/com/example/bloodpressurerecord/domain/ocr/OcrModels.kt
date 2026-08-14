@@ -18,9 +18,18 @@ data class OcrBlock(
     val centerY: Float get() = (top + bottom) / 2f
 }
 
+/** 识别结果来源，用于确认页明确标记专用段码兜底结果。 */
+enum class OcrSource {
+    ML_KIT,
+    SEVEN_SEGMENT
+}
+
 /** 一次 OCR 的完整结果。 */
 data class OcrResult(
     val imageWidth: Int,
     val imageHeight: Int,
-    val blocks: List<OcrBlock>
+    val blocks: List<OcrBlock>,
+    val source: OcrSource = OcrSource.ML_KIT,
+    /** 多个预处理版本给出冲突结果时，强制要求人工核对。 */
+    val requiresReview: Boolean = false
 )

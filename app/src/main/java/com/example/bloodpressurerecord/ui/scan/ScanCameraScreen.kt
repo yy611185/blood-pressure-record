@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -60,12 +61,16 @@ import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 fun ScanCameraScreen(
     viewModel: ScanViewModel,
     onBack: () -> Unit,
-    onEnterReview: () -> Unit
+    onEnterReview: () -> Unit,
+    onManualEntry: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val density = LocalDensity.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var showExitDialog by remember { mutableStateOf(false) }
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
+    val guidePaddingPx = with(density) { 40.dp.toPx() }
 
     val cameraController = remember { LifecycleCameraController(context) }
 
@@ -107,9 +112,20 @@ fun ScanCameraScreen(
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
-                        val bitmap = image.toUprightBitmap()
-                        image.close()
-                        viewModel.onPhotoCaptured(bitmap)
+                        try {
+                            val upright = image.toUprightBitmap()
+                            val framed = upright.cropToGuideFrame(
+                                previewWidth = previewView?.width ?: 0,
+                                previewHeight = previewView?.height ?: 0,
+                                horizontalPaddingPx = guidePaddingPx
+                            )
+                            if (framed !== upright) upright.recycle()
+                            viewModel.onPhotoCaptured(framed)
+                        } catch (error: Throwable) {
+                            viewModel.onCaptureError(error.message ?: "无法读取相机画面")
+                        } finally {
+                            image.close()
+                        }
                     }
 
                     override fun onError(exception: ImageCaptureException) {
@@ -146,7 +162,7 @@ fun ScanCameraScreen(
                     text = "去授权",
                     onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }
                 )
-                AppSecondaryButton(text = "返回手动录入", onClick = onBack)
+                AppSecondaryButton(text = "返回手动录入", onClick = onManualEntry)
             }
         } else {
             AndroidView(
@@ -155,6 +171,7 @@ fun ScanCameraScreen(
                         scaleType = PreviewView.ScaleType.FILL_CENTER
                         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         controller = cameraController
+                        previewView = this
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -242,6 +259,12 @@ fun ScanCameraScreen(
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
+                }
+                if (state.phase == ScanPhase.Camera && state.messageIsError && state.groups.isEmpty()) {
+                    AppSecondaryButton(
+                        text = "改为手动输入",
+                        onClick = onManualEntry
+                    )
                 }
                 val currentSlot = state.retakeGroupNumber ?: state.currentGroupNumber
                 val recognized = state.groups.firstOrNull { it.groupNumber == currentSlot }

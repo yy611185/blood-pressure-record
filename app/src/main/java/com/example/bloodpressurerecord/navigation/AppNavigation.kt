@@ -213,7 +213,12 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 ScanCameraScreen(
                     viewModel = scanVm,
                     onBack = { navController.popBackStack() },
-                    onEnterReview = { navController.navigate(AppDestination.ScanReview.route) }
+                    onEnterReview = { navController.navigate(AppDestination.ScanReview.route) },
+                    onManualEntry = {
+                        navController.navigate(AppDestination.AddMeasurement.route) {
+                            popUpTo(AppDestination.ScanCamera.route) { inclusive = true }
+                        }
+                    }
                 )
             }
             composable(AppDestination.ScanReview.route) { backStackEntry ->

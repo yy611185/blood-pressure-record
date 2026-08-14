@@ -78,6 +78,7 @@ class BpReadingParserTest {
             block("0", 400f, 1700f, 160f, 200f)
         )
         assertNull(BpReadingParser.parse(r))
+        assertTrue(BpReadingParser.looksLikeStandby(r))
     }
 
     @Test
@@ -116,6 +117,31 @@ class BpReadingParserTest {
         val c = BpReadingParser.parse(r)
         assertNotNull(c)
         assertTrue(ReadingFlag.AMBIGUOUS_DIGIT in c!!.flags)
+        assertTrue(ReadingFlag.LOW_CONFIDENCE in c.flags)
+    }
+
+    @Test
+    fun `common OCR glyph confusion is normalized and flagged`() {
+        val r = result(
+            block("1O3", 400f, 700f, 240f, 240f),
+            block("68", 400f, 1000f, 210f, 240f)
+        )
+        val c = BpReadingParser.parse(r)
+        assertNotNull(c)
+        assertEquals(103, c!!.systolic)
+        assertTrue(ReadingFlag.AMBIGUOUS_DIGIT in c.flags)
+    }
+
+    @Test
+    fun `seven segment source is exposed to review`() {
+        val r = result(
+            block("103", 400f, 700f, 240f, 240f),
+            block("68", 400f, 1000f, 210f, 240f),
+            block("69", 420f, 1320f, 200f, 200f)
+        ).copy(source = OcrSource.SEVEN_SEGMENT)
+        val c = BpReadingParser.parse(r)
+        assertNotNull(c)
+        assertTrue(ReadingFlag.FROM_FALLBACK in c!!.flags)
     }
 
     @Test
