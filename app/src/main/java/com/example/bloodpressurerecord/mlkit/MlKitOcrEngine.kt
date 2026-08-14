@@ -79,6 +79,12 @@ class MlKitOcrEngine(
         OcrResult(bitmap.width, bitmap.height, emptyList())
     }
 
+    /**
+     * 多变体共识：≥2 个变体给出完全一致的读数视为共识；只有一个变体解析成功时
+     * 同样放行，但强制 requiresReview 交给确认页核对。解析器会为无脉搏结果打
+     * PARTIAL_STRUCTURE 标记。设计取舍：宁可靠用户核对，也不把有效读数整体丢弃
+     * （旧逻辑要求“≥2 个变体一致且至少一个含脉搏”，实际把大量正确结果拒之门外）。
+     */
     private fun chooseConsensus(variants: List<RecognizedVariant>): OcrResult? {
         if (variants.isEmpty()) return null
         val grouped = variants.groupBy { it.candidate.key() }
@@ -86,9 +92,10 @@ class MlKitOcrEngine(
             compareBy<List<RecognizedVariant>> { it.size }
                 .thenBy { group -> group.maxOf { it.candidate.qualityScore() } }
         ).orEmpty()
-        if (winnerGroup.size < 2 || winnerGroup.none { it.candidate.pulse != null }) return null
+        if (winnerGroup.isEmpty()) return null
         val winner = winnerGroup.maxByOrNull { it.candidate.qualityScore() } ?: return null
-        return winner.result.copy(requiresReview = grouped.size > 1)
+        val hasConsensus = winnerGroup.size >= 2
+        return winner.result.copy(requiresReview = !hasConsensus || grouped.size > 1)
     }
 
     private fun Text.toOcrResult(width: Int, height: Int): OcrResult {
