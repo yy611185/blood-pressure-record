@@ -31,6 +31,9 @@ class MlKitOcrEngine(
 
     companion object {
         private const val TAG = "BpOcr"
+
+        /** 校准通道达到该置信度才免人工核对；低于时强制 requiresReview。 */
+        private const val CALIBRATED_AUTO_ACCEPT_CONFIDENCE = 0.98f
     }
 
     override suspend fun recognize(bitmap: Bitmap): OcrResult = withContext(Dispatchers.Default) {
@@ -47,9 +50,15 @@ class MlKitOcrEngine(
                         "dia=${calibrated.candidate.diastolic} pulse=${calibrated.candidate.pulse} " +
                         "conf=${calibrated.confidence}"
                 )
+                // 参考照片上该校准通道是主力（25/25 全对，conf 0.97–1.0），但真实拍摄
+                // 的透视/倾斜会让固定槽位错位并产生高置信误匹配（实测 121→222）。
+                // 置信度不是满分时强制“请核对”，把偶发误匹配暴露给用户而不是静默入库。
                 return@withContext calibrated.toOcrResult(
                     prepared.recognitionSource.width,
                     prepared.recognitionSource.height
+                ).copy(
+                    lcdLocalized = prepared.screenLocated,
+                    requiresReview = calibrated.confidence < CALIBRATED_AUTO_ACCEPT_CONFIDENCE
                 )
             }
 
