@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.mlkit
 
 import android.graphics.Bitmap
+import android.util.Log
 import com.example.bloodpressurerecord.domain.ocr.CalibratedLcdRecognizer
 import com.example.bloodpressurerecord.domain.ocr.BpReadingParser
 import com.example.bloodpressurerecord.domain.ocr.OcrBlock
@@ -28,6 +29,10 @@ class MlKitOcrEngine(
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 ) : OcrEngine {
 
+    companion object {
+        private const val TAG = "BpOcr"
+    }
+
     override suspend fun recognize(bitmap: Bitmap): OcrResult = withContext(Dispatchers.Default) {
         val prepared = runCatching { ScanImagePreprocessor.prepare(bitmap) }.getOrNull()
             ?: return@withContext recognizeOne(bitmap)
@@ -36,6 +41,12 @@ class MlKitOcrEngine(
                 .mapNotNull(CalibratedLcdRecognizer::recognize)
                 .maxByOrNull { it.confidence }
             if (calibrated != null) {
+                Log.d(
+                    TAG,
+                    "channel=calibrated sys=${calibrated.candidate.systolic} " +
+                        "dia=${calibrated.candidate.diastolic} pulse=${calibrated.candidate.pulse} " +
+                        "conf=${calibrated.confidence}"
+                )
                 return@withContext calibrated.toOcrResult(
                     prepared.recognitionSource.width,
                     prepared.recognitionSource.height
@@ -50,12 +61,18 @@ class MlKitOcrEngine(
                 val candidate = BpReadingParser.parse(result) ?: return@mapNotNull null
                 RecognizedVariant(result, candidate)
             }
+            Log.d(
+                TAG,
+                "channel=mlkit variants=${rawResults.size} parsed=${recognized.size} " +
+                    "candidates=${recognized.joinToString { it.candidate.key() }}"
+            )
             chooseConsensus(recognized)?.let { return@withContext it }
 
             val fallback = prepared.segmentMasks
                 .mapNotNull(SegmentDigitRecognizer::recognize)
                 .filter { it.candidate.pulse != null && it.confidence >= 0.82f }
                 .maxByOrNull { it.confidence + if (it.candidate.pulse != null) 0.15f else 0f }
+            Log.d(TAG, "channel=segment fallback=${fallback != null}")
             fallback?.toOcrResult(
                 prepared.recognitionSource.width,
                 prepared.recognitionSource.height
@@ -65,7 +82,7 @@ class MlKitOcrEngine(
                     imageHeight = prepared.recognitionSource.height,
                     blocks = emptyList(),
                     requiresReview = true
-                )
+                ).also { Log.d(TAG, "channel=none all paths failed") }
         } finally {
             prepared.recycle()
         }
@@ -74,8 +91,10 @@ class MlKitOcrEngine(
     private fun recognizeOne(bitmap: Bitmap): OcrResult = runCatching {
         val image = InputImage.fromBitmap(bitmap, 0)
         val text = Tasks.await(recognizer.process(image))
+        Log.d(TAG, "mlkit variant ${bitmap.width}x${bitmap.height}: \"${text.text}\"")
         text.toOcrResult(bitmap.width, bitmap.height)
     }.getOrElse {
+        Log.w(TAG, "mlkit variant ${bitmap.width}x${bitmap.height} failed: ${it.message ?: it.javaClass.simpleName}")
         OcrResult(bitmap.width, bitmap.height, emptyList())
     }
 
