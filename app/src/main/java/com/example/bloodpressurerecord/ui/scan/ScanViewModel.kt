@@ -178,7 +178,7 @@ class ScanViewModel(
         }
     }
 
-    fun onPhotoCaptured(bitmap: Bitmap) {
+    fun onPhotoCaptured(bitmap: Bitmap, thumbnailSource: Bitmap? = null) {
         if (_uiState.value.phase == ScanPhase.Processing || _uiState.value.phase == ScanPhase.Saving) {
             return
         }
@@ -187,17 +187,24 @@ class ScanViewModel(
             it.copy(phase = ScanPhase.Processing, message = "正在识别...", messageIsError = false)
         }
         viewModelScope.launch {
+            // 识别输入：完整摆正图（由相机页传入，可能带一张引导框裁剪图做缩略图）。
             val normalized = bitmap.normalize()
             if (normalized !== bitmap) bitmap.recycle()
             val result = ocrEngine.recognize(normalized)
-            // “保存识别照片”开启时才保留全尺寸图供落盘；默认只留 480px 缩略图，
-            // 避免每组 ~10MB 的全尺寸 Bitmap 长期占用内存。
+
             val keepFull = savePhotosEnabled.value
+            val thumbSource = thumbnailSource
+                ?.takeIf { !it.isRecycled && it !== bitmap && it !== normalized }
+                ?: normalized
             val thumbnail = if (keepFull) {
+                // 保存识别照片：保留全尺寸识别图供落盘，释放引导框裁剪图。
+                if (thumbSource !== normalized) thumbSource.recycle()
                 normalized
             } else {
-                val thumb = normalized.thumbnail()
-                if (thumb !== normalized) normalized.recycle()
+                // 默认：只留 480px 缩略图（优先用用户对准的引导框区域），释放其余大图。
+                val thumb = thumbSource.thumbnail()
+                if (thumb !== thumbSource) thumbSource.recycle()
+                if (normalized !== thumbSource) normalized.recycle()
                 thumb
             }
             onOcrReady(targetGroup, result, thumbnail)
