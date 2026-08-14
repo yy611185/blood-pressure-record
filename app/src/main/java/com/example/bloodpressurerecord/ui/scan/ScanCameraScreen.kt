@@ -119,8 +119,11 @@ fun ScanCameraScreen(
                                 previewHeight = previewView?.height ?: 0,
                                 horizontalPaddingPx = guidePaddingPx
                             )
-                            if (framed !== upright) upright.recycle()
-                            viewModel.onPhotoCaptured(framed)
+                            // 识别输入用完整摆正图：预处理内部有屏幕定位（locateLcd），
+                            // 且不依赖“预览视图坐标→照片坐标”的映射，真机上该映射
+                            // 存在 FILL_CENTER/cropRect 偏差，曾导致裁掉高压行或裁偏。
+                            // 引导框裁剪结果只用于确认页缩略图。
+                            viewModel.onPhotoCaptured(upright, framed)
                         } catch (error: Throwable) {
                             viewModel.onCaptureError(error.message ?: "无法读取相机画面")
                         } finally {
