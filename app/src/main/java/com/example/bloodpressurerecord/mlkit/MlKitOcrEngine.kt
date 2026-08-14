@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.mlkit
 
 import android.graphics.Bitmap
 import android.util.Log
+import com.example.bloodpressurerecord.domain.ocr.CalibratedLcdRecognizer
 import com.example.bloodpressurerecord.domain.ocr.BpReadingParser
 import com.example.bloodpressurerecord.domain.ocr.OcrBlock
 import com.example.bloodpressurerecord.domain.ocr.OcrResult
@@ -36,10 +37,21 @@ class MlKitOcrEngine(
         val prepared = runCatching { ScanImagePreprocessor.prepare(bitmap) }.getOrNull()
             ?: return@withContext recognizeOne(bitmap)
         try {
-            // CalibratedLcdRecognizer 的槽位/模板与真实照片存在系统性偏差（对 25 张
-            // 真值照片 0/25 匹配），且它一旦匹配会直接返回读数，存在伪读数风险。
-            // 在完成重标定之前禁用该通道：识别完全走 ML Kit 多路变体 + 7 段兜底。
-            Log.d(TAG, "channel=calibrated disabled (uncalibrated)")
+            val calibrated = prepared.segmentMasks.asReversed()
+                .mapNotNull(CalibratedLcdRecognizer::recognize)
+                .maxByOrNull { it.confidence }
+            if (calibrated != null) {
+                Log.d(
+                    TAG,
+                    "channel=calibrated sys=${calibrated.candidate.systolic} " +
+                        "dia=${calibrated.candidate.diastolic} pulse=${calibrated.candidate.pulse} " +
+                        "conf=${calibrated.confidence}"
+                )
+                return@withContext calibrated.toOcrResult(
+                    prepared.recognitionSource.width,
+                    prepared.recognitionSource.height
+                )
+            }
 
             val enhanced = prepared.ocrVariants.first()
             val remaining = prepared.ocrVariants.drop(1)
