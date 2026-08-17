@@ -367,11 +367,6 @@ class ScanViewModel(
                         message = if (photoWarning == null) "保存成功。" else "保存成功，但识别照片保存失败。",
                         saved = true
                     )
-                    state.groups.forEach { group ->
-                        group.thumbnail?.let { bitmap ->
-                            if (!bitmap.isRecycled) bitmap.recycle()
-                        }
-                    }
                 }
                 .onFailure { throwable ->
                     _uiState.update {

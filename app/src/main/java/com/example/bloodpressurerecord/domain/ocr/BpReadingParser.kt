@@ -117,6 +117,8 @@ object BpReadingParser {
         val numericValues = texts.filterNot { TIME_PATTERN.containsMatchIn(it) }.mapNotNull { text ->
             text.filter { it.isDigit() }.takeIf { it.isNotEmpty() }?.toIntOrNull()
         }
+        val hasValidReadings = numericValues.count { it in 50..220 } >= 2
+        if (hasValidReadings) return false
         return numericValues.size <= 2 && 0 in numericValues && (hasTime || numericValues.size == 1)
     }
 

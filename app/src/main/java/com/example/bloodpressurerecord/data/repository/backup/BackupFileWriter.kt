@@ -178,7 +178,16 @@ class BackupFileWriter {
             null -> cell.setBlank()
             is Boolean -> cell.setCellValue(value)
             is Number -> cell.setCellValue(value.toDouble())
-            else -> cell.setCellValue(value.toString())
+            else -> {
+                val str = value.toString()
+                // 防御 Excel 公式注入（Formula Injection/DDE）
+                val safeStr = if (str.isNotEmpty() && (str[0] == '=' || str[0] == '+' || str[0] == '-' || str[0] == '@' || str[0] == '\t' || str[0] == '\r')) {
+                    "'$str"
+                } else {
+                    str
+                }
+                cell.setCellValue(safeStr)
+            }
         }
     }
 
