@@ -53,8 +53,8 @@ class ScanPhotoStoreTest {
     fun `delete older than threshold`() {
         val old = store.save("session-old", 1, byteArrayOf(1))
         val fresh = store.save("session-fresh", 1, byteArrayOf(2))
-        old.parentFile.setLastModified(1_000_000L)
-        fresh.parentFile.setLastModified(System.currentTimeMillis())
+        old.parentFile?.setLastModified(1_000_000L)
+        fresh.parentFile?.setLastModified(System.currentTimeMillis())
         val removed = store.deleteOlderThan(System.currentTimeMillis() - 60_000L)
         assertEquals(1, removed)
         assertEquals(listOf("session-fresh"), store.listSessionIds())
@@ -65,5 +65,40 @@ class ScanPhotoStoreTest {
         val file = store.save("session-1", 2, byteArrayOf(1))
         assertEquals("2.jpg", file.name)
         assertFalse(store.listSessionIds().isEmpty())
+    }
+
+    @Test
+    fun `legacy backup record ids are accepted`() {
+        store.save("bp_measurements:12", 1, byteArrayOf(1))
+        store.save("blood_pressure_records:34", 1, byteArrayOf(2))
+        assertEquals(
+            listOf("blood_pressure_records:34", "bp_measurements:12"),
+            store.listSessionIds()
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `path traversal session id is rejected`() {
+        store.save("../escape", 1, byteArrayOf(1))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `absolute-looking session id is rejected`() {
+        store.save("/tmp/evil", 1, byteArrayOf(1))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `delete also rejects traversal session id`() {
+        store.deleteForSession("..\\escape")
+    }
+
+    @Test
+    fun `rejected id does not write outside the store root`() {
+        val parent = requireNotNull(root.parentFile)
+        val outsideBefore = parent.listFiles()?.map { it.name }?.toSet().orEmpty()
+        runCatching { store.save("..", 1, byteArrayOf(9, 9, 9)) }
+        val outsideAfter = parent.listFiles()?.map { it.name }?.toSet().orEmpty()
+        assertEquals(outsideBefore, outsideAfter)
+        assertTrue(store.listSessionIds().isEmpty())
     }
 }

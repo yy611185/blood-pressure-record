@@ -96,9 +96,16 @@ interface MedicationDao {
         return id
     }
 
+    @Update
+    suspend fun updateTime(time: MedicationTimeEntity)
+
     /**
-     * 按时间文本做差量更新。未改变的 MedicationTimeEntity 会保留原 id，
-     * 因而其既有服药打卡历史不会再被级联删除。
+     * 智能差量更新：
+     * 1. 相同 timeText 的保留原 id；
+     * 2. 修改时间点时（如 08:00 改为 08:30），优先复用原有实体的 id 并 update 其 timeText，
+     *    彻底避免触发 ON DELETE CASCADE 误删已有的打卡历史（medication_intake_logs）；
+     * 3. 仅当用户明确减少时间点数量时，才删除多余的时间实体；
+     * 4. 增加时间点时插入新实体。
      */
     @Transaction
     suspend fun updateMedicationWithTimes(
@@ -106,14 +113,43 @@ interface MedicationDao {
         timeTexts: List<String>
     ) {
         updateMedication(medication)
-        val desired = timeTexts.toSet()
-        val existing = getTimesForMedication(medication.id)
-        val keptTexts = hashSetOf<String>()
-        val idsToDelete = existing.mapNotNull { time ->
-            if (time.timeText in desired && keptTexts.add(time.timeText)) null else time.id
+        val desiredList = timeTexts.distinct().sorted()
+        val existingList = getTimesForMedication(medication.id)
+        
+        val matchedExistingIds = hashSetOf<Long>()
+        val unassignedDesired = mutableListOf<String>()
+
+        for (desired in desiredList) {
+            val exactMatch = existingList.firstOrNull { it.id !in matchedExistingIds && it.timeText == desired }
+            if (exactMatch != null) {
+                matchedExistingIds.add(exactMatch.id)
+            } else {
+                unassignedDesired.add(desired)
+            }
         }
-        if (idsToDelete.isNotEmpty()) deleteTimesByIds(idsToDelete)
-        desired.filterNot(keptTexts::contains).sorted().forEach { timeText ->
+
+        val availableExisting = existingList.filter { it.id !in matchedExistingIds }.toMutableList()
+        val toUpdate = mutableListOf<MedicationTimeEntity>()
+        val toInsert = mutableListOf<String>()
+
+        for (desired in unassignedDesired) {
+            if (availableExisting.isNotEmpty()) {
+                val reuseEntity = availableExisting.removeAt(0)
+                toUpdate.add(reuseEntity.copy(timeText = desired))
+            } else {
+                toInsert.add(desired)
+            }
+        }
+
+        val toDeleteIds = availableExisting.map { it.id }
+
+        if (toDeleteIds.isNotEmpty()) {
+            deleteTimesByIds(toDeleteIds)
+        }
+        for (item in toUpdate) {
+            updateTime(item)
+        }
+        for (timeText in toInsert) {
             insertTime(MedicationTimeEntity(medicationId = medication.id, timeText = timeText))
         }
     }

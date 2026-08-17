@@ -7,7 +7,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-/** 与 Android Bitmap 解耦的黑白图，true 表示深色前景（LCD 段码）。 */
+/** 与 Android Bitmap 解耦的二值图，true 表示深色前景（LCD 段码）。 */
 class BinaryImage(
     val width: Int,
     val height: Int,
@@ -18,7 +18,10 @@ class BinaryImage(
         require(foreground.size == width * height)
     }
 
-    operator fun get(x: Int, y: Int): Boolean = foreground[y * width + x]
+    operator fun get(x: Int, y: Int): Boolean {
+        if (x !in 0 until width || y !in 0 until height) return false
+        return foreground[y * width + x]
+    }
 
     internal fun pixels(): BooleanArray = foreground
 }
@@ -29,11 +32,7 @@ data class SegmentRecognition(
 )
 
 /**
- * 三行 LCD 的确定性 7 段识别器。
- *
- * 算法只依赖二值像素：轻量膨胀连接同一数字的段码，连通域定位数字，七个采样区
- * 做模板匹配，再按 Y 坐标组成高压/低压/脉搏三行。它只在 ML Kit 无法得到有效
- * 读数时启用，输出始终带 FROM_FALLBACK，必须经确认页核对。
+ * 确定性 7 段数码管拓扑状态机识别器。
  */
 object SegmentDigitRecognizer {
 
@@ -50,13 +49,11 @@ object SegmentDigitRecognizer {
         9 to intArrayOf(1, 1, 1, 1, 0, 1, 1)
     )
 
-    /** 连通域填充率超过该值且宽高比正常时，视为实心噪声块而非数字笔画。 */
     private const val SOLID_FILL_REJECT = 0.75f
 
     fun recognize(image: BinaryImage): SegmentRecognition? {
         val baseRadius = max(1, min(image.width, image.height) / 360)
-        val radii = listOf(baseRadius, baseRadius * 2, baseRadius * 3, baseRadius * 4)
-            .distinct()
+        val radii = listOf(baseRadius, baseRadius * 2, baseRadius * 3, baseRadius * 4).distinct()
         return radii.mapNotNull { radius -> recognizeWithRadius(image, radius) }
             .maxByOrNull { recognitionScore(it) }
     }
@@ -217,13 +214,10 @@ object SegmentDigitRecognizer {
     private fun classifyDigit(image: BinaryImage, bounds: Bounds): ClassifiedDigit? {
         val aspectRatio = bounds.width.toFloat() / bounds.height
         val fillRatio = bounds.pixelArea.toFloat() / (bounds.width * bounds.height)
-        // 宽而实的连通域（图标、边框、LCD 底纹残留）不是数字笔画。
         if (aspectRatio >= 0.26f && fillRatio > SOLID_FILL_REJECT) return null
 
         if (aspectRatio < 0.26f) {
-            // 7 段“1”由两条竖直实心窄段组成（合成测试与真实 LCD 相同，填充率≈1）；
-            // 细到接近毛发级（1–2px）的竖条才是掩码噪声，直接拒绝，避免幽灵“1”行。
-            val minStrokeWidth = max(3, bounds.height / 20)
+            val minStrokeWidth = max(2, bounds.height / 25)
             return if (bounds.width < minStrokeWidth) {
                 null
             } else {

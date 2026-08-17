@@ -11,6 +11,7 @@ import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
+import com.example.bloodpressurerecord.data.scan.ScanSessionIds
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -29,7 +30,7 @@ object BackupImportLimits {
     const val MAX_FILE_BYTES = 10 * 1024 * 1024
     const val MAX_RECORDS = 5_000
     const val MAX_TOTAL_READING_ROWS = MAX_RECORDS * MeasurementInputRules.MAX_READING_COUNT
-    const val MAX_RECORD_ID_LENGTH = 200
+    const val MAX_RECORD_ID_LENGTH = ScanSessionIds.MAX_LENGTH
     const val MAX_ZIP_ENTRIES = 512
     const val MAX_UNCOMPRESSED_ENTRY_BYTES = 64L * 1024 * 1024
     const val MAX_TOTAL_UNCOMPRESSED_BYTES = 128L * 1024 * 1024

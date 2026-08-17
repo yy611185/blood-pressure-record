@@ -101,8 +101,8 @@ fun ScanCameraScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        ScanCameraActive.isActive = true
+    DisposableEffect(hasCameraPermission, state.phase) {
+        ScanCameraActive.isActive = hasCameraPermission && state.phase == ScanPhase.Camera
         onDispose { ScanCameraActive.isActive = false }
     }
 

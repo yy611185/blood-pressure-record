@@ -4,8 +4,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <!-- 离线优先：ML Kit bundled 的传递依赖会声明 INTERNET，这里显式移除。 -->
+    <!-- 离线优先：ML Kit / CameraX 传递依赖会声明这些权限，这里显式移除。 -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 健康提醒优先使用用户可授权的精确闹钟；未授权时代码会自动回退为非精确闹钟。 -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -23,7 +25,6 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.BloodPressureRecord">
-        <profileable android:shell="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true">

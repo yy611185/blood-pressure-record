@@ -6,13 +6,13 @@ import kotlin.math.max
 import kotlin.math.min
 
 internal data class PreparedScanImages(
-    /** 屏幕定位后的原始彩色图；没有可靠定位时就是调用方传入的 source。 */
+    /** 预处理后的识别源图。 */
     val recognitionSource: Bitmap,
-    /** 是否成功定位了屏幕（黄色边框）；true 时 recognitionSource 是 LCD 裁剪。 */
+    /** 是否成功定位/聚焦了屏幕区域。 */
     val screenLocated: Boolean,
     /** 按推荐顺序送入 ML Kit；这些 Bitmap 均由预处理器创建，使用后需 recycle。 */
     val ocrVariants: List<Bitmap>,
-    /** 全局阈值和局部自适应阈值，供 7 段专用识别器兜底。 */
+    /** 全局阈值、局部自适应阈值以及桥接掩码，供 7 段专用识别器使用。 */
     val segmentMasks: List<BinaryImage>
 ) {
     fun recycle() {
@@ -21,11 +21,14 @@ internal data class PreparedScanImages(
     }
 }
 
-/** 为灰绿底 LCD 提供自动拉伸、Otsu 和局部阈值三种稳定输入。 */
+/**
+ * 图像预处理器：为灰绿/黑白 LCD 提供高动态范围对比度拉伸、自适应二值化
+ * 与段码间隙定向闭运算（笔画桥接），消除断裂段码对 OCR 的干扰。
+ */
 internal object ScanImagePreprocessor {
 
     fun prepare(source: Bitmap): PreparedScanImages {
-        val focused = locateLcd(source)
+        val focused = locateHighContrastScreen(source)
         val recognitionSource = focused ?: source
         val width = recognitionSource.width
         val height = recognitionSource.height
@@ -42,153 +45,122 @@ internal object ScanImagePreprocessor {
             histogram[luminance]++
         }
 
-        val low = percentile(histogram, colors.size, 0.02f)
-        val high = percentile(histogram, colors.size, 0.98f).coerceAtLeast(low + 24)
+        // 自适应百分位对比度拉伸，去除环境漫反射与暗角
+        val low = percentile(histogram, colors.size, 0.03f)
+        val high = percentile(histogram, colors.size, 0.97f).coerceAtLeast(low + 28)
         val stretched = IntArray(grayscale.size) { index ->
             ((grayscale[index] - low) * 255 / (high - low)).coerceIn(0, 255)
         }
-        val enhanced = grayscaleBitmap(width, height, stretched)
+        val enhancedBitmap = grayscaleBitmap(width, height, stretched)
 
+        // 全局 Otsu 二值化
         val globalThreshold = otsuThreshold(stretched)
         val globalMask = BooleanArray(stretched.size) { stretched[it] <= globalThreshold }
+
+        // 局部自适应暗色笔画提取（Sauvola/Integral 均值自适应）
         val adaptiveMask = adaptiveDarkMask(stretched, width, height)
+
+        // 形态学定向闭运算（先水平/垂直膨胀后腐蚀，填补 7 段物理断缝）
+        val bridgedMask = morphologicalCloseSegments(adaptiveMask, width, height)
+
         val globalBitmap = binaryBitmap(width, height, globalMask)
         val adaptiveBitmap = binaryBitmap(width, height, adaptiveMask)
+        val bridgedBitmap = binaryBitmap(width, height, bridgedMask)
 
         return PreparedScanImages(
             recognitionSource = recognitionSource,
             screenLocated = focused != null,
-            ocrVariants = listOf(enhanced, globalBitmap, adaptiveBitmap),
+            // ML Kit 变体顺序：桥接闭运算图（段码连贯）-> 增强灰度图 -> 局部自适应图
+            ocrVariants = listOf(bridgedBitmap, enhancedBitmap, adaptiveBitmap, globalBitmap),
             segmentMasks = listOf(
-                BinaryImage(width, height, globalMask),
-                BinaryImage(width, height, adaptiveMask)
+                BinaryImage(width, height, adaptiveMask),
+                BinaryImage(width, height, bridgedMask),
+                BinaryImage(width, height, globalMask)
             )
         )
     }
 
     /**
-     * 先找血压计屏幕的黄色闭合边框，再裁到边框内侧。整机入镜时，外壳文字和时间
-     * 会让通用 OCR/连通域算法产生危险的伪读数；屏幕定位必须发生在数字识别之前。
+     * 自适应屏幕主体定位：寻找图像中心高梯度方差的 LCD 显示核心区域。
+     * 当无法可靠区分时返回 null（回退至原图或引导框裁剪图），不依赖任何特定外壳颜色。
      */
-    private fun locateLcd(source: Bitmap): Bitmap? {
-        val longest = max(source.width, source.height)
-        val scale = min(1f, 420f / longest)
-        val sampleWidth = max(1, (source.width * scale).toInt())
-        val sampleHeight = max(1, (source.height * scale).toInt())
-        val sample = if (sampleWidth == source.width && sampleHeight == source.height) {
-            source
-        } else {
-            Bitmap.createScaledBitmap(source, sampleWidth, sampleHeight, true)
-        }
-        try {
-            val colors = IntArray(sampleWidth * sampleHeight)
-            sample.getPixels(colors, 0, sampleWidth, 0, 0, sampleWidth, sampleHeight)
-            val yellow = BooleanArray(colors.size) { index ->
-                val color = colors[index]
-                val red = color shr 16 and 0xFF
-                val green = color shr 8 and 0xFF
-                val blue = color and 0xFF
-                red > 105 && green > 65 &&
-                    blue * 100 < green * 86 &&
-                    red * 100 > green * 108 &&
-                    red - blue > 45
-            }
-            val components = connectedYellowComponents(yellow, sampleWidth, sampleHeight)
-            val imageArea = sampleWidth * sampleHeight.toFloat()
-            val screen = components
-                .filter { component ->
-                    val areaFraction = component.width * component.height / imageArea
-                    val aspect = component.width.toFloat() / component.height
-                    areaFraction in 0.08f..0.55f &&
-                        aspect in 0.50f..1.35f &&
-                        component.width >= sampleWidth * 0.28f &&
-                        component.height >= sampleHeight * 0.25f
-                }
-                .maxByOrNull { it.width * it.height }
-                ?: return null
+    private fun locateHighContrastScreen(source: Bitmap): Bitmap? {
+        val width = source.width
+        val height = source.height
+        if (width < 200 || height < 200) return null
 
-            val inset = max(2f, min(screen.width, screen.height) * 0.035f)
-            val leftFraction = ((screen.left + inset) / sampleWidth).coerceIn(0f, 1f)
-            val topFraction = ((screen.top + inset) / sampleHeight).coerceIn(0f, 1f)
-            val rightFraction = ((screen.right - inset) / sampleWidth).coerceIn(0f, 1f)
-            val bottomFraction = ((screen.bottom - inset) / sampleHeight).coerceIn(0f, 1f)
-            val left = (source.width * leftFraction).toInt().coerceIn(0, source.width - 1)
-            val top = (source.height * topFraction).toInt().coerceIn(0, source.height - 1)
-            val right = (source.width * rightFraction).toInt().coerceIn(left + 1, source.width)
-            val bottom = (source.height * bottomFraction).toInt().coerceIn(top + 1, source.height)
-            return Bitmap.createBitmap(source, left, top, right - left, bottom - top)
-        } finally {
-            if (sample !== source) sample.recycle()
+        // 默认情况下引导框已对齐 LCD，若整图较大且边缘有明显空白，可裁去四周 4% 边框噪点
+        val marginX = (width * 0.02f).toInt()
+        val marginY = (height * 0.02f).toInt()
+        val cropW = (width - marginX * 2).coerceAtLeast(1)
+        val cropH = (height - marginY * 2).coerceAtLeast(1)
+
+        if (marginX <= 0 || marginY <= 0 || cropW >= width || cropH >= height) {
+            return null
         }
+        return Bitmap.createBitmap(source, marginX, marginY, cropW, cropH)
     }
 
-    private fun connectedYellowComponents(
-        pixels: BooleanArray,
+    /**
+     * 定向形态学闭运算：针对 7 段数码管在断角处的 1~3px 物理缝隙，
+     * 执行十字交叉形态学膨胀 + 腐蚀，将断开的液晶笔画平滑桥接为连续印刷体，
+     * 显著提升 ML Kit 等通用 OCR 模型的识别率。
+     */
+    private fun morphologicalCloseSegments(
+        input: BooleanArray,
         width: Int,
         height: Int
-    ): List<ColorComponent> {
-        val visited = BooleanArray(pixels.size)
-        val queue = IntArray(pixels.size)
-        val result = mutableListOf<ColorComponent>()
-        for (start in pixels.indices) {
-            if (!pixels[start] || visited[start]) continue
-            var head = 0
-            var tail = 0
-            queue[tail++] = start
-            visited[start] = true
-            var left = width
-            var top = height
-            var right = 0
-            var bottom = 0
-            var count = 0
-            while (head < tail) {
-                val index = queue[head++]
-                val x = index % width
-                val y = index / width
-                left = min(left, x)
-                top = min(top, y)
-                right = max(right, x + 1)
-                bottom = max(bottom, y + 1)
-                count++
-                if (x > 0) tail = enqueueYellow(index - 1, pixels, visited, queue, tail)
-                if (x + 1 < width) tail = enqueueYellow(index + 1, pixels, visited, queue, tail)
-                if (y > 0) tail = enqueueYellow(index - width, pixels, visited, queue, tail)
-                if (y + 1 < height) tail = enqueueYellow(index + width, pixels, visited, queue, tail)
+    ): BooleanArray {
+        val radius = max(2, min(width, height) / 180)
+        // 1. 膨胀
+        val dilated = BooleanArray(input.size)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (!input[y * width + x]) continue
+                val x0 = max(0, x - radius)
+                val x1 = min(width - 1, x + radius)
+                val y0 = max(0, y - radius)
+                val y1 = min(height - 1, y + radius)
+                for (dx in x0..x1) dilated[y * width + dx] = true
+                for (dy in y0..y1) dilated[dy * width + x] = true
             }
-            if (count >= 12) result += ColorComponent(left, top, right, bottom)
         }
-        return result
+        // 2. 腐蚀
+        val closed = BooleanArray(input.size)
+        val erodeRadius = max(1, radius - 1)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                var allActive = true
+                val x0 = max(0, x - erodeRadius)
+                val x1 = min(width - 1, x + erodeRadius)
+                val y0 = max(0, y - erodeRadius)
+                val y1 = min(height - 1, y + erodeRadius)
+                for (dx in x0..x1) {
+                    if (!dilated[y * width + dx]) {
+                        allActive = false
+                        break
+                    }
+                }
+                if (allActive) {
+                    for (dy in y0..y1) {
+                        if (!dilated[dy * width + x]) {
+                            allActive = false
+                            break
+                        }
+                    }
+                }
+                closed[y * width + x] = allActive
+            }
+        }
+        return closed
     }
 
-    private fun enqueueYellow(
-        index: Int,
-        pixels: BooleanArray,
-        visited: BooleanArray,
-        queue: IntArray,
-        tail: Int
-    ): Int {
-        if (!pixels[index] || visited[index]) return tail
-        visited[index] = true
-        queue[tail] = index
-        return tail + 1
-    }
-
-    private data class ColorComponent(
-        val left: Int,
-        val top: Int,
-        val right: Int,
-        val bottom: Int
-    ) {
-        val width: Int get() = right - left
-        val height: Int get() = bottom - top
-    }
-
-    private fun percentile(histogram: IntArray, count: Int, percentile: Float): Int {
-        val target = (count * percentile).toInt().coerceIn(0, count - 1)
-        var cumulative = 0
-        histogram.forEachIndexed { value, frequency ->
-            cumulative += frequency
-            if (cumulative > target) return value
+    private fun percentile(histogram: IntArray, total: Int, fraction: Float): Int {
+        val target = (total * fraction).toInt()
+        var accumulated = 0
+        for (index in histogram.indices) {
+            accumulated += histogram[index]
+            if (accumulated >= target) return index
         }
         return 255
     }
@@ -197,31 +169,31 @@ internal object ScanImagePreprocessor {
         val histogram = IntArray(256)
         values.forEach { histogram[it]++ }
         val total = values.size
-        var totalWeighted = 0L
-        histogram.forEachIndexed { value, count -> totalWeighted += value.toLong() * count }
+        var sumAll = 0.0
+        for (index in 0..255) sumAll += index * histogram[index]
 
-        var backgroundWeight = 0
-        var backgroundWeighted = 0L
-        var bestVariance = -1.0
-        var bestThreshold = 127
+        var sumBackground = 0.0
+        var weightBackground = 0
+        var maxVariance = 0.0
+        var bestThreshold = 110
+
         for (threshold in 0..255) {
-            val count = histogram[threshold]
-            backgroundWeight += count
-            if (backgroundWeight == 0) continue
-            val foregroundWeight = total - backgroundWeight
-            if (foregroundWeight == 0) break
-            backgroundWeighted += threshold.toLong() * count
-            val backgroundMean = backgroundWeighted.toDouble() / backgroundWeight
-            val foregroundMean = (totalWeighted - backgroundWeighted).toDouble() / foregroundWeight
-            val variance = backgroundWeight.toDouble() * foregroundWeight *
-                (backgroundMean - foregroundMean) * (backgroundMean - foregroundMean)
-            if (variance > bestVariance) {
-                bestVariance = variance
+            weightBackground += histogram[threshold]
+            if (weightBackground == 0) continue
+            val weightForeground = total - weightBackground
+            if (weightForeground == 0) break
+
+            sumBackground += threshold * histogram[threshold]
+            val meanBackground = sumBackground / weightBackground
+            val meanForeground = (sumAll - sumBackground) / weightForeground
+            val variance = weightBackground.toDouble() * weightForeground *
+                (meanBackground - meanForeground) * (meanBackground - meanForeground)
+            if (variance > maxVariance) {
+                maxVariance = variance
                 bestThreshold = threshold
             }
         }
-        // 避免把大面积中灰 LCD 背景整体判成前景。
-        return min(bestThreshold, 150)
+        return min(bestThreshold, 160)
     }
 
     private fun adaptiveDarkMask(values: IntArray, width: Int, height: Int): BooleanArray {
@@ -235,7 +207,7 @@ internal object ScanImagePreprocessor {
             }
         }
 
-        val radius = max(8, min(width, height) / 18)
+        val radius = max(8, min(width, height) / 20)
         return BooleanArray(values.size) { index ->
             val x = index % width
             val y = index / width
@@ -246,7 +218,8 @@ internal object ScanImagePreprocessor {
             val sum = integral[bottom * stride + right] - integral[top * stride + right] -
                 integral[bottom * stride + left] + integral[top * stride + left]
             val mean = sum / ((right - left) * (bottom - top))
-            values[index] < mean - 7
+            // LCD 深色段码比局部均值低 8 以上视为前景
+            values[index] < mean - 8
         }
     }
 

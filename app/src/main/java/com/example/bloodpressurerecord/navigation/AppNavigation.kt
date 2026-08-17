@@ -223,16 +223,25 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
             }
             composable(AppDestination.ScanReview.route) { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry(AppDestination.ScanCamera.route)
+                    runCatching { navController.getBackStackEntry(AppDestination.ScanCamera.route) }
+                        .getOrNull()
                 }
-                val scanVm: ScanViewModel = viewModel(parentEntry, factory = factory)
-                ScanReviewScreen(
-                    viewModel = scanVm,
-                    onBack = { navController.popBackStack() },
-                    onSaved = {
-                        navController.popBackStack(AppDestination.ScanCamera.route, inclusive = true)
+                if (parentEntry == null) {
+                    LaunchedEffect(Unit) {
+                        navController.navigate(AppDestination.ScanCamera.route) {
+                            popUpTo(AppDestination.ScanReview.route) { inclusive = true }
+                        }
                     }
-                )
+                } else {
+                    val scanVm: ScanViewModel = viewModel(parentEntry, factory = factory)
+                    ScanReviewScreen(
+                        viewModel = scanVm,
+                        onBack = { navController.popBackStack() },
+                        onSaved = {
+                            navController.popBackStack(AppDestination.ScanCamera.route, inclusive = true)
+                        }
+                    )
+                }
             }
             composable(AppDestination.History.route) { backStack ->
                 val historyVm: HistoryViewModel = viewModel(factory = factory)

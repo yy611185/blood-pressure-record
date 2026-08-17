@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.data.repository.backup
 
+import com.example.bloodpressurerecord.data.scan.ScanSessionIds
 import java.io.File
 import java.io.InputStream
 import java.math.BigDecimal
@@ -245,13 +246,10 @@ class BackupFileReader {
         return (1..sheet.lastRowNum).mapNotNull { rowIndex ->
             val row = sheet.getRow(rowIndex) ?: return@mapNotNull null
             if (row.isEffectivelyBlank()) return@mapNotNull null
-            val recordId = row.text(columns, "record_id").trim()
-            if (recordId.isBlank()) {
-                throw BackupFormatException("测量记录第 ${rowIndex + 1} 行缺少 record_id")
-            }
-            if (recordId.length > BackupImportLimits.MAX_RECORD_ID_LENGTH) {
-                throw BackupFormatException("测量记录第 ${rowIndex + 1} 行的 record_id 过长")
-            }
+            val recordId = parseRecordId(
+                row.text(columns, "record_id"),
+                "测量记录第 ${rowIndex + 1} 行"
+            )
 
             BackupImportMeasurement(
                 sourceRowNumber = rowIndex + 1,
@@ -298,10 +296,10 @@ class BackupFileReader {
         return (1..sheet.lastRowNum).mapNotNull { rowIndex ->
             val row = sheet.getRow(rowIndex) ?: return@mapNotNull null
             if (row.isEffectivelyBlank()) return@mapNotNull null
-            val recordId = row.text(columns, "record_id").trim()
-            if (recordId.isBlank()) {
-                throw BackupFormatException("原始读数第 ${rowIndex + 1} 行缺少 record_id")
-            }
+            val recordId = parseRecordId(
+                row.text(columns, "record_id"),
+                "原始读数第 ${rowIndex + 1} 行"
+            )
             val pulseRaw = row.text(columns, "pulse").trim()
             val pulse = pulseRaw.toStrictIntOrNull()
             RawReadingRow(
@@ -361,6 +359,20 @@ class BackupFileReader {
             "false", "0" -> false
             else -> null
         }
+    }
+
+    private fun parseRecordId(raw: String, rowLabel: String): String {
+        val recordId = raw.trim()
+        if (recordId.isBlank()) {
+            throw BackupFormatException("${rowLabel}缺少 record_id")
+        }
+        if (recordId.length > BackupImportLimits.MAX_RECORD_ID_LENGTH) {
+            throw BackupFormatException("${rowLabel}的 record_id 过长")
+        }
+        if (!ScanSessionIds.isSafe(recordId)) {
+            throw BackupFormatException("${rowLabel}的 record_id 包含不安全字符")
+        }
+        return recordId
     }
 
     private fun String.toStrictIntOrNull(): Int? {

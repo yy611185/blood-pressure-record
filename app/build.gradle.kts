@@ -14,8 +14,8 @@ android {
         applicationId = "com.yang.bloodpressure"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "1.8.1"
+        versionCode = 29
+        versionName = "1.8.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -127,7 +127,7 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // 5.4.0 之前的 OOXML 解析存在重复 ZIP 条目安全问题；备份导入必须使用修复版本。
     implementation("org.apache.poi:poi-ooxml:5.5.1")
-    // ?????CameraX + ML Kit ???????bundled ???? INTERNET ???
+    // 拍照识别：CameraX + ML Kit 离线文字识别（bundled 模型，无 INTERNET 权限）
     implementation("androidx.camera:camera-core:1.4.2")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")

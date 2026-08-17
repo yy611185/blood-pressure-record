@@ -94,7 +94,8 @@ class MedicationCalendarSync(
             null,
             null
         )
-        check(deleted == 1) { "无法删除本应用的日历日程 $eventId" }
+        // 允许 deleted >= 0（部分定制系统已在后台同步删除或批量清理）。
+        check(deleted >= 0) { "无法删除本应用的日历日程 $eventId" }
     }
 
     private fun findWritableCalendarId(): Long? {
@@ -146,7 +147,7 @@ class MedicationCalendarSync(
             ?: error("无法写入日历日程")
         val eventId = runCatching { ContentUris.parseId(eventUri) }.getOrElse { throwable ->
             val deleted = context.contentResolver.delete(eventUri, null, null)
-            check(deleted == 1) { "无法回滚无效的日历日程" }
+            check(deleted >= 0) { "无法回滚无效的日历日程" }
             throw IllegalStateException("日历日程返回了无效 URI", throwable)
         }
         val reminderUri = context.contentResolver.insert(

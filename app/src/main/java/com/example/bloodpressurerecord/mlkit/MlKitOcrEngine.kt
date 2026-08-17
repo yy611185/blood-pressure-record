@@ -2,7 +2,7 @@ package com.example.bloodpressurerecord.mlkit
 
 import android.graphics.Bitmap
 import android.util.Log
-import com.example.bloodpressurerecord.domain.ocr.CalibratedLcdRecognizer
+import com.example.bloodpressurerecord.BuildConfig
 import com.example.bloodpressurerecord.domain.ocr.BpReadingParser
 import com.example.bloodpressurerecord.domain.ocr.OcrBlock
 import com.example.bloodpressurerecord.domain.ocr.OcrResult
@@ -21,8 +21,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 离线组合识别引擎：裁剪后的 LCD 画面先生成自动对比度/二值化版本，分别交给
- * bundled ML Kit；若通用 OCR 仍无有效三行结果，再启用确定性的 7 段识别器。
+ * 离线组合识别引擎：
+ * 1. 使用经过对比度增强、自适应二值化与形态学闭运算桥接后的图像；
+ * 2. 优先运行高精度 7 段拓扑状态机识别器；
+ * 3. 结合 ML Kit Latin 离线模型多变体共识进行综合判决。
  */
 class MlKitOcrEngine(
     private val recognizer: TextRecognizer =
@@ -32,69 +34,72 @@ class MlKitOcrEngine(
     companion object {
         private const val TAG = "BpOcr"
 
-        /** 校准通道达到该置信度才免人工核对；低于时强制 requiresReview。 */
-        private const val CALIBRATED_AUTO_ACCEPT_CONFIDENCE = 0.98f
+        /** 7 段拓扑通道达到该置信度免强制人工核对标志。 */
+        private const val AUTO_ACCEPT_CONFIDENCE = 0.85f
+
+        private inline fun debugLog(message: () -> String) {
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, message())
+            }
+        }
     }
 
     override suspend fun recognize(bitmap: Bitmap): OcrResult = withContext(Dispatchers.Default) {
         val prepared = runCatching { ScanImagePreprocessor.prepare(bitmap) }.getOrNull()
             ?: return@withContext recognizeOne(bitmap)
         try {
-            val calibrated = prepared.segmentMasks.asReversed()
-                .mapNotNull(CalibratedLcdRecognizer::recognize)
-                .maxByOrNull { it.confidence }
-            if (calibrated != null) {
-                Log.d(
-                    TAG,
-                    "channel=calibrated sys=${calibrated.candidate.systolic} " +
-                        "dia=${calibrated.candidate.diastolic} pulse=${calibrated.candidate.pulse} " +
-                        "conf=${calibrated.confidence}"
-                )
-                // 参考照片上该校准通道是主力（25/25 全对，conf 0.97–1.0），但真实拍摄
-                // 的透视/倾斜会让固定槽位错位并产生高置信误匹配（实测 121→222）。
-                // 置信度不是满分时强制“请核对”，把偶发误匹配暴露给用户而不是静默入库。
-                return@withContext calibrated.toOcrResult(
+            // 通道 1：确定性 7 段拓扑状态机识别
+            val segmentBest = prepared.segmentMasks
+                .mapNotNull(SegmentDigitRecognizer::recognize)
+                .maxByOrNull { it.confidence + if (it.candidate.pulse != null) 0.20f else 0f }
+
+            if (segmentBest != null && segmentBest.confidence >= 0.72f) {
+                debugLog {
+                    "channel=segment sys=${segmentBest.candidate.systolic} " +
+                        "dia=${segmentBest.candidate.diastolic} pulse=${segmentBest.candidate.pulse} " +
+                        "conf=${segmentBest.confidence}"
+                }
+                return@withContext segmentBest.toOcrResult(
                     prepared.recognitionSource.width,
                     prepared.recognitionSource.height
                 ).copy(
                     lcdLocalized = prepared.screenLocated,
-                    requiresReview = calibrated.confidence < CALIBRATED_AUTO_ACCEPT_CONFIDENCE
+                    requiresReview = segmentBest.confidence < AUTO_ACCEPT_CONFIDENCE
                 )
             }
 
-            val enhanced = prepared.ocrVariants.first()
-            val remaining = prepared.ocrVariants.drop(1)
-            val variants = listOf(enhanced, prepared.recognitionSource) + remaining
-            val rawResults = variants.map(::recognizeOne)
+            // 通道 2：ML Kit 通用 OCR 识别（已桥接段码间隙）
+            val rawResults = prepared.ocrVariants.map(::recognizeOne)
             val recognized = rawResults.mapNotNull { result ->
                 val candidate = BpReadingParser.parse(result) ?: return@mapNotNull null
                 RecognizedVariant(result, candidate)
             }
-            Log.d(
-                TAG,
+            debugLog {
                 "channel=mlkit variants=${rawResults.size} parsed=${recognized.size} " +
                     "candidates=${recognized.joinToString { it.candidate.key() }}"
-            )
+            }
             chooseConsensus(recognized)?.let { consensus ->
                 return@withContext consensus.copy(lcdLocalized = prepared.screenLocated)
             }
 
-            val fallback = prepared.segmentMasks
-                .mapNotNull(SegmentDigitRecognizer::recognize)
-                .filter { it.candidate.pulse != null && it.confidence >= 0.82f }
-                .maxByOrNull { it.confidence + if (it.candidate.pulse != null) 0.15f else 0f }
-            Log.d(TAG, "channel=segment fallback=${fallback != null}")
-            fallback?.toOcrResult(
-                prepared.recognitionSource.width,
-                prepared.recognitionSource.height
-            )?.copy(lcdLocalized = prepared.screenLocated)
-                ?: OcrResult(
-                    imageWidth = prepared.recognitionSource.width,
-                    imageHeight = prepared.recognitionSource.height,
-                    blocks = emptyList(),
-                    requiresReview = true,
-                    lcdLocalized = prepared.screenLocated
-                ).also { Log.d(TAG, "channel=none all paths failed") }
+            // 通道 3：兜底输出 7 段拓扑候选（哪怕置信度略低）
+            if (segmentBest != null) {
+                return@withContext segmentBest.toOcrResult(
+                    prepared.recognitionSource.width,
+                    prepared.recognitionSource.height
+                ).copy(
+                    lcdLocalized = prepared.screenLocated,
+                    requiresReview = true
+                )
+            }
+
+            OcrResult(
+                imageWidth = prepared.recognitionSource.width,
+                imageHeight = prepared.recognitionSource.height,
+                blocks = emptyList(),
+                requiresReview = true,
+                lcdLocalized = prepared.screenLocated
+            ).also { debugLog { "channel=none all paths failed" } }
         } finally {
             prepared.recycle()
         }
@@ -103,35 +108,40 @@ class MlKitOcrEngine(
     private fun recognizeOne(bitmap: Bitmap): OcrResult = runCatching {
         val image = InputImage.fromBitmap(bitmap, 0)
         val text = Tasks.await(recognizer.process(image))
-        Log.d(TAG, "mlkit variant ${bitmap.width}x${bitmap.height}: \"${text.text}\"")
-        text.toOcrResult(bitmap.width, bitmap.height)
-    }.getOrElse {
-        Log.w(TAG, "mlkit variant ${bitmap.width}x${bitmap.height} failed: ${it.message ?: it.javaClass.simpleName}")
+        toOcrResult(bitmap.width, bitmap.height, text)
+    }.getOrElse { throwable ->
+        debugLog { "ML Kit recognizeOne failed: ${throwable.message}" }
         OcrResult(bitmap.width, bitmap.height, emptyList())
     }
 
-    /**
-     * 多变体共识：≥2 个变体给出完全一致的读数视为共识；只有一个变体解析成功时
-     * 同样放行，但强制 requiresReview 交给确认页核对。解析器会为无脉搏结果打
-     * PARTIAL_STRUCTURE 标记。设计取舍：宁可靠用户核对，也不把有效读数整体丢弃
-     * （旧逻辑要求“≥2 个变体一致且至少一个含脉搏”，实际把大量正确结果拒之门外）。
-     */
     private fun chooseConsensus(variants: List<RecognizedVariant>): OcrResult? {
         if (variants.isEmpty()) return null
         val grouped = variants.groupBy { it.candidate.key() }
-        val winnerGroup = grouped.values.maxWithOrNull(
-            compareBy<List<RecognizedVariant>> { it.size }
-                .thenBy { group -> group.maxOf { it.candidate.qualityScore() } }
-        ).orEmpty()
-        if (winnerGroup.isEmpty()) return null
-        val winner = winnerGroup.maxByOrNull { it.candidate.qualityScore() } ?: return null
-        val hasConsensus = winnerGroup.size >= 2
-        return winner.result.copy(requiresReview = !hasConsensus || grouped.size > 1)
+        val winningEntry = grouped.maxByOrNull { (key, list) ->
+            val countScore = list.size * 10
+            val bestCandidate = list.maxByOrNull { it.candidate.qualityScore() }?.candidate
+            val qualityScore = bestCandidate?.qualityScore() ?: 0
+            countScore + qualityScore
+        } ?: return null
+
+        val winningList = winningEntry.value
+        val hasDisagreement = grouped.size > 1
+        val bestVariant = winningList.maxByOrNull { it.candidate.qualityScore() } ?: winningList.first()
+
+        val flags = buildSet {
+            addAll(bestVariant.candidate.flags)
+            if (hasDisagreement) {
+                add(ReadingFlag.AMBIGUOUS_DIGIT)
+            }
+        }
+        return bestVariant.result.copy(
+            requiresReview = hasDisagreement || ReadingFlag.AMBIGUOUS_DIGIT in flags
+        )
     }
 
-    private fun Text.toOcrResult(width: Int, height: Int): OcrResult {
-        val blocks = textBlocks.flatMap { block ->
-            block.lines.flatMap { line ->
+    private fun toOcrResult(width: Int, height: Int, text: Text): OcrResult {
+        val blocks = text.textBlocks.flatMap { textBlock ->
+            textBlock.lines.flatMap { line ->
                 line.elements.mapNotNull { element ->
                     val box = element.boundingBox ?: return@mapNotNull null
                     OcrBlock(
@@ -154,16 +164,16 @@ class MlKitOcrEngine(
             candidate.diastolic,
             candidate.pulse
         )
-        val rowHeight = height * 0.18f
-        val startY = height * 0.20f
-        val rowStep = height * 0.25f
+        val rowHeight = height * 0.20f
+        val startY = height * 0.18f
+        val rowStep = height * 0.26f
         val blocks = values.mapIndexed { index, value ->
             val top = startY + rowStep * index
             OcrBlock(
                 text = value.toString(),
-                left = width * 0.25f,
+                left = width * 0.20f,
                 top = top,
-                right = width * 0.75f,
+                right = width * 0.80f,
                 bottom = top + rowHeight,
                 confidence = confidence
             )

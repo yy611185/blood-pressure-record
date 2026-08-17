@@ -9,15 +9,18 @@ import java.io.File
 class ScanPhotoStore(private val rootDir: File) {
 
     fun save(sessionId: String, groupNumber: Int, jpegBytes: ByteArray): File {
-        val dir = File(rootDir, sessionId).apply { mkdirs() }
+        require(groupNumber > 0) { "组序号必须为正整数" }
+        val dir = sessionDir(sessionId).apply { mkdirs() }
         val file = File(dir, "$groupNumber.jpg")
+        checkInsideRoot(file)
         file.writeBytes(jpegBytes)
         return file
     }
 
     /** 删除某条记录关联的照片目录。 */
     fun deleteForSession(sessionId: String) {
-        File(rootDir, sessionId).deleteRecursively()
+        val dir = sessionDir(sessionId)
+        if (dir.exists()) dir.deleteRecursively()
     }
 
     /** 删除全部照片，返回删除的记录目录数。 */
@@ -34,9 +37,31 @@ class ScanPhotoStore(private val rootDir: File) {
         return dirs.size
     }
 
-    fun listSessionIds(): List<String> = sessionDirs().map { it.name }.sorted()
+    fun listSessionIds(): List<String> = sessionDirs().map { decodeDirName(it.name) }.sorted()
 
     fun sizeBytes(): Long = rootDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    private fun sessionDir(sessionId: String): File {
+        val dir = File(rootDir, encodeDirName(sessionId))
+        checkInsideRoot(dir)
+        return dir
+    }
+
+    /**
+     * Windows 不允许目录名含 `:`。旧备份 id（`bp_measurements:12`）在落盘时改成 `~`，
+     * `~` 不在 [ScanSessionIds] 允许字符里，因此不会和真实 id 冲突。
+     */
+    private fun encodeDirName(sessionId: String): String =
+        ScanSessionIds.requireSafe(sessionId).replace(':', '~')
+
+    private fun decodeDirName(dirName: String): String = dirName.replace('~', ':')
+
+    private fun checkInsideRoot(target: File) {
+        val root = rootDir.canonicalFile
+        val resolved = target.canonicalFile
+        val inside = resolved == root || resolved.toPath().startsWith(root.toPath())
+        check(inside) { "照片路径超出存储目录" }
+    }
 
     private fun sessionDirs(): List<File> =
         rootDir.listFiles()?.filter { it.isDirectory }?.toList() ?: emptyList()

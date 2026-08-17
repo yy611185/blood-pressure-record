@@ -17,12 +17,16 @@ fun ImageProxy.toUprightBitmap(): Bitmap {
         crop.left > 0 || crop.top > 0 ||
         crop.right < bufferBitmap.width || crop.bottom < bufferBitmap.height
     ) {
+        val safeLeft = crop.left.coerceIn(0, bufferBitmap.width - 1)
+        val safeTop = crop.top.coerceIn(0, bufferBitmap.height - 1)
+        val safeWidth = crop.width().coerceIn(1, bufferBitmap.width - safeLeft)
+        val safeHeight = crop.height().coerceIn(1, bufferBitmap.height - safeTop)
         Bitmap.createBitmap(
             bufferBitmap,
-            crop.left.coerceIn(0, bufferBitmap.width - 1),
-            crop.top.coerceIn(0, bufferBitmap.height - 1),
-            crop.width().coerceAtMost(bufferBitmap.width - crop.left),
-            crop.height().coerceAtMost(bufferBitmap.height - crop.top)
+            safeLeft,
+            safeTop,
+            safeWidth,
+            safeHeight
         ).also { if (it !== bufferBitmap) bufferBitmap.recycle() }
     } else {
         bufferBitmap
@@ -61,7 +65,9 @@ fun Bitmap.cropToGuideFrame(
     val right = ceil(width * rightFraction).toInt().coerceIn(left + 1, width)
     val bottom = ceil(height * bottomFraction).toInt().coerceIn(top + 1, height)
     if (left == 0 && top == 0 && right == width && bottom == height) return this
-    return Bitmap.createBitmap(this, left, top, right - left, bottom - top)
+    val cropWidth = (right - left).coerceIn(1, width - left)
+    val cropHeight = (bottom - top).coerceIn(1, height - top)
+    return Bitmap.createBitmap(this, left, top, cropWidth, cropHeight)
 }
 
 /** 限制最长边，控制 OCR 与内存开销；小于目标尺寸时原样返回。 */
