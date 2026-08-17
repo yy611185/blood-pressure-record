@@ -36,3 +36,9 @@ keystore/*
 Thumbs.db
 *.swp
 *~
+
+# Archives / diagnostics
+*.tgz
+*.tar.gz
+*.hprof
+*.log
