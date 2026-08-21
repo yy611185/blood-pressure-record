@@ -23,6 +23,7 @@ data class TrendPointRow(
 
 data class CalendarSessionSummaryRow(
     val measuredAt: Long,
+    val noteSummary: String?,
     val containsHighRiskReading: Boolean
 )
 
@@ -121,6 +122,7 @@ interface MeasurementSessionDao {
     @Query(
         """
         SELECT measuredAt,
+               CASE WHEN note IS NULL THEN NULL ELSE SUBSTR(note, 1, 40) END AS noteSummary,
                highRiskAlertTriggered AS containsHighRiskReading
         FROM measurement_sessions
         WHERE measuredAt >= :startInclusive AND measuredAt < :endExclusive

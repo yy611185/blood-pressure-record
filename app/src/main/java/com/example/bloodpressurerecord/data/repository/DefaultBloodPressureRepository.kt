@@ -48,6 +48,7 @@ class DefaultBloodPressureRepository(
             rows.map {
                 CalendarSessionSummary(
                     measuredAt = it.measuredAt,
+                    noteSummary = it.noteSummary,
                     containsHighRiskReading = it.containsHighRiskReading
                 )
             }

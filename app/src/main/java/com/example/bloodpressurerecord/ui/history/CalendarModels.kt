@@ -38,7 +38,9 @@ object HistoryDateRanges {
 data class CalendarDaySummary(
     val date: LocalDate,
     val recordCount: Int,
-    val containsHighRisk: Boolean
+    val containsHighRisk: Boolean,
+    /** 当天至少一条记录带有自定义备注（日历红点标记）。 */
+    val hasNote: Boolean = false
 )
 
 data class CalendarMonthCell(

@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 data class CalendarSessionSummary(
     val measuredAt: Long,
+    val noteSummary: String?,
     val containsHighRiskReading: Boolean
 )
 

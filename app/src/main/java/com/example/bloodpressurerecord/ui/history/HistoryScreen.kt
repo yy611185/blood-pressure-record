@@ -1,9 +1,11 @@
 package com.example.bloodpressurerecord.ui.history
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +82,7 @@ import com.example.bloodpressurerecord.ui.theme.Terracotta600
 import com.example.bloodpressurerecord.ui.theme.Terracotta700
 import com.example.bloodpressurerecord.ui.theme.Terracotta800
 import com.example.bloodpressurerecord.ui.theme.Terracotta900
+import com.example.bloodpressurerecord.ui.theme.WarmError
 import com.example.bloodpressurerecord.ui.theme.WarmTextFaint
 import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import java.time.Instant
@@ -98,6 +101,8 @@ fun HistoryScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showMonthPicker by remember { mutableStateOf(false) }
     val today = remember { LocalDate.now() }
+    // 双击带备注红点的日期：选中后等当天记录加载完成，滚动到第一条带备注的记录卡片。
+    var pendingNoteScrollDate by remember { mutableStateOf<LocalDate?>(null) }
 
     if (showMonthPicker) {
         val initialMillis = uiState.displayedMonth.atDay(1)
@@ -130,6 +135,31 @@ fun HistoryScreen(
     // 以列表真实位置兜底复位，确保“历史记录”标题一定能重新显示。
     LaunchedEffect(listState.canScrollBackward) {
         if (!listState.canScrollBackward) topBarScroll.expand()
+    }
+    LaunchedEffect(
+        pendingNoteScrollDate,
+        uiState.selectedDate,
+        uiState.dayState,
+        uiState.selectedDayRecords
+    ) {
+        val targetDate = pendingNoteScrollDate ?: return@LaunchedEffect
+        if (uiState.viewMode != HistoryViewMode.CALENDAR ||
+            uiState.selectedDate != targetDate ||
+            uiState.dayState != CalendarLoadingState.CONTENT ||
+            uiState.selectedDayRecords.isEmpty()
+        ) {
+            return@LaunchedEffect
+        }
+        // 列表固定前缀：模式切换(1) + 鼓励条(有记录时 1) + 日历卡(1) + 当天摘要(1)。
+        val itemsBeforeRecords = 1 +
+            (if (uiState.daySummaries.isNotEmpty()) 1 else 0) +
+            1 + // 日历卡
+            1   // 当天摘要
+        val notedIndex = uiState.selectedDayRecords
+            .indexOfFirst { it.noteSummary != HistoryViewModel.NO_NOTE_TEXT }
+        val targetIndex = itemsBeforeRecords + notedIndex.coerceAtLeast(0)
+        listState.animateScrollToItem(targetIndex)
+        pendingNoteScrollDate = null
     }
     Column(
         modifier = Modifier
@@ -174,7 +204,11 @@ fun HistoryScreen(
                         onPreviousMonth = viewModel::showPreviousMonth,
                         onNextMonth = viewModel::showNextMonth,
                         onChooseMonth = { showMonthPicker = true },
-                        onDateSelected = viewModel::selectDate
+                        onDateSelected = viewModel::selectDate,
+                        onDateDoubleClick = { date ->
+                            pendingNoteScrollDate = date
+                            viewModel.selectDate(date)
+                        }
                     )
                 }
             }
@@ -442,7 +476,8 @@ private fun CalendarMonth(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onChooseMonth: () -> Unit,
-    onDateSelected: (LocalDate?) -> Unit
+    onDateSelected: (LocalDate?) -> Unit,
+    onDateDoubleClick: (LocalDate) -> Unit
 ) {
     // 与 CalendarMonthLayout 一致：周一开头。
     val weekLabels = listOf(
@@ -458,6 +493,7 @@ private fun CalendarMonth(
         CalendarMonthLayout.cells(month).chunked(CalendarMonthLayout.COLUMN_COUNT)
     }
     val currentOnDateSelected by rememberUpdatedState(onDateSelected)
+    val currentOnDateDoubleClick by rememberUpdatedState(onDateDoubleClick)
     Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -524,12 +560,16 @@ private fun CalendarMonth(
                         val onCellClick = remember(date) {
                             { currentOnDateSelected(date) }
                         }
+                        val onCellDoubleClick = remember(date) {
+                            { currentOnDateDoubleClick(date) }
+                        }
                         CalendarDay(
                             date = date,
                             summary = summaries[date],
                             selected = selectedDate == date,
                             today = today == date,
                             onClick = onCellClick,
+                            onDoubleClick = onCellDoubleClick,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -541,6 +581,7 @@ private fun CalendarMonth(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CalendarDay(
     date: LocalDate,
@@ -548,6 +589,7 @@ internal fun CalendarDay(
     selected: Boolean,
     today: Boolean,
     onClick: () -> Unit,
+    onDoubleClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val enabled = summary != null
@@ -558,6 +600,7 @@ internal fun CalendarDay(
             if (enabled) {
                 append("，有${summary?.recordCount}条记录，可选择")
                 if (summary?.containsHighRisk == true) append("，包含高风险读数")
+                if (summary?.hasNote == true) append("，含自定义备注，双击查看")
             } else {
                 append("，无记录，不可选择")
             }
@@ -586,7 +629,10 @@ internal fun CalendarDay(
             if (!enabled) disabled()
         }
     if (enabled) {
-        cellModifier = cellModifier.clickable(onClick = onClick)
+        cellModifier = cellModifier.combinedClickable(
+            onClick = onClick,
+            onDoubleClick = onDoubleClick
+        )
     }
 
     Box(cellModifier, contentAlignment = Alignment.Center) {
@@ -608,18 +654,29 @@ internal fun CalendarDay(
                 fontWeight = if (enabled || selected) FontWeight.Bold else FontWeight.Normal
             )
         }
+        // 备注红点：该日期存在带自定义备注的记录；双击可跳转查看。
+        if (summary?.hasNote == true) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 1.dp)
+                    .size(5.dp)
+                    .background(WarmError, CircleShape)
+            )
+        }
     }
 }
 
-/** 日历图例：有记录 / 含偏高读数 / 选中。 */
+/** 日历图例：有记录 / 含偏高读数 / 含备注 / 选中。 */
 @Composable
 internal fun CalendarLegend() {
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = AppSpacing.small),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.large)
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.medium)
     ) {
         LegendItem(color = Sage300, label = "有记录")
         LegendItem(color = Terracotta300, label = "含偏高读数")
+        LegendItem(color = WarmError, label = "含备注")
         LegendItem(color = Terracotta600, label = "选中")
     }
 }

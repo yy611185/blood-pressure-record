@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -311,13 +312,16 @@ private fun WarmBottomNavBar(
     currentRoute: String?,
     onSelect: (AppDestination) -> Unit
 ) {
+    // 百分比胶囊：无论条高多少，左右端头都是精确半圆，避免固定半径被
+    // 部分 ROM 的阴影/轮廓渲染退化成方角。
+    val dockShape = RoundedCornerShape(percent = 50)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp)
-            .shadow(4.dp, MaterialTheme.shapes.large, clip = false)
-            .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.large)
+            .shadow(2.dp, dockShape, clip = false)
+            .background(MaterialTheme.colorScheme.surface, dockShape)
             .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -327,7 +331,7 @@ private fun WarmBottomNavBar(
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
-                    .clip(MaterialTheme.shapes.large)
+                    .clip(dockShape)
                     .background(
                         if (selected) MaterialTheme.colorScheme.primaryContainer
                         else Color.Transparent

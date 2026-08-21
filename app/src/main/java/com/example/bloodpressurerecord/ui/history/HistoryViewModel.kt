@@ -116,7 +116,8 @@ class HistoryViewModel(
                         CalendarDaySummary(
                             date = date,
                             recordCount = values.size,
-                            containsHighRisk = values.any { it.containsHighRiskReading }
+                            containsHighRisk = values.any { it.containsHighRiskReading },
+                            hasNote = values.any { !it.noteSummary.isNullOrBlank() }
                         )
                     }
                 MonthResult(month = month, summaries = summaries)

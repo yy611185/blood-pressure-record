@@ -83,6 +83,17 @@ object AppReleaseNotes {
     val notes = listOf(
         ReleaseNote(
             version = AppInfoContent.CURRENT_VERSION,
+            summary = "新增口令加密备份、日历备注红点与双击跳转，修复底部导航圆角。",
+            changes = listOf(
+                "数据管理页新增「加密导出」：备份以 .bpx 格式用 AES-256-GCM 加密保存，口令经 PBKDF2 派生且不落盘；导入时输入相同口令即可恢复，明文 Excel 导出保留并继续提示风险。",
+                "历史日历中，存在自定义备注的日期下方显示小红点；双击带红点的日期可自动跳转并定位到该条带备注的记录。",
+                "底部导航条左右端头改为精确弧形（胶囊）显示，修复部分设备上出现的方形边角。",
+                "修复发布流水线配置错误，恢复持续集成与自动发版能力。",
+                "版本更新至 v1.8.2。"
+            )
+        ),
+        ReleaseNote(
+            version = "1.8.1",
             summary = "修复备份平均策略、提醒自动保存、历史标题回滚与系统导航栏沉浸问题。",
             changes = listOf(
                 "提醒时间选择后立即自动保存并重排提醒，移除额外的「保存提醒设置」按钮。",

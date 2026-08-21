@@ -117,9 +117,9 @@ class BackupImportService(
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) {
     /** 兼容旧调用方：完整导入等价于预览后勾选所有可恢复内容并提交。 */
-    suspend fun importXlsx(inputStream: InputStream): BackupImportResult {
+    suspend fun importXlsx(inputStream: InputStream, passphrase: CharArray? = null): BackupImportResult {
         return commitImport(
-            previewXlsx(inputStream),
+            previewXlsx(inputStream, passphrase),
             BackupImportOptions(
                 importMeasurements = true,
                 restoreUserProfile = true,
@@ -129,9 +129,13 @@ class BackupImportService(
         )
     }
 
-    suspend fun previewXlsx(inputStream: InputStream): BackupImportPreview = withContext(Dispatchers.IO) {
+    suspend fun previewXlsx(
+        inputStream: InputStream,
+        passphrase: CharArray? = null
+    ): BackupImportPreview = withContext(Dispatchers.IO) {
         val document = BackupFileReader().readXlsx(
-            SizeLimitedInputStream(inputStream, BackupImportLimits.MAX_FILE_BYTES)
+            SizeLimitedInputStream(inputStream, BackupImportLimits.MAX_FILE_BYTES),
+            passphrase
         )
         val zone = document.meta["timezone"]
             ?.let { runCatching { ZoneId.of(it) }.getOrNull() }

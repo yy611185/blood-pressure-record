@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册、不联网、不复杂。数据只存在你的手机里。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-35-blue) ![Version](https://img.shields.io/badge/version-1.8.1-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-35-blue) ![Version](https://img.shields.io/badge/version-1.8.2-orange)
 
 ---
 
@@ -35,6 +35,7 @@
 | 💊 服药提醒 | 晨/晚提醒 + 每日打卡 + 可选写入系统日历（需授权） |
 | 📲 桌面小部件 | 不打开 App 也能看到最新血压与今日进度 |
 | 💾 Excel 导入导出 | 备份含完整原始读数与设置，格式 v3（兼容 v2） |
+| 🔐 加密备份 | 可选 .bpx 加密导出：AES-256-GCM + 口令派生密钥，导入需相同口令 |
 
 - 支持 Excel (.xlsx) 格式导入和导出；格式 v3 保留每条记录的平均策略，并向后兼容 v2。
 - 导出文件包含使用说明、测量记录、全部原始读数、用户资料和导出信息。
@@ -145,7 +146,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ### 已知限制（诚实声明）
 
-- 健康数据在本地**明文存储**（Room）与**明文导出**（Excel）——依赖 Android 全盘加密与你的主动保管
+- 健康数据在本地**明文存储**（Room，依赖 Android 全盘加密）；导出可选**明文 Excel** 或**口令加密的 .bpx 容器**
 - 换机只能靠手动 Excel 迁移，无自动同步
 - 血压分级采用中国指南标准，其他国家/地区标准可能不同
 - Android Studio Meerkat | 2024.3.1 Patch 1 或更高版本
@@ -159,6 +160,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 1.8.2 | 2026-08-21 | 口令加密备份、日历备注红点、Dock 胶囊圆角 |
 | 1.8.1 | 2026-07-27 | 备份 v3 兼容、提醒自动保存、导航沉浸 |
 | 1.8.0 | 2026-07-27 | 服药提醒、打卡、桌面小部件、日历同步 |
 | 1.7.0 | 2026-07-26 | 中国指南分级、平均策略、跨零点修复 |
@@ -219,6 +221,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 1.8.2 | 2026-08-21 | 口令加密备份、日历备注红点与双击跳转、Dock 胶囊圆角 |
 | 1.8.1 | 2026-07-27 | 数据往返修复、提醒自动保存、历史标题与系统导航沉浸 |
 | 1.8.0 | 2026-07-27 | 服药提醒、首页打卡、桌面小部件与日历同步 |
 | 1.7.0 | 2026-07-26 | 中国指南分级、偏低提示、平均策略与跨零点修复 |
@@ -279,7 +282,7 @@ Release 构建只在同时提供正式签名环境变量时签名；未配置时
 - 应用不自建服务器，也不会主动上传血压记录。
 - Room、DataStore 和其他本地健康数据的 Android 系统自动备份已关闭。
 - 备份必须由用户在“数据管理”中主动导出，导出文件仅保存到用户选择的位置。
-- Excel 备份当前为明文格式；用户需要自行保护导出文件，后续加密格式设计见 [`docs/backup-encryption-design.md`](docs/backup-encryption-design.md)。
+- Excel 备份为明文格式；如需加密请选择“加密导出”（.bpx，AES-256-GCM，口令派生密钥且不落盘——口令遗失后备份无法恢复）。加密设计见 [`docs/backup-encryption-design.md`](docs/backup-encryption-design.md)。
 - 卸载应用前未导出的数据可能丢失；应用无法保证本地数据永不丢失。
 
 ## 许可协议
