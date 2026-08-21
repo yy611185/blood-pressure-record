@@ -83,12 +83,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          test -n "${ANDROID_KEYSTORE_BASE64}"
-          test -n "${ANDROID_KEYSTORE_PASSWORD}"
-          test -n "${ANDROID_KEY_ALIAS}"
-          test -n "${ANDROID_KEY_PASSWORD}"
+          test -n "${ANDROID_KEYSTORE_BASE64}" || { echo "::error::Secret ANDROID_KEYSTORE_BASE64 is empty. Add it under Settings -> Secrets and variables -> Actions (base64 of keystore/blood-pressure-release.jks)."; exit 1; }
+          test -n "${ANDROID_KEYSTORE_PASSWORD}" || { echo "::error::Secret ANDROID_KEYSTORE_PASSWORD is empty. Add the keystore store password."; exit 1; }
+          test -n "${ANDROID_KEY_ALIAS}" || { echo "::error::Secret ANDROID_KEY_ALIAS is empty. Add the key alias (default: bloodpressure)."; exit 1; }
+          test -n "${ANDROID_KEY_PASSWORD}" || { echo "::error::Secret ANDROID_KEY_PASSWORD is empty. Add the key password."; exit 1; }
           echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/release.jks"
-          test -s "${RUNNER_TEMP}/release.jks"
+          test -s "${RUNNER_TEMP}/release.jks" || { echo "::error::Decoded keystore is empty; ANDROID_KEYSTORE_BASE64 may be invalid."; exit 1; }
       - name: Build and verify signed Release
         env:
           BP_RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
