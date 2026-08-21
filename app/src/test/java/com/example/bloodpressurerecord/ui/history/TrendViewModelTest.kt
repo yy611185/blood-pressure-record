@@ -110,8 +110,15 @@ class TrendViewModelTest {
                     widgetRefreshed = true
                 )
             )
-        override suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String> =
+        override suspend fun exportBackupXlsxToUri(
+            uri: Uri,
+            fileNameHint: String,
+            passphrase: CharArray?
+        ): Result<String> =
             Result.success("")
-        override suspend fun importBackupXlsxFromUri(uri: Uri): Result<String> = Result.success("")
+        override suspend fun importBackupXlsxFromUri(
+            uri: Uri,
+            passphrase: CharArray?
+        ): Result<String> = Result.success("")
     }
 }

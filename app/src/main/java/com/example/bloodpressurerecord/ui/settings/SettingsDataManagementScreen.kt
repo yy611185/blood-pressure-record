@@ -23,6 +23,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,7 +35,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
@@ -53,6 +56,13 @@ fun SettingsDataManagementScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var pendingExportFileName by remember { mutableStateOf(defaultBackupFileName()) }
+    var pendingEncryptedExportFileName by remember {
+        mutableStateOf(defaultEncryptedBackupFileName())
+    }
+    var exportPassphrase by remember { mutableStateOf("") }
+    var exportPassphraseConfirm by remember { mutableStateOf("") }
+    var importPassphrase by remember { mutableStateOf("") }
+
     val backupExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -62,6 +72,21 @@ fun SettingsDataManagementScreen(
             viewModel.exportBackupXlsxToUri(uri, pendingExportFileName)
         } else {
             viewModel.dismissBackupExport()
+        }
+    }
+    val encryptedExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportEncryptedBackupToUri(
+                uri,
+                pendingEncryptedExportFileName,
+                exportPassphrase.toCharArray()
+            )
+            exportPassphrase = ""
+            exportPassphraseConfirm = ""
+        } else {
+            viewModel.dismissEncryptedBackupExport()
         }
     }
     val backupImportLauncher = rememberLauncherForActivityResult(
@@ -80,25 +105,120 @@ fun SettingsDataManagementScreen(
             title = { Text("导出 Excel 备份") },
             text = {
                 Text(
-                    "导出的 Excel 文件未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置。" +
+                    "明文导出的 Excel 文件未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置。" +
                         "请勿保存到公共设备、不受信任的云盘或与他人共享的位置。文件只会保存到您选择的位置，" +
-                        "应用不会上传服务器。"
+                        "应用不会上传服务器。建议选择“加密导出”。"
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        pendingExportFileName = defaultBackupFileName()
-                        backupExportLauncher.launch(pendingExportFileName)
-                    }
-                ) {
-                    Text("继续导出")
+                TextButton(onClick = viewModel::requestEncryptedBackupExport) {
+                    Text("加密导出")
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissBackupExport) {
-                    Text("取消")
+                Row {
+                    TextButton(
+                        onClick = {
+                            pendingExportFileName = defaultBackupFileName()
+                            backupExportLauncher.launch(pendingExportFileName)
+                        }
+                    ) {
+                        Text("明文导出")
+                    }
+                    TextButton(onClick = viewModel::dismissBackupExport) {
+                        Text("取消")
+                    }
                 }
+            }
+        )
+    }
+
+    if (uiState.showExportPassphraseDialog) {
+        val passphraseValid = exportPassphrase.length >= 8 &&
+            exportPassphrase == exportPassphraseConfirm
+        AlertDialog(
+            onDismissRequest = viewModel::dismissEncryptedBackupExport,
+            title = { Text("设置备份口令") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "备份将以 .bpx 加密格式保存，导入时必须输入相同口令。" +
+                            "口令不会保存在设备上，遗失后无法恢复数据，请牢记或另行保存。"
+                    )
+                    OutlinedTextField(
+                        value = exportPassphrase,
+                        onValueChange = { exportPassphrase = it },
+                        label = { Text("备份口令（至少 8 位）") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    OutlinedTextField(
+                        value = exportPassphraseConfirm,
+                        onValueChange = { exportPassphraseConfirm = it },
+                        label = { Text("再次输入口令") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        isError = exportPassphraseConfirm.isNotEmpty() &&
+                            exportPassphrase != exportPassphraseConfirm,
+                        supportingText = {
+                            if (exportPassphraseConfirm.isNotEmpty() &&
+                                exportPassphrase != exportPassphraseConfirm
+                            ) {
+                                Text("两次输入的口令不一致")
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = passphraseValid && !uiState.isDataActionRunning,
+                    onClick = {
+                        pendingEncryptedExportFileName = defaultEncryptedBackupFileName()
+                        encryptedExportLauncher.launch(pendingEncryptedExportFileName)
+                    }
+                ) { Text("选择保存位置") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissEncryptedBackupExport) { Text("取消") }
+            }
+        )
+    }
+
+    if (uiState.showImportPassphraseDialog) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissImportPassphrase,
+            title = { Text("输入备份口令") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("该备份文件已加密，请输入导出时设置的口令以生成预览。")
+                    OutlinedTextField(
+                        value = importPassphrase,
+                        onValueChange = { importPassphrase = it },
+                        label = { Text("备份口令") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        isError = uiState.importPassphraseError != null,
+                        supportingText = {
+                            uiState.importPassphraseError?.let { Text(it) }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = importPassphrase.isNotEmpty() && !uiState.isDataActionRunning,
+                    onClick = {
+                        viewModel.submitImportPassphrase(importPassphrase.toCharArray())
+                        importPassphrase = ""
+                    }
+                ) { Text("继续预览") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    importPassphrase = ""
+                    viewModel.dismissImportPassphrase()
+                }) { Text("取消") }
             }
         )
     }
@@ -319,4 +439,9 @@ fun SettingsDataManagementScreen(
 private fun defaultBackupFileName(): String {
     val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
     return "家庭血压记录备份_$stamp.xlsx"
+}
+
+private fun defaultEncryptedBackupFileName(): String {
+    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
+    return "家庭血压记录备份_$stamp.${BackupCrypto.FILE_EXTENSION}"
 }

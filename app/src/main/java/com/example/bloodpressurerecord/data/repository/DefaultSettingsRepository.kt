@@ -7,6 +7,7 @@ import com.example.bloodpressurerecord.data.db.dao.BloodPressureMeasurementDao
 import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
 import com.example.bloodpressurerecord.data.db.dao.UserProfileDao
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
+import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportService
 import com.example.bloodpressurerecord.data.repository.backup.BackupFileWriter
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import com.example.bloodpressurerecord.reminder.ReminderScheduler
+import java.io.ByteArrayOutputStream
 
 class DefaultSettingsRepository(
     private val context: Context,
@@ -189,7 +191,11 @@ class DefaultSettingsRepository(
         )
     }
 
-    override suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String> = runCatching {
+    override suspend fun exportBackupXlsxToUri(
+        uri: Uri,
+        fileNameHint: String,
+        passphrase: CharArray?
+    ): Result<String> = runCatching {
         withContext(Dispatchers.IO) {
             val payload = BackupExportService(
                 sessionDao = measurementSessionDao,
@@ -200,26 +206,43 @@ class DefaultSettingsRepository(
                 appName = "家庭血压记录",
                 appVersion = currentAppVersion()
             )
-            
-            val outputStream = context.contentResolver.openOutputStream(uri)
-                ?: error("无法写入所选文件，请重新选择保存位置")
 
-            outputStream.use { stream ->
+            // 先在内存中生成 xlsx，再按需加密后一次性写出，避免把明文临时落盘。
+            val xlsxBytes = ByteArrayOutputStream().use { buffer ->
                 val writer = BackupFileWriter()
                 val template = runCatching {
                     context.assets.open(BackupFileWriter.TEMPLATE_ASSET_NAME)
                 }.getOrNull()
-                
+
                 if (template != null) {
                     template.use { input ->
-                        writer.writeXlsx(payload, stream, input)
+                        writer.writeXlsx(payload, buffer, input)
                     }
                 } else {
-                    writer.writeXlsx(payload, stream)
+                    writer.writeXlsx(payload, buffer)
                 }
+                buffer.toByteArray()
+            }
+
+            val outputStream = context.contentResolver.openOutputStream(uri)
+                ?: error("无法写入所选文件，请重新选择保存位置")
+
+            outputStream.use { stream ->
+                if (passphrase != null) {
+                    stream.write(BackupCrypto.encrypt(xlsxBytes, passphrase))
+                } else {
+                    stream.write(xlsxBytes)
+                }
+                stream.flush()
             }
             appSettingsStore.setLastSuccessfulExportAt(System.currentTimeMillis())
-            "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n${payload.diagnostics.toUserMessage()}\n文件已交给你选择的保存位置。"
+            if (passphrase != null) {
+                "加密备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n" +
+                    payload.diagnostics.toUserMessage() +
+                    "\n文件已用口令加密（.bpx），导入时需要相同口令；请妥善保管口令。"
+            } else {
+                "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n${payload.diagnostics.toUserMessage()}\n文件已交给你选择的保存位置。"
+            }
         }
     }
 
@@ -228,8 +251,11 @@ class DefaultSettingsRepository(
         medicationResync?.invoke()
     }
 
-    override suspend fun importBackupXlsxFromUri(uri: Uri): Result<String> = runCatching {
-        val preview = previewBackupXlsxFromUri(uri).getOrThrow()
+    override suspend fun importBackupXlsxFromUri(
+        uri: Uri,
+        passphrase: CharArray?
+    ): Result<String> = runCatching {
+        val preview = previewBackupXlsxFromUri(uri, passphrase).getOrThrow()
         commitBackupImport(
             preview,
             BackupImportOptions(
@@ -241,7 +267,10 @@ class DefaultSettingsRepository(
         ).getOrThrow()
     }
 
-    override suspend fun previewBackupXlsxFromUri(uri: Uri): Result<BackupImportPreview> = runCatching {
+    override suspend fun previewBackupXlsxFromUri(
+        uri: Uri,
+        passphrase: CharArray?
+    ): Result<BackupImportPreview> = runCatching {
         withContext(Dispatchers.IO) {
             val inputStream = context.contentResolver.openInputStream(uri)
                 ?: error("无法读取所选文件")
@@ -249,7 +278,7 @@ class DefaultSettingsRepository(
                 BackupImportService(
                     database = database,
                     appSettingsStore = appSettingsStore
-                ).previewXlsx(stream)
+                ).previewXlsx(stream, passphrase)
             }
         }
     }

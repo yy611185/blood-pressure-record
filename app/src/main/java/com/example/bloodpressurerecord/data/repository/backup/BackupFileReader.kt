@@ -52,7 +52,7 @@ class BackupFormatException(message: String, cause: Throwable? = null) :
 class BackupFileReader {
     private val formatter = DataFormatter()
 
-    fun readXlsx(inputStream: InputStream): BackupImportDocument {
+    fun readXlsx(inputStream: InputStream, passphrase: CharArray? = null): BackupImportDocument {
         val tempFile = try {
             File.createTempFile("blood-pressure-backup-", ".xlsx")
         } catch (throwable: Exception) {
@@ -72,64 +72,107 @@ class BackupFileReader {
                     output.write(buffer, 0, count)
                 }
             }
-            preflightZip(tempFile)
-            // 10 MB 的文件上限只限制压缩后字节；下面的中央目录和实际解压读取
-            // 共同限制条目数、单条目大小、总解压大小和压缩炸弹比例。
-            ZipSecureFile.setMinInflateRatio(BackupImportLimits.MIN_INFLATE_RATIO)
-            ZipSecureFile.setMaxEntrySize(BackupImportLimits.MAX_UNCOMPRESSED_ENTRY_BYTES)
-            val workbook = try {
-                XSSFWorkbook(tempFile)
-            } catch (throwable: Exception) {
-                throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", throwable)
+            // 加密容器先解密出明文 xlsx，再走与明文完全相同的校验和解析路径。
+            val sourceFile = if (isEncryptedContainerFile(tempFile)) {
+                val pass = passphrase
+                    ?: throw BackupPassphraseRequiredException("该备份已加密，请输入备份口令。")
+                val decrypted = try {
+                    BackupCrypto.decrypt(tempFile.readBytes(), pass)
+                } catch (throwable: Exception) {
+                    if (throwable is BackupContainerFormatException ||
+                        throwable is BackupPassphraseException
+                    ) {
+                        throw throwable
+                    }
+                    throw BackupContainerFormatException("解密备份失败", throwable)
+                }
+                try {
+                    File.createTempFile("blood-pressure-backup-decrypted-", ".xlsx").apply {
+                        writeBytes(decrypted)
+                    }
+                } catch (throwable: Exception) {
+                    throw BackupFormatException("无法准备备份文件校验空间", throwable)
+                }
+            } else {
+                tempFile
             }
-
-            return workbook.use {
-                val metaSheet = workbook.getSheet(SHEET_META)
-                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
-                val meta = metaSheet.readKeyValues()
-                val version = meta["export_format_version"]?.toIntOrNull()
-                    ?: throw BackupFormatException("缺少或无法识别备份格式版本")
-                if (version !in SUPPORTED_FORMAT_VERSIONS) {
-                    throw BackupFormatException("不支持的备份格式版本：$version")
+            try {
+                preflightZip(sourceFile)
+                // 10 MB 的文件上限只限制压缩后字节；下面的中央目录和实际解压读取
+                // 共同限制条目数、单条目大小、总解压大小和压缩炸弹比例。
+                ZipSecureFile.setMinInflateRatio(BackupImportLimits.MIN_INFLATE_RATIO)
+                ZipSecureFile.setMaxEntrySize(BackupImportLimits.MAX_UNCOMPRESSED_ENTRY_BYTES)
+                val workbook = try {
+                    XSSFWorkbook(sourceFile)
+                } catch (throwable: Exception) {
+                    throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", throwable)
                 }
 
-                val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
-                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
-                val readingsSheet = workbook.getSheet(SHEET_READINGS)
-                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
+                return workbook.use {
+                    val metaSheet = workbook.getSheet(SHEET_META)
+                        ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
+                    val meta = metaSheet.readKeyValues()
+                    val version = meta["export_format_version"]?.toIntOrNull()
+                        ?: throw BackupFormatException("缺少或无法识别备份格式版本")
+                    if (version !in SUPPORTED_FORMAT_VERSIONS) {
+                        throw BackupFormatException("不支持的备份格式版本：$version")
+                    }
 
-                val readingRows = readReadingRows(readingsSheet)
-                if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
-                    throw BackupFormatException("原始读数总数超过允许上限")
-                }
-                val measurements = readMeasurements(
-                    measurementSheet,
-                    readingRows.groupBy { it.recordId },
-                    formatVersion = version
-                )
-                if (measurements.size > BackupImportLimits.MAX_RECORDS) {
-                    throw BackupFormatException("测量记录总数超过允许上限")
-                }
-                val duplicateIds = measurements.groupingBy { it.recordId }
-                    .eachCount()
-                    .filterValues { it > 1 }
-                if (duplicateIds.isNotEmpty()) {
-                    throw BackupFormatException("备份中存在重复 record_id，未执行导入")
-                }
-                val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
-                if (readingRows.any { it.recordId !in knownIds }) {
-                    throw BackupFormatException("原始读数引用了不存在的测量记录")
-                }
+                    val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
+                        ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
+                    val readingsSheet = workbook.getSheet(SHEET_READINGS)
+                        ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
 
-                BackupImportDocument(
-                    measurements = measurements,
-                    userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
-                    meta = meta
-                )
+                    val readingRows = readReadingRows(readingsSheet)
+                    if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
+                        throw BackupFormatException("原始读数总数超过允许上限")
+                    }
+                    val measurements = readMeasurements(
+                        measurementSheet,
+                        readingRows.groupBy { it.recordId },
+                        formatVersion = version
+                    )
+                    if (measurements.size > BackupImportLimits.MAX_RECORDS) {
+                        throw BackupFormatException("测量记录总数超过允许上限")
+                    }
+                    val duplicateIds = measurements.groupingBy { it.recordId }
+                        .eachCount()
+                        .filterValues { it > 1 }
+                    if (duplicateIds.isNotEmpty()) {
+                        throw BackupFormatException("备份中存在重复 record_id，未执行导入")
+                    }
+                    val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
+                    if (readingRows.any { it.recordId !in knownIds }) {
+                        throw BackupFormatException("原始读数引用了不存在的测量记录")
+                    }
+
+                    BackupImportDocument(
+                        measurements = measurements,
+                        userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
+                        meta = meta
+                    )
+                }
+            } finally {
+                if (sourceFile !== tempFile) sourceFile.delete()
             }
         } finally {
             tempFile.delete()
         }
+    }
+
+    /** 只读文件头部魔数判断是否为加密备份容器。 */
+    private fun isEncryptedContainerFile(file: File): Boolean {
+        val header = file.inputStream().use { input ->
+            val buffer = ByteArray(BackupCrypto.HEADER_SIZE)
+            var read = 0
+            while (read < buffer.size) {
+                val count = input.read(buffer, read, buffer.size - read)
+                if (count < 0) break
+                read += count
+            }
+            buffer.copyOf(read)
+        }
+        return BackupCrypto.isEncryptedContainer(header)
     }
 
     /** 在交给 POI 解析前先按 ZIP 中央目录和实际解压字节做有界预检。 */

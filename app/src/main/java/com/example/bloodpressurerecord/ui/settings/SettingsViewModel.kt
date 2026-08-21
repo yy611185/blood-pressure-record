@@ -7,8 +7,11 @@ import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
+import com.example.bloodpressurerecord.data.repository.backup.BackupContainerFormatException
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
+import com.example.bloodpressurerecord.data.repository.backup.BackupPassphraseException
+import com.example.bloodpressurerecord.data.repository.backup.BackupPassphraseRequiredException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,7 +39,10 @@ data class SettingsUiState(
     val message: String = "",
     val showClearConfirm: Boolean = false,
     val showBackupExportConfirm: Boolean = false,
+    val showExportPassphraseDialog: Boolean = false,
     val showBackupImportConfirm: Boolean = false,
+    val showImportPassphraseDialog: Boolean = false,
+    val importPassphraseError: String? = null,
     val backupImportPreview: BackupImportPreview? = null,
     val importMeasurementsSelected: Boolean = true,
     val restoreUserProfileSelected: Boolean = false,
@@ -56,6 +62,8 @@ class SettingsViewModel(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
     private var isProfileDirty: Boolean = false
+    /** 等待用户输入口令后继续预览的加密备份文件。 */
+    private var pendingImportUri: Uri? = null
 
     init {
         medicationRepository?.let { medRepo ->
@@ -417,16 +425,42 @@ class SettingsViewModel(
         _uiState.update { it.copy(showBackupExportConfirm = false) }
     }
 
+    fun requestEncryptedBackupExport() {
+        _uiState.update {
+            it.copy(
+                showBackupExportConfirm = false,
+                showExportPassphraseDialog = true
+            )
+        }
+    }
+
+    fun dismissEncryptedBackupExport() {
+        _uiState.update { it.copy(showExportPassphraseDialog = false) }
+    }
+
     fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String) {
+        runExport(uri, fileNameHint, passphrase = null)
+    }
+
+    fun exportEncryptedBackupToUri(uri: Uri, fileNameHint: String, passphrase: CharArray) {
+        runExport(uri, fileNameHint, passphrase)
+    }
+
+    private fun runExport(uri: Uri, fileNameHint: String, passphrase: CharArray?) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     showBackupExportConfirm = false,
+                    showExportPassphraseDialog = false,
                     isDataActionRunning = true,
-                    message = "正在导出 Excel 备份，请稍候..."
+                    message = if (passphrase != null) {
+                        "正在导出加密备份，请稍候..."
+                    } else {
+                        "正在导出 Excel 备份，请稍候..."
+                    }
                 )
             }
-            repository.exportBackupXlsxToUri(uri, fileNameHint)
+            repository.exportBackupXlsxToUri(uri, fileNameHint, passphrase)
                 .onSuccess { msg ->
                     _uiState.update { it.copy(isDataActionRunning = false, message = msg) }
                 }
@@ -466,7 +500,7 @@ class SettingsViewModel(
         previewBackupXlsxFromUri(uri)
     }
 
-    fun previewBackupXlsxFromUri(uri: Uri) {
+    fun previewBackupXlsxFromUri(uri: Uri, passphrase: CharArray? = null) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -475,12 +509,15 @@ class SettingsViewModel(
                     message = "正在验证备份并生成导入预览..."
                 )
             }
-            repository.previewBackupXlsxFromUri(uri)
+            repository.previewBackupXlsxFromUri(uri, passphrase)
                 .onSuccess { preview ->
+                    pendingImportUri = null
                     _uiState.update {
                         it.copy(
                             isDataActionRunning = false,
                             backupImportPreview = preview,
+                            showImportPassphraseDialog = false,
+                            importPassphraseError = null,
                             importMeasurementsSelected = true,
                             restoreUserProfileSelected = false,
                             restoreDisplaySettingsSelected = false,
@@ -490,13 +527,54 @@ class SettingsViewModel(
                     }
                 }
                 .onFailure { throwable ->
-                    _uiState.update {
-                        it.copy(
-                            isDataActionRunning = false,
-                            message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
-                        )
+                    when (throwable) {
+                        is BackupPassphraseRequiredException -> {
+                            pendingImportUri = uri
+                            _uiState.update {
+                                it.copy(
+                                    isDataActionRunning = false,
+                                    showImportPassphraseDialog = true,
+                                    importPassphraseError = null,
+                                    message = "该备份文件已加密。"
+                                )
+                            }
+                        }
+                        is BackupPassphraseException -> {
+                            pendingImportUri = uri
+                            _uiState.update {
+                                it.copy(
+                                    isDataActionRunning = false,
+                                    showImportPassphraseDialog = true,
+                                    importPassphraseError = throwable.message,
+                                    message = throwable.message ?: "备份口令错误。"
+                                )
+                            }
+                        }
+                        else -> {
+                            _uiState.update {
+                                it.copy(
+                                    isDataActionRunning = false,
+                                    message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
+                                )
+                            }
+                        }
                     }
                 }
+        }
+    }
+
+    fun submitImportPassphrase(passphrase: CharArray) {
+        val uri = pendingImportUri ?: return
+        previewBackupXlsxFromUri(uri, passphrase)
+    }
+
+    fun dismissImportPassphrase() {
+        pendingImportUri = null
+        _uiState.update {
+            it.copy(
+                showImportPassphraseDialog = false,
+                importPassphraseError = null
+            )
         }
     }
 

@@ -62,11 +62,18 @@ interface SettingsRepository {
 
     suspend fun clearAllData(): Result<ClearAllDataResult>
 
-    suspend fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String): Result<String>
+    suspend fun exportBackupXlsxToUri(
+        uri: Uri,
+        fileNameHint: String,
+        passphrase: CharArray? = null
+    ): Result<String>
 
-    suspend fun importBackupXlsxFromUri(uri: Uri): Result<String>
+    suspend fun importBackupXlsxFromUri(uri: Uri, passphrase: CharArray? = null): Result<String>
 
-    suspend fun previewBackupXlsxFromUri(uri: Uri): Result<BackupImportPreview> =
+    suspend fun previewBackupXlsxFromUri(
+        uri: Uri,
+        passphrase: CharArray? = null
+    ): Result<BackupImportPreview> =
         Result.failure(UnsupportedOperationException("当前设置仓库不支持备份预览"))
 
     suspend fun commitBackupImport(

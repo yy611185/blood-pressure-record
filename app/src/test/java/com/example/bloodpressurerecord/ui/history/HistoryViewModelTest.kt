@@ -66,7 +66,7 @@ class HistoryViewModelTest {
             )
         )
         val repo = FakeRepository().apply {
-            summaries.value = listOf(CalendarSessionSummary(epoch(selected, 9), false))
+            summaries.value = listOf(CalendarSessionSummary(epoch(selected, 9), null, false))
         }
         val vm = HistoryViewModel(repo, handle, zone, todayProvider = { today })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
@@ -108,7 +108,7 @@ class HistoryViewModelTest {
     fun `从首页打开指定日期会切回日历模式`() = runTest {
         val today = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
-            summaries.value = listOf(CalendarSessionSummary(epoch(today, 9), false))
+            summaries.value = listOf(CalendarSessionSummary(epoch(today, 9), null, false))
         }
         val vm = HistoryViewModel(
             repo,
@@ -130,7 +130,7 @@ class HistoryViewModelTest {
     fun `有记录日期可选择且当天记录按时间正序`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
-            summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), false))
+            summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), null, false))
             records.value = listOf(record("late", epoch(date, 20)), record("early", epoch(date, 7)))
         }
         val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { date })
@@ -154,10 +154,29 @@ class HistoryViewModelTest {
     }
 
     @Test
+    fun `日历摘要标记当天是否存在自定义备注`() = runTest {
+        val noted = LocalDate.of(2026, 7, 25)
+        val plain = LocalDate.of(2026, 7, 26)
+        val repo = FakeRepository().apply {
+            summaries.value = listOf(
+                CalendarSessionSummary(epoch(noted, 9), "加了一片阿尔马尔", false),
+                CalendarSessionSummary(epoch(noted, 20), null, false),
+                CalendarSessionSummary(epoch(plain, 9), null, false)
+            )
+        }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { noted })
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.daySummaries.getValue(noted).hasNote)
+        assertEquals(false, vm.uiState.value.daySummaries.getValue(plain).hasNote)
+    }
+
+    @Test
     fun `删除最后一条后清除选择并禁用日期`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
-            summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), false))
+            summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), null, false))
             records.value = listOf(record("one", epoch(date, 9)))
         }
         val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { date })
@@ -183,7 +202,7 @@ class HistoryViewModelTest {
             )
         )
         val repo = FakeRepository().apply {
-            summaries.value = listOf(CalendarSessionSummary(epoch(date, 12), false))
+            summaries.value = listOf(CalendarSessionSummary(epoch(date, 12), null, false))
         }
         val vm = HistoryViewModel(repo, handle, zone, todayProvider = { date })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
@@ -210,7 +229,7 @@ class HistoryViewModelTest {
 
         vm.showMonth(june)
         vm.showMonth(may)
-        juneFlow.value = listOf(CalendarSessionSummary(epoch(juneDate, 9), false))
+        juneFlow.value = listOf(CalendarSessionSummary(epoch(juneDate, 9), null, false))
         advanceUntilIdle()
 
         assertEquals(may, vm.uiState.value.displayedMonth)
@@ -223,8 +242,8 @@ class HistoryViewModelTest {
         val secondDate = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
             summaries.value = listOf(
-                CalendarSessionSummary(epoch(firstDate, 9), false),
-                CalendarSessionSummary(epoch(secondDate, 9), false)
+                CalendarSessionSummary(epoch(firstDate, 9), null, false),
+                CalendarSessionSummary(epoch(secondDate, 9), null, false)
             )
         }
         val firstFlow = MutableStateFlow<List<SessionSummary>>(emptyList())
