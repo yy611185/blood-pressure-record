@@ -1,0 +1,191 @@
+{
+  "summary": {
+    "projectName": "血压追踪 · Blood Pressure Record",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 26,
+    "overview": "项目已具备可用的 README 导航、真实配对的测试与较强的发布门设计，但 CI 工作流文件当前存在语法错误导致全部质量与发布门停摆，README 版本事实与构建脚本冲突会误导环境搭建，仓库表面还有未受保护的批量测试材料。本次窗口无会话证据接入，行为维度仅能依据静态机制评估。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Skills",
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Skills",
+          "scopes": [
+            "Global"
+          ],
+          "count": 1,
+          "paths": [
+            "~/.agents/skills/eval/SKILL.md"
+          ]
+        },
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            ".github/workflows/build-release.yml"
+          ]
+        },
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Hooks",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Commands",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "MCP",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Memories",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Plugins",
+          "scopes": [
+            "Plugin"
+          ],
+          "count": 0
+        }
+      ],
+      "repositorySourceRows": []
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 52,
+        "summary": "README 提供了密度较高的项目导航与维护约束，但其内部版本事实相互冲突，且仓库表面被未跟踪的批量测试材料污染，任务边界不够明确。",
+        "findingRefs": [
+          "untracked-test-media"
+        ]
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 55,
+        "summary": "构建、测试、签名命令面在 README 与 Gradle 中完整可见且可复现，但环境要求节给出与构建脚本冲突的 SDK/Gradle 版本，缺少 doctor 与重置路线。",
+        "findingRefs": [
+          "readme-version-drift"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 48,
+        "summary": "24 个测试文件与源码存在经核实的配对，CI 声明了测试与 lint 检查；但承载这些检查的工作流文件当前无法解析，且本窗口无本地执行结果。",
+        "findingRefs": [
+          "maintenance-rules-unenforced"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 38,
+        "summary": "发布流水线设计上包含版本一致性、签名校验与测试前置门，但工作流语法错误使接受边界当前不可运行；分支保护与回滚路线无证据。",
+        "findingRefs": [
+          "workflow-parse-halts-gates"
+        ]
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 35,
+        "summary": "完成了有界评审，但会话来源未接入、窗口内无任何可评估 Episode，重复工作与学习循环只能保持为证据缺口。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "workflow-parse-halts-gates",
+      "title": "CI 工作流文件语法错误使全部质量与发布门无法运行",
+      "severity": "High",
+      "reason": "事实：.github/workflows/build-release.yml 已提交版本中，release job 的 steps 列表在第 65–68 行出现 0/2 列缩进（其余 steps 为 6 列），顶层序列项混入嵌套映射，构成无效的 YAML。推断：GitHub Actions 无法解析该文件，PR 检查、main 推送测试与 tag 发布全部不会执行，项目唯一的机械验证与交付接受边界当前停摆。边界：GitHub 服务端运行状态未打开验证（UNVERIFIED），但 YAML 语法错误是文件自身的确定性缺陷；该工作流承载 testDebugUnitTest/lintDebug/assembleDebug 与签名发布门。",
+      "expectedOutput": [
+        "Update the existing Config owner identified by the reviewed evidence and retain a focused validation result."
+      ],
+      "expectedArtifact": "Config",
+      "aiFixPrompt": "/better-harness fix this issue\n\n修复 .github/workflows/build-release.yml 中 release job 的 steps 缩进：将该 job 内全部步骤列表项统一为与其余步骤一致的 6 列缩进（当前第 65–68 行的 `- uses: android-actions/setup-android@v3`、`- name: Install Android 16 SDK`、`- name: Resolve and verify release version` 位于 0/2 列），不改变任何步骤的执行顺序、命令、secrets 引用与权限声明。\n\n## Validation\n\n- 用 YAML 解析器解析该文件成功（例如 python -c \"import yaml; yaml.safe_load(open(...))\" 输出无异常）\n- 确认 release job 的全部 steps 缩进一致且保持原有顺序与内容\n- 不得改变 needs、permissions、if 条件或任何 run 命令",
+      "dimensionRefs": [
+        "reliable-delivery"
+      ]
+    },
+    {
+      "id": "readme-version-drift",
+      "title": "README 版本事实与构建脚本冲突，环境搭建与依赖判断会被误导",
+      "severity": "Medium",
+      "reason": "事实：README 环境要求节写 Android SDK 35 / Gradle 8.7，而同一文件的已知限制与维护约束节写 AGP 8.10.1 / Gradle 8.11.1 / compileSdk 36；README 三处写 Room v7，而 app/build.gradle.kts 实际依赖 room 2.6.1（经核实 compileSdk = 36、targetSdk = 36、versionName 1.8.1）。CI 亦安装 android-36 平台。推断：按环境要求节搭建环境或判断 Room 迁移框架版本的 agent 会拿到错误前提；README 是当前唯一的项目导航文档（无 AGENTS.md），矛盾没有第二个权威入口可以纠正。边界：Gradle wrapper 实际分发版本未逐一核实，修复时应以 wrapper 配置为准对齐。",
+      "expectedOutput": [
+        "Update the existing Document owner identified by the reviewed evidence and retain a focused validation result."
+      ],
+      "expectedArtifact": "Document",
+      "aiFixPrompt": "/better-harness fix this issue\n\n以构建脚本与 Gradle wrapper 为权威真值，统一 README 中的版本事实：先读取 app/build.gradle.kts（compileSdk/targetSdk/versionName 与 room 依赖版本）、gradle/wrapper 配置与 libs.versions.toml（如存在）确认真实版本，再修订 README 的环境要求、技术栈表、目录结构注释与维护约束节，使 SDK、AGP、Gradle、Room 版本在全文仅保留一组且与构建文件一致。\n\n## Validation\n\n- README 中 SDK/AGP/Gradle/Room 版本只剩一组互相一致的表述，且与 app/build.gradle.kts 和 wrapper 配置相符\n- 维护约束、隐私说明与其余章节内容不被误改",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    },
+    {
+      "id": "untracked-test-media",
+      "title": "未跟踪测试材料污染变更表面并可被整体误提交",
+      "severity": "Medium",
+      "reason": "事实：仓库根目录下 测试照片/ 的 25 张 jpg（约 5 万行二进制）与 scan_samples/ 均未跟踪且不在 .gitignore 中（经核实 .gitignore 无对应条目）；当前 HEAD 差异因此显示 26 个文件 / 50713 行变更。已观察后果：变更影响分析的推荐读取列表被这些二进制文件整体占据，agent 的变更风险路由与目录检索持续被噪声稀释；任何一次性 git add . 会把约 5 万行二进制（含健康应用测试素材）注入 git 历史。旁证：仓库根已跟踪 4 个历史 APK，而 .gitignore 后来才排除 *.apk，说明同类产物入库规则滞后已经发生过。边界：这些照片是否为用户有意保留的素材未知，修复需先确认其去留。",
+      "expectedOutput": [
+        "Update the existing Config owner identified by the reviewed evidence and retain a focused validation result."
+      ],
+      "expectedArtifact": "Config",
+      "aiFixPrompt": "/better-harness fix this issue\n\n先确认 测试照片/ 与 scan_samples/ 中材料的去留意图，再恢复干净的变更表面：若材料不入库，在 .gitignore 中为 测试照片/ 与 scan_samples/ 的二进制内容添加忽略条目（若需保留 scan_samples/README.md 等说明文本，可用例外规则保留文本、忽略图片）；不删除用户文件，不移动文件到仓库之外，除非用户明确要求。\n\n## Validation\n\n- git status 不再将这些材料列为未跟踪变更主体，HEAD 差异不再被约 5 万行二进制占据\n- 现有 .gitignore 规则（含 keystore 白名单与 *.apk 排除）不被破坏\n- 未删除或移动任何用户文件",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "maintenance-rules-unenforced",
+      "title": "README 声明的维护约束没有机械检查承接",
+      "severity": "Low",
+      "reason": "事实：README 维护约束节明确声明禁止 destructive migration/fallback、禁止用 REPLACE 重建现有 session、Excel 导入必须兼容 v2/v3、分级阈值修改须同步领域测试；但 CI 仅运行 testDebugUnitTest/lintDebug/assembleDebug，无 detekt/ktlint 等自定义规则、无 pre-commit 钩子，这些声明没有任何机械检查承接。推断：违反上述约束的变更可能在测试恰好未覆盖时静默通过 CI。边界：现有迁移测试与往返测试可能部分兜底，但其执行结果未验证（UNVERIFIED）；本窗口无会话证据表明违规已经发生，故保持低严重度。",
+      "expectedOutput": [
+        "Update the existing Test owner identified by the reviewed evidence and retain a focused validation result."
+      ],
+      "expectedArtifact": "Test",
+      "aiFixPrompt": "/better-harness fix this issue\n\n先做有界发现：运行或检查现有测试任务（gradlew testDebugUnitTest，必要时 connectedDebugAndroidTest 的迁移测试）确认 README 声明的约束（禁止 destructive migration/fallback、禁止 REPLACE 重建 session、Excel v2/v3 兼容、阈值修改同步领域测试）哪些已被现有测试覆盖。对已覆盖的约束，在 README 或测试处注明锚点；对未覆盖的约束，优先补充最小的领域测试或迁移断言（沿用项目现有测试风格），不引入新的工具链，除非用户明确要求。\n\n## Validation\n\n- 每条 README 维护约束都有一个对应的测试锚点或明确记录的豁免理由\n- 新增/修改的检查在 testDebugUnitTest 中可运行并给出通过或失败的准确输出",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    }
+  ]
+}
