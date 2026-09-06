@@ -58,32 +58,32 @@ fun BloodPressureVisualStatus.style(colors: ColorScheme): BloodPressureStatusSty
     BloodPressureVisualStatus.NORMAL -> BloodPressureStatusStyle(
         label = "正常",
         icon = Icons.Default.CheckCircle,
-        containerColor = Sage200,
-        contentColor = Sage800
+        containerColor = colors.secondaryContainer,
+        contentColor = colors.onSecondaryContainer
     )
     BloodPressureVisualStatus.LOW -> BloodPressureStatusStyle(
         label = "血压偏低",
         icon = Icons.Default.Info,
-        containerColor = Terracotta100,
-        contentColor = Terracotta700
+        containerColor = colors.tertiaryContainer,
+        contentColor = colors.onTertiaryContainer
     )
     BloodPressureVisualStatus.ELEVATED -> BloodPressureStatusStyle(
         label = "正常高值",
         icon = Icons.Default.Info,
-        containerColor = Terracotta200,
-        contentColor = Terracotta800
+        containerColor = colors.primaryContainer,
+        contentColor = colors.onPrimaryContainer
     )
     BloodPressureVisualStatus.HIGH -> BloodPressureStatusStyle(
         label = "血压偏高",
         icon = Icons.Default.Warning,
-        containerColor = Terracotta200,
-        contentColor = Terracotta800
+        containerColor = colors.primaryContainer,
+        contentColor = colors.onPrimaryContainer
     )
     BloodPressureVisualStatus.HIGH_RISK -> BloodPressureStatusStyle(
         label = "含高风险读数",
         icon = Icons.Default.Error,
-        containerColor = Terracotta300,
-        contentColor = Terracotta900
+        containerColor = colors.errorContainer,
+        contentColor = colors.onErrorContainer
     )
 }
 

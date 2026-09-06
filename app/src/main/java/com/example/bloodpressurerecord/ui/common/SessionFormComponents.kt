@@ -5,10 +5,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -39,19 +41,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
-import com.example.bloodpressurerecord.ui.theme.Terracotta700
-import com.example.bloodpressurerecord.ui.theme.Terracotta800
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import java.time.Instant
 import java.time.LocalTime
@@ -138,25 +140,35 @@ fun MeasurementDateTimePicker(
         )
     }
 
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
-    ) {
-        // 药丸日期/时间按钮。之前用默认 OutlinedButton（24dp 内边距 + 24dp 图标），
-        // 在大字号下半宽按钮放不下完整日期导致文字被截断；
-        // 这里收紧内边距、缩小图标并让文字自动缩排，保证完整显示。
-        DateTimePillButton(
-            icon = Icons.Default.CalendarMonth,
-            text = localDateTime.toLocalDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日")),
-            onClick = { showDatePicker = true },
-            modifier = Modifier.weight(1.25f)
-        )
-        DateTimePillButton(
-            icon = Icons.Default.Schedule,
-            text = localDateTime.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")),
-            onClick = { showTimePicker = true },
-            modifier = Modifier.weight(0.75f)
-        )
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 330.dp
+        val dateButton: @Composable (Modifier) -> Unit = { buttonModifier ->
+            DateTimePillButton(
+                icon = Icons.Default.CalendarMonth,
+                text = localDateTime.toLocalDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日")),
+                onClick = { showDatePicker = true },
+                modifier = buttonModifier
+            )
+        }
+        val timeButton: @Composable (Modifier) -> Unit = { buttonModifier ->
+            DateTimePillButton(
+                icon = Icons.Default.Schedule,
+                text = localDateTime.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")),
+                onClick = { showTimePicker = true },
+                modifier = buttonModifier
+            )
+        }
+        if (stacked) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                dateButton(Modifier.fillMaxWidth())
+                timeButton(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                dateButton(Modifier.weight(1.25f))
+                timeButton(Modifier.weight(0.75f))
+            }
+        }
     }
     dateTimeError?.let {
         Text(
@@ -188,7 +200,7 @@ private fun DateTimePillButton(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Terracotta700,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(17.dp)
         )
         Spacer(Modifier.width(6.dp))
@@ -197,9 +209,7 @@ private fun DateTimePillButton(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Visible,
-            softWrap = false
+            maxLines = 2
         )
     }
 }
@@ -238,29 +248,44 @@ fun MeasurementReadingCard(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
-                NumberField(
-                    value = reading.systolic,
-                    onValueChange = onSystolicChange,
-                    label = "收缩压（高压）",
-                    imeAction = ImeAction.Next,
-                    modifier = Modifier.weight(1f)
-                )
-                NumberField(
-                    value = reading.diastolic,
-                    onValueChange = onDiastolicChange,
-                    label = "舒张压（低压）",
-                    imeAction = ImeAction.Next,
-                    isError = relationError,
-                    modifier = Modifier.weight(1f)
-                )
-                NumberField(
-                    value = reading.pulse,
-                    onValueChange = onPulseChange,
-                    label = "脉搏",
-                    imeAction = ImeAction.Done,
-                    modifier = Modifier.weight(1f)
-                )
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 300.dp
+                val fields: @Composable (Modifier) -> Unit = { fieldModifier ->
+                    NumberField(
+                        value = reading.systolic,
+                        onValueChange = onSystolicChange,
+                        label = "收缩压（高压）",
+                        accessibleLabel = "第 ${index + 1} 组收缩压（高压）",
+                        imeAction = ImeAction.Next,
+                        modifier = fieldModifier
+                    )
+                    NumberField(
+                        value = reading.diastolic,
+                        onValueChange = onDiastolicChange,
+                        label = "舒张压（低压）",
+                        accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
+                        imeAction = ImeAction.Next,
+                        isError = relationError,
+                        modifier = fieldModifier
+                    )
+                    NumberField(
+                        value = reading.pulse,
+                        onValueChange = onPulseChange,
+                        label = "脉搏（选填）",
+                        accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
+                        imeAction = ImeAction.Done,
+                        modifier = fieldModifier
+                    )
+                }
+                if (stacked) {
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                        fields(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                        fields(Modifier.weight(1f))
+                    }
+                }
             }
             if (relationError) {
                 Text(
@@ -285,6 +310,7 @@ private fun NumberField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
+    accessibleLabel: String,
     imeAction: ImeAction,
     modifier: Modifier = Modifier,
     isError: Boolean = false
@@ -294,9 +320,7 @@ private fun NumberField(
             label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Visible
+            maxLines = 2
         )
         OutlinedTextField(
             value = value,
@@ -313,7 +337,7 @@ private fun NumberField(
             textStyle = TextStyle(
                 fontSize = 24.sp,
                 textAlign = TextAlign.Center,
-                color = Terracotta800
+                color = MaterialTheme.colorScheme.onSurface
             ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -323,7 +347,8 @@ private fun NumberField(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
+                .heightIn(min = 64.dp)
+                .semantics { contentDescription = accessibleLabel },
             label = null,
             placeholder = null
         )

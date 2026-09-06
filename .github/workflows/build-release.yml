@@ -27,10 +27,10 @@ jobs:
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
-      - name: Unit tests, Lint and Debug build
+      - name: Unit tests, Lint and Debug builds
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --stacktrace
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4

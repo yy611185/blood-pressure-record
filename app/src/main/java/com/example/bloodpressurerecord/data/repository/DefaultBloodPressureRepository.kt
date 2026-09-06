@@ -90,7 +90,8 @@ class DefaultBloodPressureRepository(
             sessionId = sessionId,
             input = input,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            minimumReadingCount = MeasurementInputRules.MIN_READING_COUNT
         )
         val readings = buildReadingEntities(sessionId, input.readings)
         sessionDao.insertSessionWithReadings(session, readings)
@@ -107,7 +108,11 @@ class DefaultBloodPressureRepository(
             sessionId = sessionId,
             input = input,
             createdAt = existing.session.createdAt,
-            updatedAt = now
+            updatedAt = now,
+            minimumReadingCount = minOf(
+                MeasurementInputRules.MIN_READING_COUNT,
+                existing.readings.size.coerceAtLeast(1)
+            )
         )
         val readings = buildReadingEntities(sessionId, input.readings)
         check(sessionDao.updateSessionWithReadings(session, readings)) {
@@ -139,7 +144,8 @@ class DefaultBloodPressureRepository(
             input = input,
             createdAt = session.createdAt.takeIf { it > 0L } ?: nowMillis(),
             updatedAt = session.updatedAt.takeIf { it > 0L } ?: session.createdAt.takeIf { it > 0L }
-                ?: nowMillis()
+                ?: nowMillis(),
+            minimumReadingCount = 1
         )
         val readings = session.readings.sortedBy { it.orderIndex }.mapIndexed { index, reading ->
             MeasurementReadingEntity(
@@ -159,11 +165,12 @@ class DefaultBloodPressureRepository(
         sessionId: String,
         input: SaveSessionInput,
         createdAt: Long,
-        updatedAt: Long
+        updatedAt: Long,
+        minimumReadingCount: Int
     ): MeasurementSessionEntity {
         val readingValues = input.readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
-        require(MeasurementInputRules.validateReadings(readingValues) == null) {
-            "每次测量必须包含 ${MeasurementInputRules.MIN_READING_COUNT} 至 " +
+        require(readingValues.size in minimumReadingCount..MeasurementInputRules.MAX_READING_COUNT) {
+            "每次测量必须包含 $minimumReadingCount 至 " +
                 "${MeasurementInputRules.MAX_READING_COUNT} 组读数"
         }
         readingValues.forEachIndexed { index, reading ->

@@ -5,10 +5,21 @@ import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Assert.fail
 import org.junit.Test
 
 class BackupCryptoTest {
+    @Test
+    fun decrypt_rejectsUnsupportedIterationCountBeforeKeyDerivation() {
+        val container = BackupCrypto.encrypt("payload".toByteArray(), "password".toCharArray())
+        // iterations 位于 magic、version、kdfId 之后；改为 Int.MAX_VALUE，必须立即拒绝。
+        for (index in 6..9) container[index] = 0x7F
+
+        assertThrows(BackupContainerFormatException::class.java) {
+            BackupCrypto.decrypt(container, "password".toCharArray())
+        }
+    }
 
     private val passphrase = "正确口令-123456".toCharArray()
 

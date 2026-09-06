@@ -65,7 +65,8 @@ object BackupCrypto {
     }
 
     fun decrypt(container: ByteArray, passphrase: CharArray): ByteArray {
-        if (container.size < HEADER_SIZE || !isEncryptedContainer(container)) {
+        val minimumContainerSize = HEADER_SIZE + GCM_TAG_BITS / 8
+        if (container.size < minimumContainerSize || !isEncryptedContainer(container)) {
             throw BackupContainerFormatException("不是有效的加密备份文件")
         }
         val version = container[MAGIC.size].toInt() and 0xFF
@@ -79,8 +80,8 @@ object BackupCrypto {
         var offset = MAGIC.size + 2
         val iterations = readIntBe(container, offset)
         offset += 4
-        if (iterations < 1) {
-            throw BackupContainerFormatException("加密备份的迭代次数无效")
+        if (iterations != ITERATIONS) {
+            throw BackupContainerFormatException("加密备份的 KDF 参数不受支持")
         }
         val salt = container.copyOfRange(offset, offset + SALT_BYTES)
         offset += SALT_BYTES
@@ -88,8 +89,8 @@ object BackupCrypto {
         offset += NONCE_BYTES
         val header = container.copyOfRange(0, offset)
         val ciphertext = container.copyOfRange(offset, container.size)
-        if (ciphertext.isEmpty()) {
-            throw BackupContainerFormatException("加密备份内容为空")
+        if (ciphertext.size < GCM_TAG_BITS / 8) {
+            throw BackupContainerFormatException("加密备份内容已截断")
         }
         val key = try {
             deriveKey(passphrase, salt, iterations)

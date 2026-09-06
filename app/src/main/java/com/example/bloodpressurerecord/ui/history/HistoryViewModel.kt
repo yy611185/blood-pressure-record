@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlin.math.roundToInt
 
 data class HistoryUiState(
     val viewMode: HistoryViewMode = HistoryViewMode.CALENDAR,
@@ -231,9 +232,9 @@ class HistoryViewModel(
             daySummaries = if (monthMatches) monthData.summaries else emptyMap(),
             selectedDayRecords = records,
             selectedDayAverageSystolic = dayData.records.takeIf { dayMatches && it.isNotEmpty() }
-                ?.map { it.avgSystolic }?.average()?.toInt(),
+                ?.map { it.avgSystolic }?.average()?.roundToInt(),
             selectedDayAverageDiastolic = dayData.records.takeIf { dayMatches && it.isNotEmpty() }
-                ?.map { it.avgDiastolic }?.average()?.toInt(),
+                ?.map { it.avgDiastolic }?.average()?.roundToInt(),
             recentState = if (!recentMatches) {
                 CalendarLoadingState.LOADING
             } else if (recentData.error == null) {
@@ -379,9 +380,9 @@ class HistoryViewModel(
                 startDate = currentRange.startInclusive.toLocalDate(zoneId),
                 endDateInclusive = (currentRange.endExclusive - 1L).toLocalDate(zoneId),
                 recordCount = statistics.recordCount,
-                averageSystolic = statistics.averageSystolic?.toInt(),
-                averageDiastolic = statistics.averageDiastolic?.toInt(),
-                averagePulse = statistics.averagePulse?.toInt(),
+                averageSystolic = statistics.averageSystolic?.roundToInt(),
+                averageDiastolic = statistics.averageDiastolic?.roundToInt(),
+                averagePulse = statistics.averagePulse?.roundToInt(),
                 highRiskCount = statistics.highRiskCount
             )
         }

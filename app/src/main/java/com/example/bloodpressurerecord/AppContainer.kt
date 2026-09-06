@@ -13,6 +13,8 @@ import com.example.bloodpressurerecord.data.repository.DefaultTrendRepository
 import com.example.bloodpressurerecord.data.repository.TrendRepository
 import com.example.bloodpressurerecord.reminder.MedicationReminderCoordinator
 import com.example.bloodpressurerecord.widget.AppWidgetUpdater
+import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
+import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
 
 interface AppContainer {
     val bloodPressureRepository: BloodPressureRepository
@@ -20,12 +22,17 @@ interface AppContainer {
     val trendRepository: TrendRepository
     val medicationRepository: MedicationRepository
     val medicationReminderCoordinator: MedicationReminderCoordinator
+    val sessionDraftRepository: SessionDraftRepository
 }
 
 class DefaultAppContainer(context: Context) : AppContainer {
     private val appContext = context.applicationContext
     private val database by lazy { AppDatabase.create(appContext) }
     private val appSettingsStore by lazy { AppSettingsStore(appContext) }
+
+    override val sessionDraftRepository: SessionDraftRepository by lazy {
+        FileSessionDraftRepository(appContext)
+    }
 
     override val bloodPressureRepository: BloodPressureRepository by lazy {
         DefaultBloodPressureRepository(

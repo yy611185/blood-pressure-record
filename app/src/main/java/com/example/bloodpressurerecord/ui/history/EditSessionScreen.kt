@@ -67,7 +67,7 @@ fun EditSessionScreen(
             onContinueEditing = { showExitDialog = false },
             onSaveDraft = {
                 showExitDialog = false
-                onBack()
+                viewModel.saveDraft(onBack)
             },
             onDiscard = {
                 viewModel.discardDraft()

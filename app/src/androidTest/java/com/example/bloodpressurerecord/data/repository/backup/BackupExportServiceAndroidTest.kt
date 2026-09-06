@@ -6,6 +6,8 @@ import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
+import com.example.bloodpressurerecord.data.db.entity.MedicationEntity
+import com.example.bloodpressurerecord.data.db.entity.MedicationIntakeLogEntity
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
@@ -304,7 +306,7 @@ class BackupExportServiceAndroidTest {
     }
 
     @Test
-    fun import_skipsRecordWithFewerThanTwoReadings() = runTest {
+    fun import_preservesHistoricalRecordWithOneReading() = runTest {
         val bytes = exportSingleSession(
             "too-few",
             listOf(Triple(120, 80, 70), Triple(122, 82, 72))
@@ -321,8 +323,9 @@ class BackupExportServiceAndroidTest {
             AppSettingsStore(ApplicationProvider.getApplicationContext())
         ).importXlsx(ByteArrayInputStream(tampered))
 
-        assertEquals(1, result.skippedCount)
-        assertEquals(BackupImportErrorCode.INVALID_READING_COUNT, result.errors.single().code)
+        assertEquals(0, result.skippedCount)
+        assertEquals(1, result.insertedCount)
+        assertEquals(1, database.measurementSessionDao().countReadings())
     }
 
     @Test
@@ -345,6 +348,46 @@ class BackupExportServiceAndroidTest {
         assertEquals(1, second.replacedCount)
         assertEquals(1, database.measurementSessionDao().countSessions())
         assertEquals(2, database.measurementSessionDao().countReadings())
+    }
+
+    @Test
+    fun version4_roundTripsMedicationTimesAndIntakeLogsIdempotently() = runTest {
+        val dao = database.medicationDao()
+        val medicationId = dao.insertMedicationWithTimes(
+            MedicationEntity(
+                name = "降压药",
+                dosage = "1片",
+                enabled = false,
+                createdAt = 1_777_777L
+            ),
+            listOf("08:00", "20:00")
+        )
+        val morning = dao.getTimesForMedication(medicationId).first { it.timeText == "08:00" }
+        dao.insertLog(
+            MedicationIntakeLogEntity(
+                medicationId = medicationId,
+                timeId = morning.id,
+                epochDay = 20_000,
+                takenAt = 1_800_000L
+            )
+        )
+        val bytes = exportCurrentDatabase()
+        dao.deleteAllLogs()
+        dao.deleteAllTimes()
+        dao.deleteAllMedications()
+
+        val service = BackupImportService(
+            database,
+            AppSettingsStore(ApplicationProvider.getApplicationContext())
+        )
+        service.importXlsx(ByteArrayInputStream(bytes))
+        service.importXlsx(ByteArrayInputStream(bytes))
+
+        val restored = dao.getMedicationsWithTimes().single()
+        assertEquals("降压药", restored.medication.name)
+        assertFalse(restored.medication.enabled)
+        assertEquals(listOf("08:00", "20:00"), restored.times.map { it.timeText }.sorted())
+        assertEquals(1, dao.getLogsForDay(20_000).size)
     }
 
     @Test
@@ -546,7 +589,8 @@ class BackupExportServiceAndroidTest {
             sessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),
             userProfileDao = database.userProfileDao(),
-            appSettingsStore = settingsStore
+            appSettingsStore = settingsStore,
+            medicationDao = database.medicationDao()
         ).buildPayload("家庭血压记录", "test")
         return ByteArrayOutputStream().use { output ->
             BackupFileWriter().writeXlsx(payload, output)

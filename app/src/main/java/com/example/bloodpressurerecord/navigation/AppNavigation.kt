@@ -253,7 +253,8 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                         repository = application.appContainer.bloodPressureRepository,
                         discardFirstReading = application.appContainer.settingsRepository
                             .observeSettings()
-                            .map { it.appSettings.discardFirstReading }
+                            .map { it.appSettings.discardFirstReading },
+                        draftRepository = application.appContainer.sessionDraftRepository
                     )
                 }
                 val vm: EditSessionViewModel = viewModel(factory = editFactory)

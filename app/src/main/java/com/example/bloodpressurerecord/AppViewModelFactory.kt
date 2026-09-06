@@ -43,7 +43,8 @@ class AppViewModelFactory(
                         .map { it.appSettings.highRiskAlertEnabled },
                     discardFirstReading = container.settingsRepository.observeSettings()
                         .map { it.appSettings.discardFirstReading },
-                    savedStateHandle = savedStateHandle
+                    savedStateHandle = savedStateHandle,
+                    draftRepository = container.sessionDraftRepository
                 ) as T
             }
 

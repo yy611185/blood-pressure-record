@@ -122,8 +122,14 @@ class MedicationReminderCoordinator(
         )
         appSettingsStore.setScheduledMedicationTimeIds(allTimeIds)
         val calendarResult = calendarSync.rebuild(slots, settings.medicationCalendarSyncEnabled)
-        if (settings.medicationCalendarSyncEnabled && calendarResult == null) {
-            error("日历同步未完成：缺少日历权限或无法访问日历提供方")
+        if (calendarResult == null) {
+            error(
+                if (settings.medicationCalendarSyncEnabled) {
+                    "日历同步未完成：缺少日历权限或无法访问日历提供方"
+                } else {
+                    "日历同步已关闭，但旧日程尚未清理；授权日历权限后可重试"
+                }
+            )
         }
     }
 }

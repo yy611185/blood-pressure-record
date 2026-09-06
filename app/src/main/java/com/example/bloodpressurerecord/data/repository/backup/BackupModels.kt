@@ -44,6 +44,26 @@ data class BackupMetaItem(
     val value: String
 )
 
+data class BackupMedicationRow(
+    val backupId: String,
+    val name: String,
+    val dosage: String,
+    val enabled: Boolean,
+    val createdAt: Long
+)
+
+data class BackupMedicationTimeRow(
+    val backupId: String,
+    val medicationBackupId: String,
+    val timeText: String
+)
+
+data class BackupMedicationLogRow(
+    val timeBackupId: String,
+    val epochDay: Long,
+    val takenAt: Long
+)
+
 data class BackupExportDiagnostics(
     val sessionCount: Int = 0,
     val readingCount: Int = 0,
@@ -64,5 +84,8 @@ data class BackupExportPayload(
     val readings: List<BackupReadingRow> = emptyList(),
     val userProfile: List<BackupUserProfileItem>,
     val meta: List<BackupMetaItem>,
-    val diagnostics: BackupExportDiagnostics = BackupExportDiagnostics()
+    val diagnostics: BackupExportDiagnostics = BackupExportDiagnostics(),
+    val medications: List<BackupMedicationRow> = emptyList(),
+    val medicationTimes: List<BackupMedicationTimeRow> = emptyList(),
+    val medicationLogs: List<BackupMedicationLogRow> = emptyList()
 )

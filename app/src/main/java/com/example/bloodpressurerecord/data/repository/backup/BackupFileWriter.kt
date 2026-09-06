@@ -21,6 +21,15 @@ class BackupFileWriter {
             writeInstructionsSheet(workbook, headerStyle, payload.instructions)
             writeMeasurementsSheet(workbook, headerStyle, payload.measurements)
             writeReadingsSheet(workbook, headerStyle, payload.readings)
+            writeTableSheet(workbook, "药品", headerStyle, MEDICATION_COLUMNS, payload.medications.map {
+                listOf(it.backupId, it.name, it.dosage, it.enabled, it.createdAt)
+            })
+            writeTableSheet(workbook, "服药时间", headerStyle, MEDICATION_TIME_COLUMNS, payload.medicationTimes.map {
+                listOf(it.backupId, it.medicationBackupId, it.timeText)
+            })
+            writeTableSheet(workbook, "服药打卡", headerStyle, MEDICATION_LOG_COLUMNS, payload.medicationLogs.map {
+                listOf(it.timeBackupId, it.epochDay, it.takenAt)
+            })
             writeKeyValueSheet(workbook, "用户资料", headerStyle, payload.userProfile.map { it.key to it.value.orEmpty() })
             writeKeyValueSheet(workbook, "导出信息", headerStyle, payload.meta.map { it.key to it.value })
             REQUIRED_SHEET_NAMES.forEachIndexed { index, name ->
@@ -150,6 +159,24 @@ class BackupFileWriter {
         READING_COLUMNS.indices.drop(1).forEach { sheet.setColumnWidth(it, 14 * 256) }
     }
 
+    private fun writeTableSheet(
+        workbook: XSSFWorkbook,
+        sheetName: String,
+        headerStyle: CellStyle,
+        columns: List<String>,
+        rows: List<List<Any?>>
+    ) {
+        val sheet = workbook.getOrCreateClearedSheet(sheetName)
+        val header = sheet.createRow(0)
+        columns.forEachIndexed { index, title -> header.writeCell(index, title, headerStyle) }
+        rows.forEachIndexed { rowIndex, values ->
+            val row = sheet.createRow(rowIndex + 1)
+            values.forEachIndexed { index, value -> row.writeCell(index, value) }
+        }
+        sheet.createFreezePane(0, 1)
+        columns.indices.forEach { sheet.setColumnWidth(it, 24 * 256) }
+    }
+
     private fun buildMeasurementCells(item: BackupMeasurementRow): List<Any?> {
         return listOf(
             item.recordId,
@@ -192,7 +219,9 @@ class BackupFileWriter {
 
     companion object {
         const val TEMPLATE_ASSET_NAME = "backup_template_v1.xlsx"
-        private val REQUIRED_SHEET_NAMES = listOf("使用说明", "测量记录", "原始读数", "用户资料", "导出信息")
+        private val REQUIRED_SHEET_NAMES = listOf(
+            "使用说明", "测量记录", "原始读数", "药品", "服药时间", "服药打卡", "用户资料", "导出信息"
+        )
         val MEASUREMENT_COLUMNS = listOf(
             "record_id",
             "measured_at",
@@ -218,5 +247,8 @@ class BackupFileWriter {
             "diastolic",
             "pulse"
         )
+        val MEDICATION_COLUMNS = listOf("backup_id", "name", "dosage", "enabled", "created_at")
+        val MEDICATION_TIME_COLUMNS = listOf("backup_id", "medication_backup_id", "time_text")
+        val MEDICATION_LOG_COLUMNS = listOf("time_backup_id", "epoch_day", "taken_at")
     }
 }

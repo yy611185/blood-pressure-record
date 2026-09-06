@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册、不联网、不复杂。数据只存在你的手机里。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-35-blue) ![Version](https://img.shields.io/badge/version-1.8.2-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-1.8.2-orange)
 
 ---
 
@@ -34,14 +34,14 @@
 | 📈 趋势图 | 7/30 天/全部，支持缩放、参考线、每日聚合、当天明细 |
 | 💊 服药提醒 | 晨/晚提醒 + 每日打卡 + 可选写入系统日历（需授权） |
 | 📲 桌面小部件 | 不打开 App 也能看到最新血压与今日进度 |
-| 💾 Excel 导入导出 | 备份含完整原始读数与设置，格式 v3（兼容 v2） |
+| 💾 Excel 导入导出 | v4 完整备份测量、设置、药品、服药时间与打卡，兼容读取 v2/v3 |
 | 🔐 加密备份 | 可选 .bpx 加密导出：AES-256-GCM + 口令派生密钥，导入需相同口令 |
 
-- 支持 Excel (.xlsx) 格式导入和导出；格式 v3 保留每条记录的平均策略，并向后兼容 v2。
-- 导出文件包含使用说明、测量记录、全部原始读数、用户资料和导出信息。
+- 支持 Excel (.xlsx) 格式导入和导出；格式 v4 保留平均策略和完整用药数据，并向后兼容 v2/v3。
+- 导出文件包含使用说明、测量记录、全部原始读数、用户资料、药品、每日服药时间、打卡历史和导出信息。
 - 文件交给用户选择的 Android 文件位置或文件提供方；应用不会自行上传服务器。
 - 即使暂无测量记录，也可导出用户资料与设置。
-- 导出的 Excel 当前未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置；请勿放入公共设备、不受信任的云盘或与他人共享的位置。
+- 可选择明文 Excel 或口令加密的 .bpx；两者都可能包含姓名、年龄、血压记录、症状、备注、提醒和用药数据，请妥善保存。
 - 导入会先生成预览和统计信息，确认后才写入；可分别选择测量记录、用户资料、显示设置和提醒设置。
 - 导入会拒绝明显的未来测量时间、重复记录 id、损坏或超过大小/解压安全上限的 xlsx；被跳过的记录不会写入。
 

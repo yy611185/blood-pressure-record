@@ -10,12 +10,11 @@ data class SessionFormDraft(
     val symptoms: Set<String>
 )
 
-/**
- * 草稿只保存在 SavedStateHandle，不写入正式 Room 表，也不写日志。
- */
+/** 页面内状态写入 SavedStateHandle；用户明确保存时再提交到独立草稿仓库。 */
 class SessionDraftStore(
     private val savedStateHandle: SavedStateHandle,
-    private val keyPrefix: String
+    private val keyPrefix: String,
+    private val repository: SessionDraftRepository? = null
 ) {
     fun save(draft: SessionFormDraft) {
         savedStateHandle[key("present")] = true
@@ -29,7 +28,9 @@ class SessionDraftStore(
     }
 
     fun restore(): SessionFormDraft? {
-        if (savedStateHandle.get<Boolean>(key("present")) != true) return null
+        if (savedStateHandle.get<Boolean>(key("present")) != true) {
+            return repository?.load(keyPrefix)?.getOrNull()?.also(::save)
+        }
         val systolic = savedStateHandle.get<ArrayList<String>>(key("systolic")).orEmpty()
         val diastolic = savedStateHandle.get<ArrayList<String>>(key("diastolic")).orEmpty()
         val pulse = savedStateHandle.get<ArrayList<String>>(key("pulse")).orEmpty()
@@ -60,6 +61,12 @@ class SessionDraftStore(
             "note",
             "symptoms"
         ).forEach { savedStateHandle.remove<Any>(key(it)) }
+        repository?.delete(keyPrefix)
+    }
+
+    fun persist(draft: SessionFormDraft): Result<Unit> {
+        save(draft)
+        return repository?.save(keyPrefix, draft) ?: Result.success(Unit)
     }
 
     private fun key(suffix: String): String = "$keyPrefix.$suffix"

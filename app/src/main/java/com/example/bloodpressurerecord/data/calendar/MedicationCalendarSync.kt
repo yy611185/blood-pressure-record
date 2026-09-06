@@ -45,9 +45,12 @@ class MedicationCalendarSync(
         rebuildMutex.withLock {
             withContext(Dispatchers.IO) {
             if (!hasPermission()) return@withContext null
-            // 删除失败时不能继续新增，否则每次同步都会产生重复日程。
-            deleteOurEvents()
-            if (!enabled) return@withContext 0
+            val existingEventIds = findOurEventIds()
+            if (!enabled) {
+                existingEventIds.forEach(::deleteEvent)
+                return@withContext 0
+            }
+            // 先确认目标日历可写，再改动旧日程；没有可写日历时保留现状。
             val calendarId = findWritableCalendarId() ?: return@withContext null
             var created = 0
             val createdEventIds = mutableListOf<Long>()
@@ -56,6 +59,8 @@ class MedicationCalendarSync(
                     createdEventIds += insertDailyEvent(calendarId, slot)
                     created += 1
                 }
+                // 新集合完整创建后才移除旧集合，创建阶段失败不会丢失原有提醒。
+                existingEventIds.forEach(::deleteEvent)
             } catch (throwable: Throwable) {
                 // 只回滚本轮创建的事件，避免把其他合法的本应用日程一并删除。
                 createdEventIds.asReversed().forEach { eventId ->
@@ -67,7 +72,7 @@ class MedicationCalendarSync(
             }
         }
 
-    private fun deleteOurEvents() {
+    private fun findOurEventIds(): List<Long> {
         val resolver = context.contentResolver
         val selection = "${CalendarContract.Events.CUSTOM_APP_PACKAGE} = ? AND " +
             "${CalendarContract.Events.DESCRIPTION} = ?"
@@ -83,9 +88,7 @@ class MedicationCalendarSync(
         cursor.use {
             while (cursor.moveToNext()) ids.add(cursor.getLong(0))
         }
-        ids.forEach { id ->
-            deleteEvent(id)
-        }
+        return ids
     }
 
     private fun deleteEvent(eventId: Long) {
@@ -149,17 +152,19 @@ class MedicationCalendarSync(
             check(deleted == 1) { "无法回滚无效的日历日程" }
             throw IllegalStateException("日历日程返回了无效 URI", throwable)
         }
-        val reminderUri = context.contentResolver.insert(
-            CalendarContract.Reminders.CONTENT_URI,
-            ContentValues().apply {
-                put(CalendarContract.Reminders.EVENT_ID, eventId)
-                put(CalendarContract.Reminders.MINUTES, 0)
-                put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
-            }
-        )
-        if (reminderUri == null) {
-            deleteEvent(eventId)
-            error("无法为日历日程写入提醒")
+        try {
+            val reminderUri = context.contentResolver.insert(
+                CalendarContract.Reminders.CONTENT_URI,
+                ContentValues().apply {
+                    put(CalendarContract.Reminders.EVENT_ID, eventId)
+                    put(CalendarContract.Reminders.MINUTES, 0)
+                    put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
+                }
+            )
+            if (reminderUri == null) error("无法为日历日程写入提醒")
+        } catch (throwable: Throwable) {
+            runCatching { deleteEvent(eventId) }
+            throw throwable
         }
         return eventId
     }

@@ -259,6 +259,13 @@ fun SettingsDataManagementScreen(
                             "覆盖 ${preview.replacedCount} 条，自动修正 ${preview.correctedCount} 条，" +
                             "跳过 ${preview.skippedCount} 条，原始读数 ${preview.readingCount} 组。"
                     )
+                    Text(
+                        if (preview.medicationCount > 0 || preview.medicationLogCount > 0) {
+                            "包含药品 ${preview.medicationCount} 种、每日时间点 ${preview.medicationTimeCount} 个、服药打卡 ${preview.medicationLogCount} 条。"
+                        } else {
+                            "此备份不包含用药数据；现有药品不会因此被清空。"
+                        }
+                    )
                     if (preview.errorCount > 0) {
                         Text(
                             "校验提示 ${preview.errorCount} 条；被跳过的记录不会写入。",

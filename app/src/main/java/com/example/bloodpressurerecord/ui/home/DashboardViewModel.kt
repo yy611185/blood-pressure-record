@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.roundToInt
 
 data class DashboardUiState(
     val today: LocalDate = LocalDate.now(),
@@ -73,8 +74,8 @@ class DashboardViewModel(
                     today = today,
                     latest = latest,
                     todayCount = todayStatistics.recordCount,
-                    todayAverageSystolic = todayStatistics.averageSystolic?.toInt(),
-                    todayAverageDiastolic = todayStatistics.averageDiastolic?.toInt(),
+                    todayAverageSystolic = todayStatistics.averageSystolic?.roundToInt(),
+                    todayAverageDiastolic = todayStatistics.averageDiastolic?.roundToInt(),
                     streakDays = streakDays(today, recordedDates),
                     weekRecorded = (6 downTo 0).map { daysAgo ->
                         today.minusDays(daysAgo.toLong()) in recordedDates
