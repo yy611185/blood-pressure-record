@@ -35,8 +35,12 @@ object SessionFormLogic {
      */
     const val UI_MAX_READING_COUNT = 10
 
-    fun saveDisabledReason(readings: List<SessionReadingInputUi>): String? {
-        return validateAndBuildReadings(readings, requiredCount = 2).error
+    fun saveDisabledReason(
+        readings: List<SessionReadingInputUi>,
+        requiredCount: Int = 2,
+        maximumCount: Int = UI_MAX_READING_COUNT
+    ): String? {
+        return validateAndBuildReadings(readings, requiredCount, maximumCount = maximumCount).error
     }
 
     fun recomputeDerived(
@@ -70,7 +74,8 @@ object SessionFormLogic {
     fun validateAndBuildReadings(
         readings: List<SessionReadingInputUi>,
         requiredCount: Int = 2,
-        strategy: AverageStrategy = AverageStrategy.ALL
+        strategy: AverageStrategy = AverageStrategy.ALL,
+        maximumCount: Int = UI_MAX_READING_COUNT
     ): SessionValidationResult {
         val list = mutableListOf<SessionReadingInput>()
         readings.forEachIndexed { index, reading ->
@@ -81,11 +86,13 @@ object SessionFormLogic {
             parsed.reading?.let { list += it }
         }
         if (list.size < requiredCount) {
-            return SessionValidationResult(error = "把两组的高压和低压都填好，就可以保存啦")
-        }
-        if (list.size > UI_MAX_READING_COUNT) {
             return SessionValidationResult(
-                error = "每次测量最多填写 $UI_MAX_READING_COUNT 组读数。"
+                error = "至少填写 $requiredCount 组高压和低压，就可以保存啦"
+            )
+        }
+        if (list.size > maximumCount) {
+            return SessionValidationResult(
+                error = "每次测量最多保留 $maximumCount 组读数。"
             )
         }
         val values = list.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }

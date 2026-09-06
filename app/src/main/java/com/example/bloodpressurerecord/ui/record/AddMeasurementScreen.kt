@@ -62,10 +62,6 @@ import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
-import com.example.bloodpressurerecord.ui.theme.Sage200
-import com.example.bloodpressurerecord.ui.theme.Sage900
-import com.example.bloodpressurerecord.ui.theme.Terracotta700
-import com.example.bloodpressurerecord.ui.theme.TerracottaDashed
 
 /** 存储值保持“无症状”不变，仅展示时使用口语化文案。 */
 private fun symptomLabel(symptom: String): String =
@@ -91,7 +87,7 @@ fun AddMeasurementScreen(
             onContinueEditing = { showExitDialog = false },
             onSaveDraft = {
                 showExitDialog = false
-                onBack()
+                viewModel.saveDraft(onBack)
             },
             onDiscard = {
                 viewModel.discardDraft()
@@ -335,7 +331,7 @@ private fun DashedAddGroupButton(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    val dashColor = TerracottaDashed
+    val dashColor = MaterialTheme.colorScheme.primary
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -358,7 +354,7 @@ private fun DashedAddGroupButton(
         Icon(
             Icons.Default.Add,
             contentDescription = null,
-            tint = Terracotta700,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp)
         )
         Spacer(Modifier.width(6.dp))
@@ -366,7 +362,7 @@ private fun DashedAddGroupButton(
             "再加一组",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
-            color = Terracotta700
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }
@@ -381,7 +377,7 @@ private fun AverageResultCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = Sage200),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -391,19 +387,19 @@ private fun AverageResultCard(
             Text(
                 groupLabel,
                 style = MaterialTheme.typography.labelMedium,
-                color = Sage900
+                color = MaterialTheme.colorScheme.onSecondaryContainer
             )
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     avgText,
                     fontSize = 32.sp,
-                    color = Sage900
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     "mmHg",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Sage900,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
                 avgPulse?.let {
@@ -411,7 +407,7 @@ private fun AverageResultCard(
                     Text(
                         "脉搏 $it 次/分",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Sage900,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
                 }
@@ -419,7 +415,7 @@ private fun AverageResultCard(
             Text(
                 averageComment(categoryLabel),
                 style = MaterialTheme.typography.bodyMedium,
-                color = Sage900
+                color = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
     }

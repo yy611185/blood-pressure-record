@@ -7,6 +7,9 @@ import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
+import com.example.bloodpressurerecord.data.db.entity.MedicationEntity
+import com.example.bloodpressurerecord.data.db.entity.MedicationTimeEntity
+import com.example.bloodpressurerecord.data.db.entity.MedicationIntakeLogEntity
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
@@ -59,7 +62,10 @@ data class BackupImportResult(
     val correctedCount: Int,
     val skippedCount: Int,
     val readingCount: Int,
-    val errors: List<BackupImportError>
+    val errors: List<BackupImportError>,
+    val medicationCount: Int = 0,
+    val medicationTimeCount: Int = 0,
+    val medicationLogCount: Int = 0
 ) {
     val errorCount: Int
         get() = errors.size
@@ -72,7 +78,9 @@ data class BackupImportResult(
         }
         return "备份导入完成：新增 $insertedCount 条，覆盖 $replacedCount 条，" +
             "自动修正 $correctedCount 条，跳过 $skippedCount 条，错误 $errorCount 条。" +
-            settingsWarning
+            settingsWarning + if (medicationCount > 0 || medicationLogCount > 0) {
+                " 已恢复药品 $medicationCount 种、时间点 $medicationTimeCount 个、打卡 $medicationLogCount 条。"
+            } else ""
     }
 }
 
@@ -97,8 +105,14 @@ class BackupImportPreview internal constructor(
     val changesDisplaySettings: Boolean,
     val changesReminderTimes: Boolean,
     val changesReminderEnabled: Boolean,
+    val medicationCount: Int,
+    val medicationTimeCount: Int,
+    val medicationLogCount: Int,
     internal val preparedRecords: List<PreparedImportRecord>,
-    internal val userProfile: Map<String, String>
+    internal val userProfile: Map<String, String>,
+    internal val medications: List<BackupMedicationRow>,
+    internal val medicationTimes: List<BackupMedicationTimeRow>,
+    internal val medicationLogs: List<BackupMedicationLogRow>
 ) {
     val errorCount: Int
         get() = errors.size
@@ -137,6 +151,7 @@ class BackupImportService(
             SizeLimitedInputStream(inputStream, BackupImportLimits.MAX_FILE_BYTES),
             passphrase
         )
+        validateMedicationDocument(document)
         val zone = document.meta["timezone"]
             ?.let { runCatching { ZoneId.of(it) }.getOrNull() }
             ?: throw BackupFormatException("备份时区无效，未执行导入")
@@ -171,8 +186,14 @@ class BackupImportService(
             changesDisplaySettings = displaySettingsDiffer(document.userProfile, currentSettings),
             changesReminderTimes = reminderTimesDiffer(document.userProfile, currentSettings),
             changesReminderEnabled = reminderEnabledDiffer(document.userProfile, currentSettings),
+            medicationCount = document.medications.size,
+            medicationTimeCount = document.medicationTimes.size,
+            medicationLogCount = document.medicationLogs.size,
             preparedRecords = preparedRecords,
-            userProfile = document.userProfile
+            userProfile = document.userProfile,
+            medications = document.medications,
+            medicationTimes = document.medicationTimes,
+            medicationLogs = document.medicationLogs
         )
     }
 
@@ -206,6 +227,7 @@ class BackupImportService(
                     )
                 )
             }
+            importMedications(preview)
         }
 
         if (options.restoreDisplaySettings || options.restoreReminderSettings) {
@@ -230,8 +252,88 @@ class BackupImportService(
             correctedCount = if (options.importMeasurements) preview.correctedCount else 0,
             skippedCount = preview.skippedCount,
             readingCount = if (options.importMeasurements) preview.readingCount else 0,
-            errors = errors.toList()
+            errors = errors.toList(),
+            medicationCount = preview.medicationCount,
+            medicationTimeCount = preview.medicationTimeCount,
+            medicationLogCount = preview.medicationLogCount
         )
+    }
+
+    private suspend fun importMedications(preview: BackupImportPreview) {
+        if (preview.medications.isEmpty()) return
+        val dao = database.medicationDao()
+        val existing = dao.getMedicationsWithTimes()
+        val medicationIds = mutableMapOf<String, Long>()
+        preview.medications.forEach { source ->
+            val match = existing.firstOrNull {
+                it.medication.name == source.name &&
+                    it.medication.dosage == source.dosage &&
+                    it.medication.createdAt == source.createdAt
+            }
+            val localId = if (match != null) {
+                dao.updateMedication(
+                    match.medication.copy(
+                        name = source.name,
+                        dosage = source.dosage,
+                        enabled = source.enabled,
+                        createdAt = source.createdAt
+                    )
+                )
+                match.medication.id
+            } else {
+                dao.insertMedication(
+                    MedicationEntity(
+                        name = source.name,
+                        dosage = source.dosage,
+                        enabled = source.enabled,
+                        createdAt = source.createdAt
+                    )
+                )
+            }
+            medicationIds[source.backupId] = localId
+        }
+
+        val timeIds = mutableMapOf<String, Long>()
+        preview.medicationTimes.forEach { source ->
+            val medicationId = requireNotNull(medicationIds[source.medicationBackupId])
+            val existingTime = dao.getTimesForMedication(medicationId)
+                .firstOrNull { it.timeText == source.timeText }
+            val localTimeId = existingTime?.id ?: dao.insertTime(
+                MedicationTimeEntity(medicationId = medicationId, timeText = source.timeText)
+            )
+            timeIds[source.backupId] = localTimeId
+        }
+        preview.medicationLogs.forEach { source ->
+            val timeId = requireNotNull(timeIds[source.timeBackupId])
+            val medicationBackupId = preview.medicationTimes
+                .first { it.backupId == source.timeBackupId }.medicationBackupId
+            dao.insertLog(
+                MedicationIntakeLogEntity(
+                    medicationId = requireNotNull(medicationIds[medicationBackupId]),
+                    timeId = timeId,
+                    epochDay = source.epochDay,
+                    takenAt = source.takenAt
+                )
+            )
+        }
+    }
+
+    private fun validateMedicationDocument(document: BackupImportDocument) {
+        if (document.medications.size > MAX_MEDICATIONS ||
+            document.medicationTimes.size > MAX_MEDICATION_TIMES ||
+            document.medicationLogs.size > MAX_MEDICATION_LOGS
+        ) {
+            throw BackupFormatException("用药数据超过允许上限")
+        }
+        val medicationIds = document.medications.map { it.backupId }
+        val timeIds = document.medicationTimes.map { it.backupId }
+        if (medicationIds.size != medicationIds.distinct().size ||
+            timeIds.size != timeIds.distinct().size ||
+            document.medicationTimes.any { it.medicationBackupId !in medicationIds } ||
+            document.medicationLogs.any { it.timeBackupId !in timeIds }
+        ) {
+            throw BackupFormatException("用药数据存在重复标识或无效引用")
+        }
     }
 
     private fun prepareRecord(
@@ -255,12 +357,10 @@ class BackupImportService(
             )
             return null
         }
-        if (source.readings.size !in
-            MeasurementInputRules.MIN_READING_COUNT..MeasurementInputRules.MAX_READING_COUNT
-        ) {
+        if (source.readings.size !in 1..MeasurementInputRules.MAX_READING_COUNT) {
             errors += source.error(
                 BackupImportErrorCode.INVALID_READING_COUNT,
-                "每条记录必须包含 ${MeasurementInputRules.MIN_READING_COUNT} 至 " +
+                "历史记录必须包含 1 至 " +
                     "${MeasurementInputRules.MAX_READING_COUNT} 组原始读数。"
             )
             return null
@@ -466,6 +566,9 @@ class BackupImportService(
 
     companion object {
         private const val DATABASE_BATCH_SIZE = 250
+        private const val MAX_MEDICATIONS = 1_000
+        private const val MAX_MEDICATION_TIMES = 10_000
+        private const val MAX_MEDICATION_LOGS = 50_000
         private val DATE_TIME_FORMATTER = DateTimeFormatter
             .ofPattern("uuuu-MM-dd HH:mm:ss")
             .withResolverStyle(ResolverStyle.STRICT)

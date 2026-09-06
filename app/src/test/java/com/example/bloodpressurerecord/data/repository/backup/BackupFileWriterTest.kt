@@ -93,7 +93,10 @@ class BackupFileWriterTest {
     private fun assertWorkbookContainsExportedMeasurement(bytes: ByteArray) {
         XSSFWorkbook(ByteArrayInputStream(bytes)).use { workbook ->
             assertEquals(
-                listOf("使用说明", "测量记录", "原始读数", "用户资料", "导出信息"),
+                listOf(
+                    "使用说明", "测量记录", "原始读数", "药品", "服药时间", "服药打卡",
+                    "用户资料", "导出信息"
+                ),
                 workbook.sheetIterator().asSequence().map { it.sheetName }.toList()
             )
 

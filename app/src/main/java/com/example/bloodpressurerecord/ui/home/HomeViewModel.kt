@@ -8,6 +8,7 @@ import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.ui.common.MeasurementTags
 import com.example.bloodpressurerecord.ui.common.SessionFormLogic
 import com.example.bloodpressurerecord.ui.common.SessionDraftStore
+import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
 import com.example.bloodpressurerecord.ui.common.SessionFormDraft
 import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
@@ -23,6 +24,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class HomeUiState(
     val measuredAtText: String = DateTimeInputFormatter.nowText(),
@@ -55,6 +58,7 @@ class HomeViewModel(
     highRiskAlertEnabled: Flow<Boolean> = flowOf(true),
     discardFirstReading: Flow<Boolean> = flowOf(false),
     savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    draftRepository: SessionDraftRepository? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) : ViewModel() {
     // 注意：discardFirstEnabled 必须先于 localState 初始化，
@@ -69,7 +73,7 @@ class HomeViewModel(
         started = SharingStarted.Eagerly,
         initialValue = false
     )
-    private val draftStore = SessionDraftStore(savedStateHandle, "add_session")
+    private val draftStore = SessionDraftStore(savedStateHandle, "add_session", draftRepository)
     private val restoredDraft = draftStore.restore()
     private val localState = MutableStateFlow(
         restoredDraft?.toHomeUiState() ?: HomeUiState()
@@ -269,6 +273,21 @@ class HomeViewModel(
         pendingSaveContainsHighRisk = false
     }
 
+    fun saveDraft(onSaved: () -> Unit) {
+        val draft = currentDraft()
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { draftStore.persist(draft) }
+            result.onSuccess { onSaved() }.onFailure { throwable ->
+                localState.update {
+                    it.copy(
+                        formMessage = "草稿保存失败：${throwable.message ?: "请稍后重试"}",
+                        formMessageIsError = true
+                    )
+                }
+            }
+        }
+    }
+
     private fun savePendingInput() {
         val input = pendingSaveInput ?: return
         if (localState.value.isSaving) return
@@ -320,15 +339,17 @@ class HomeViewModel(
     }
 
     private fun persistDraft() {
+        draftStore.save(currentDraft())
+    }
+
+    private fun currentDraft(): SessionFormDraft {
         val state = localState.value
-        draftStore.save(
-            SessionFormDraft(
-                measuredAtText = state.measuredAtText,
-                scene = state.scene,
-                readings = allReadings(state),
-                note = state.note,
-                symptoms = state.selectedSymptoms + state.selectedFactors
-            )
+        return SessionFormDraft(
+            measuredAtText = state.measuredAtText,
+            scene = state.scene,
+            readings = allReadings(state),
+            note = state.note,
+            symptoms = state.selectedSymptoms + state.selectedFactors
         )
     }
 

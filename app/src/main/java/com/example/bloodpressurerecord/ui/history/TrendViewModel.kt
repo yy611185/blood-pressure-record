@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 data class TrendDayDetails(
     val point: TrendPoint,
@@ -162,17 +163,14 @@ class TrendViewModel(
                 trendRepository.getRecords(point.intervalStart, point.intervalEndExclusive)
             }.onSuccess { records ->
                 details.update { current ->
-                    current?.takeIf { it.point.id == point.id }?.copy(
-                        records = records,
-                        loading = false,
-                        error = null
+                    if (current?.point?.id != point.id) current else current.copy(
+                        records = records, loading = false, error = null
                     )
                 }
             }.onFailure { throwable ->
                 details.update { current ->
-                    current?.takeIf { it.point.id == point.id }?.copy(
-                        loading = false,
-                        error = throwable.message ?: "无法读取当天记录"
+                    if (current?.point?.id != point.id) current else current.copy(
+                        loading = false, error = throwable.message ?: "无法读取当天记录"
                     )
                 }
             }
@@ -207,10 +205,14 @@ class TrendViewModel(
         previousStatistics: PeriodStatistics
     ): TrendTextSummary {
         if (statistics.recordCount == 0) return TrendTextSummary()
-        val avgSys = statistics.averageSystolic?.toInt()
-        val avgDia = statistics.averageDiastolic?.toInt()
-        val previousAvgSys = previousStatistics.averageSystolic?.toInt()
-        val previousAvgDia = previousStatistics.averageDiastolic?.toInt()
+        val avgSys = statistics.averageSystolic?.roundToInt()
+        val avgDia = statistics.averageDiastolic?.roundToInt()
+        val systolicChange = statistics.averageSystolic?.let { current ->
+            previousStatistics.averageSystolic?.let { previous -> (current - previous).roundToInt() }
+        }
+        val diastolicChange = statistics.averageDiastolic?.let { current ->
+            previousStatistics.averageDiastolic?.let { previous -> (current - previous).roundToInt() }
+        }
         return TrendTextSummary(
             recordCount = statistics.recordCount,
             averageSystolic = avgSys,
@@ -219,8 +221,8 @@ class TrendViewModel(
             highestDiastolic = statistics.highestDiastolic,
             lowestSystolic = statistics.lowestSystolic,
             lowestDiastolic = statistics.lowestDiastolic,
-            systolicChange = previousAvgSys?.let { previous -> avgSys?.minus(previous) },
-            diastolicChange = previousAvgDia?.let { previous -> avgDia?.minus(previous) },
+            systolicChange = systolicChange,
+            diastolicChange = diastolicChange,
             highRiskCount = statistics.highRiskCount
         )
     }

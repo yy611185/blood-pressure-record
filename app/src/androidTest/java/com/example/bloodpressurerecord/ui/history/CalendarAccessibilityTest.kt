@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.unit.Density
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 import java.time.LocalDate
@@ -32,7 +34,8 @@ class CalendarAccessibilityTest {
                         summary = null,
                         selected = false,
                         today = true,
-                        onClick = {}
+                        onClick = {},
+                        onDoubleClick = {}
                     )
                 }
             }
@@ -54,7 +57,8 @@ class CalendarAccessibilityTest {
                     summary = CalendarDaySummary(date, recordCount = 3, containsHighRisk = false),
                     selected = true,
                     today = false,
-                    onClick = { clicks += 1 }
+                    onClick = { clicks += 1 },
+                    onDoubleClick = { clicks += 2 }
                 )
             }
         }
@@ -67,5 +71,29 @@ class CalendarAccessibilityTest {
             .performClick()
         assertEquals(1, clicks)
     }
-}
 
+    @Test
+    fun recorded_day_doubleClick_invokesDetailAction() {
+        val date = LocalDate.of(2026, 7, 25)
+        var detailClicks = 0
+        composeRule.setContent {
+            BloodPressureRecordTheme {
+                CalendarDay(
+                    date = date,
+                    summary = CalendarDaySummary(
+                        date, recordCount = 1, containsHighRisk = false, hasNote = true
+                    ),
+                    selected = false,
+                    today = false,
+                    onClick = {},
+                    onDoubleClick = { detailClicks += 1 }
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription(
+            "7月25日，有1条记录，可选择，含自定义备注，双击查看"
+        ).performTouchInput { doubleClick() }
+        assertEquals(1, detailClicks)
+    }
+}

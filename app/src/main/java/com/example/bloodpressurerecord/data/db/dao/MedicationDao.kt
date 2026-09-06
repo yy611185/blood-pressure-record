@@ -36,6 +36,9 @@ interface MedicationDao {
     @Query("SELECT * FROM medication_intake_logs WHERE epochDay = :epochDay")
     suspend fun getLogsForDay(epochDay: Long): List<MedicationIntakeLogEntity>
 
+    @Query("SELECT * FROM medication_intake_logs ORDER BY epochDay ASC, timeId ASC")
+    suspend fun getAllLogs(): List<MedicationIntakeLogEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertLog(log: MedicationIntakeLogEntity)
 

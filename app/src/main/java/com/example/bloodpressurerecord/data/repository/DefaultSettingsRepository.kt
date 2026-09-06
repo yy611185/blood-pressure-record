@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import com.example.bloodpressurerecord.reminder.ReminderScheduler
 import java.io.ByteArrayOutputStream
+import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
 
 class DefaultSettingsRepository(
     private val context: Context,
@@ -168,6 +169,9 @@ class DefaultSettingsRepository(
         } catch (throwable: Throwable) {
             warnings += "设置重置失败"
         }
+        FileSessionDraftRepository(context).clearAll().onFailure {
+            warnings += "测量草稿清理失败"
+        }
         try {
             rescheduleReminders()
         } catch (throwable: Throwable) {
@@ -201,7 +205,8 @@ class DefaultSettingsRepository(
                 sessionDao = measurementSessionDao,
                 measurementDao = measurementDao,
                 userProfileDao = userProfileDao,
-                appSettingsStore = appSettingsStore
+                appSettingsStore = appSettingsStore,
+                medicationDao = database.medicationDao()
             ).buildPayload(
                 appName = "家庭血压记录",
                 appVersion = currentAppVersion()
@@ -224,24 +229,32 @@ class DefaultSettingsRepository(
                 buffer.toByteArray()
             }
 
+            val exportBytes = if (passphrase != null) {
+                BackupCrypto.encrypt(xlsxBytes, passphrase)
+            } else {
+                xlsxBytes
+            }
+            require(exportBytes.size <= com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits.MAX_FILE_BYTES) {
+                "生成的备份超过 10 MB，无法保证可恢复；请减少范围后分批导出。"
+            }
             val outputStream = context.contentResolver.openOutputStream(uri)
                 ?: error("无法写入所选文件，请重新选择保存位置")
 
             outputStream.use { stream ->
-                if (passphrase != null) {
-                    stream.write(BackupCrypto.encrypt(xlsxBytes, passphrase))
-                } else {
-                    stream.write(xlsxBytes)
-                }
+                stream.write(exportBytes)
                 stream.flush()
             }
             appSettingsStore.setLastSuccessfulExportAt(System.currentTimeMillis())
             if (passphrase != null) {
                 "加密备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n" +
-                    payload.diagnostics.toUserMessage() +
+                    payload.diagnostics.toUserMessage() + "\n包含药品 ${payload.medications.size} 种、" +
+                    "时间点 ${payload.medicationTimes.size} 个、服药打卡 ${payload.medicationLogs.size} 条。" +
                     "\n文件已用口令加密（.bpx），导入时需要相同口令；请妥善保管口令。"
             } else {
-                "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n${payload.diagnostics.toUserMessage()}\n文件已交给你选择的保存位置。"
+                "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n" +
+                    payload.diagnostics.toUserMessage() + "\n包含药品 ${payload.medications.size} 种、" +
+                    "时间点 ${payload.medicationTimes.size} 个、服药打卡 ${payload.medicationLogs.size} 条。" +
+                    "\n文件已交给你选择的保存位置。"
             }
         }
     }
@@ -292,9 +305,23 @@ class DefaultSettingsRepository(
                 database = database,
                 appSettingsStore = appSettingsStore
             ).commitImport(preview, options)
-            if (options.restoreReminderSettings) rescheduleReminders()
-            onDataChanged?.invoke()
-            result.toUserMessage()
+            val followUpWarnings = mutableListOf<String>()
+            if (options.restoreReminderSettings) {
+                runCatching { rescheduleReminders() }
+                    .onFailure { followUpWarnings += "血压提醒待重试" }
+            }
+            runCatching { medicationResync?.invoke() }
+                .onFailure { followUpWarnings += "服药提醒与日历待重试" }
+            runCatching { onDataChanged?.invoke() }
+                .onFailure { followUpWarnings += "桌面小部件待刷新" }
+            buildString {
+                append(result.toUserMessage())
+                if (followUpWarnings.isNotEmpty()) {
+                    append(" 数据已恢复；")
+                    append(followUpWarnings.joinToString("、"))
+                    append("。")
+                }
+            }
         }
     }
 

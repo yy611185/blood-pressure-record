@@ -43,7 +43,10 @@ data class BackupImportMeasurement(
 data class BackupImportDocument(
     val measurements: List<BackupImportMeasurement>,
     val userProfile: Map<String, String>,
-    val meta: Map<String, String>
+    val meta: Map<String, String>,
+    val medications: List<BackupMedicationRow> = emptyList(),
+    val medicationTimes: List<BackupMedicationTimeRow> = emptyList(),
+    val medicationLogs: List<BackupMedicationLogRow> = emptyList()
 )
 
 class BackupFormatException(message: String, cause: Throwable? = null) :
@@ -149,7 +152,19 @@ class BackupFileReader {
                     BackupImportDocument(
                         measurements = measurements,
                         userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
-                        meta = meta
+                        meta = meta,
+                        medications = if (version >= 4) {
+                            readMedications(workbook.getSheet(SHEET_MEDICATIONS)
+                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATIONS"))
+                        } else emptyList(),
+                        medicationTimes = if (version >= 4) {
+                            readMedicationTimes(workbook.getSheet(SHEET_MEDICATION_TIMES)
+                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_TIMES"))
+                        } else emptyList(),
+                        medicationLogs = if (version >= 4) {
+                            readMedicationLogs(workbook.getSheet(SHEET_MEDICATION_LOGS)
+                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_LOGS"))
+                        } else emptyList()
                     )
                 }
             } finally {
@@ -359,6 +374,54 @@ class BackupFileReader {
         }
     }
 
+    private fun readMedications(sheet: Sheet): List<BackupMedicationRow> {
+        val columns = sheet.headerColumns()
+        requireColumns(columns, "backup_id", "name", "dosage", "enabled", "created_at")
+        return sheet.dataRows().map { (rowIndex, row) ->
+            val id = row.text(columns, "backup_id").trim()
+            val name = row.text(columns, "name").trim()
+            val enabled = row.strictBoolean(columns, "enabled")
+            val createdAt = row.strictLong(columns, "created_at")
+            if (id.isBlank() || name.isBlank() || enabled == null || createdAt == null) {
+                throw BackupFormatException("药品第 ${rowIndex + 1} 行字段无效")
+            }
+            BackupMedicationRow(id, name, row.text(columns, "dosage").trim(), enabled, createdAt)
+        }
+    }
+
+    private fun readMedicationTimes(sheet: Sheet): List<BackupMedicationTimeRow> {
+        val columns = sheet.headerColumns()
+        requireColumns(columns, "backup_id", "medication_backup_id", "time_text")
+        return sheet.dataRows().map { (rowIndex, row) ->
+            val id = row.text(columns, "backup_id").trim()
+            val medicationId = row.text(columns, "medication_backup_id").trim()
+            val time = row.text(columns, "time_text").trim()
+            if (id.isBlank() || medicationId.isBlank() || !TIME_PATTERN.matches(time)) {
+                throw BackupFormatException("服药时间第 ${rowIndex + 1} 行字段无效")
+            }
+            BackupMedicationTimeRow(id, medicationId, time)
+        }
+    }
+
+    private fun readMedicationLogs(sheet: Sheet): List<BackupMedicationLogRow> {
+        val columns = sheet.headerColumns()
+        requireColumns(columns, "time_backup_id", "epoch_day", "taken_at")
+        return sheet.dataRows().map { (rowIndex, row) ->
+            val timeId = row.text(columns, "time_backup_id").trim()
+            val epochDay = row.strictLong(columns, "epoch_day")
+            val takenAt = row.strictLong(columns, "taken_at")
+            if (timeId.isBlank() || epochDay == null || takenAt == null) {
+                throw BackupFormatException("服药打卡第 ${rowIndex + 1} 行字段无效")
+            }
+            BackupMedicationLogRow(timeId, epochDay, takenAt)
+        }
+    }
+
+    private fun Sheet.dataRows(): List<Pair<Int, Row>> = (1..lastRowNum).mapNotNull { rowIndex ->
+        val row = getRow(rowIndex) ?: return@mapNotNull null
+        if (row.isEffectivelyBlank()) null else rowIndex to row
+    }
+
     private fun Sheet.headerColumns(): Map<String, Int> {
         val header = getRow(0) ?: throw BackupFormatException("工作表“$sheetName”缺少表头")
         if (header.lastCellNum < 0) throw BackupFormatException("工作表“$sheetName”表头为空")
@@ -396,6 +459,12 @@ class BackupFileReader {
 
     private fun Row.strictInt(columns: Map<String, Int>, name: String): Int? {
         return text(columns, name).trim().toStrictIntOrNull()
+    }
+
+    private fun Row.strictLong(columns: Map<String, Int>, name: String): Long? {
+        val value = text(columns, name).trim()
+        if (value.isBlank()) return null
+        return runCatching { BigDecimal(value).stripTrailingZeros().longValueExact() }.getOrNull()
     }
 
     private fun Row.strictBoolean(columns: Map<String, Int>, name: String): Boolean? {
@@ -437,8 +506,12 @@ class BackupFileReader {
         private const val SHEET_READINGS = "原始读数"
         private const val SHEET_PROFILE = "用户资料"
         private const val SHEET_META = "导出信息"
+        private const val SHEET_MEDICATIONS = "药品"
+        private const val SHEET_MEDICATION_TIMES = "服药时间"
+        private const val SHEET_MEDICATION_LOGS = "服药打卡"
         private const val XML_TOKEN_OVERLAP = 8
-        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3)
+        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3, 4)
+        private val TIME_PATTERN = Regex("^(?:[01]\\d|2[0-3]):[0-5]\\d$")
 
     }
 }

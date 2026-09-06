@@ -6,6 +6,7 @@ import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.db.dao.BloodPressureMeasurementDao
 import com.example.bloodpressurerecord.data.db.dao.LegacyBloodPressureRecordRow
 import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
+import com.example.bloodpressurerecord.data.db.dao.MedicationDao
 import com.example.bloodpressurerecord.data.db.dao.UserProfileDao
 import com.example.bloodpressurerecord.data.db.entity.BloodPressureMeasurementEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
@@ -26,7 +27,8 @@ class BackupExportService(
     private val userProfileDao: UserProfileDao,
     private val appSettingsStore: AppSettingsStore,
     private val clockMillis: () -> Long = System::currentTimeMillis,
-    private val zoneId: ZoneId = ZoneId.systemDefault()
+    private val zoneId: ZoneId = ZoneId.systemDefault(),
+    private val medicationDao: MedicationDao? = null
 ) {
     private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -41,6 +43,35 @@ class BackupExportService(
             legacyMeasurements = legacyMeasurements,
             legacyRecordRows = legacyRecordRows
         )
+        require(measurementRows.size <= BackupImportLimits.MAX_RECORDS) {
+            "记录共 ${measurementRows.size} 条，超过单个可恢复备份的 ${BackupImportLimits.MAX_RECORDS} 条上限，请先按时间范围拆分。"
+        }
+        val medicationsWithTimes = medicationDao?.getMedicationsWithTimes().orEmpty()
+        val medicationRows = medicationsWithTimes.map { item ->
+            BackupMedicationRow(
+                backupId = "medication:${item.medication.id}",
+                name = item.medication.name,
+                dosage = item.medication.dosage,
+                enabled = item.medication.enabled,
+                createdAt = item.medication.createdAt
+            )
+        }
+        val medicationTimeRows = medicationsWithTimes.flatMap { item ->
+            item.times.map { time ->
+                BackupMedicationTimeRow(
+                    backupId = "medication_time:${time.id}",
+                    medicationBackupId = "medication:${item.medication.id}",
+                    timeText = time.timeText
+                )
+            }
+        }
+        val timeIds = medicationTimeRows.mapTo(hashSetOf()) { it.backupId }
+        val medicationLogRows = medicationDao?.getAllLogs().orEmpty().mapNotNull { log ->
+            val timeBackupId = "medication_time:${log.timeId}"
+            timeBackupId.takeIf(timeIds::contains)?.let {
+                BackupMedicationLogRow(it, log.epochDay, log.takenAt)
+            }
+        }
         val settings = appSettingsStore.settingsFlow.first()
         val profile = userProfileDao.getProfile()
         val exportedAt = formatDateTime(clockMillis())
@@ -73,7 +104,10 @@ class BackupExportService(
                 totalRecords = measurementRows.size,
                 diagnostics = diagnostics
             ),
-            diagnostics = diagnostics
+            diagnostics = diagnostics,
+            medications = medicationRows,
+            medicationTimes = medicationTimeRows,
+            medicationLogs = medicationLogRows
         )
     }
 
@@ -251,6 +285,6 @@ class BackupExportService(
     }
 
     companion object {
-        const val EXPORT_FORMAT_VERSION = 3
+        const val EXPORT_FORMAT_VERSION = 4
     }
 }
