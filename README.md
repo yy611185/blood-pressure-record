@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册、不联网、不复杂。数据只存在你的手机里。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-1.8.2-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-1.8.3-orange)
 
 ---
 
@@ -160,6 +160,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 1.8.3 | 2026-09-07 | 草稿与备份可靠性、记录修复、血压录入对齐优化 |
 | 1.8.2 | 2026-08-21 | 口令加密备份、日历备注红点、Dock 胶囊圆角 |
 | 1.8.1 | 2026-07-27 | 备份 v3 兼容、提醒自动保存、导航沉浸 |
 | 1.8.0 | 2026-07-27 | 服药提醒、打卡、桌面小部件、日历同步 |
@@ -175,7 +176,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ---
 
-*最后更新：2026-08 · 版本 1.8.1 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
+*最后更新：2026-09 · 版本 1.8.3 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
 
 - `BP_RELEASE_STORE_FILE`：签名库路径
 - `BP_RELEASE_STORE_PASSWORD`：签名库密码
@@ -221,6 +222,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 1.8.3 | 2026-09-07 | 草稿与备份可靠性、多组记录修复、血压录入页胶囊与内容居中 |
 | 1.8.2 | 2026-08-21 | 口令加密备份、日历备注红点与双击跳转、Dock 胶囊圆角 |
 | 1.8.1 | 2026-07-27 | 数据往返修复、提醒自动保存、历史标题与系统导航沉浸 |
 | 1.8.0 | 2026-07-27 | 服药提醒、首页打卡、桌面小部件与日历同步 |
