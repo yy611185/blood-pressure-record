@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -141,7 +140,7 @@ fun MeasurementDateTimePicker(
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 330.dp
+        val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 280.dp
         val dateButton: @Composable (Modifier) -> Unit = { buttonModifier ->
             DateTimePillButton(
                 icon = Icons.Default.CalendarMonth,
@@ -164,9 +163,12 @@ fun MeasurementDateTimePicker(
                 timeButton(Modifier.fillMaxWidth())
             }
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
-                dateButton(Modifier.weight(1.25f))
-                timeButton(Modifier.weight(0.75f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
+            ) {
+                dateButton(Modifier.weight(1.8f))
+                timeButton(Modifier.weight(1f))
             }
         }
     }
@@ -188,7 +190,8 @@ private fun DateTimePillButton(
 ) {
     Row(
         modifier = modifier
-            .height(50.dp)
+            .fillMaxWidth()
+            .height(48.dp)
             .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.large)
@@ -209,7 +212,7 @@ private fun DateTimePillButton(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
-            maxLines = 2
+            maxLines = 1
         )
     }
 }
@@ -249,7 +252,7 @@ fun MeasurementReadingCard(
                 }
             }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 300.dp
+                val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 240.dp
                 val fields: @Composable (Modifier) -> Unit = { fieldModifier ->
                     NumberField(
                         value = reading.systolic,
@@ -282,7 +285,10 @@ fun MeasurementReadingCard(
                         fields(Modifier.fillMaxWidth())
                     }
                 } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
+                    ) {
                         fields(Modifier.weight(1f))
                     }
                 }
@@ -318,9 +324,15 @@ private fun NumberField(
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                letterSpacing = 0.sp
+            ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2
+            maxLines = 1,
+            textAlign = TextAlign.Center
         )
         OutlinedTextField(
             value = value,
@@ -333,7 +345,7 @@ private fun NumberField(
             ),
             isError = isError,
             singleLine = true,
-            shape = RoundedCornerShape(20.dp),
+            shape = MaterialTheme.shapes.large,
             textStyle = TextStyle(
                 fontSize = 24.sp,
                 textAlign = TextAlign.Center,
@@ -347,7 +359,7 @@ private fun NumberField(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 64.dp)
+                .height(52.dp)
                 .semantics { contentDescription = accessibleLabel },
             label = null,
             placeholder = null
