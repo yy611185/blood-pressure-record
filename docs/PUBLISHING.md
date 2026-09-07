@@ -76,8 +76,8 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 | 项 | 当前值 | 规则 |
 |---|---|---|
-| `versionCode` | 28 | 每次发布**必须递增**（整数，只增不减） |
-| `versionName` | 1.8.1 | 语义化版本，随功能/修复调整 |
+| `versionCode` | 30 | 每次发布**必须递增**（整数，只增不减） |
+| `versionName` | 1.8.3 | 语义化版本，随功能/修复调整 |
 | `applicationId` | `com.yang.bloodpressure` | **首次正式分发后永不再改**——改动会被 Android 视为全新应用，旧用户无法覆盖升级 |
 
 修改位置：`app/build.gradle.kts` → `defaultConfig`。
