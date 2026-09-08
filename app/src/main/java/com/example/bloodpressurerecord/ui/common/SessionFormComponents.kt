@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -252,7 +253,10 @@ fun MeasurementReadingCard(
                 }
             }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val stacked = LocalDensity.current.fontScale >= 1.5f || maxWidth < 240.dp
+                val fontScale = LocalDensity.current.fontScale
+                val fieldWidth = (maxWidth.value - AppSpacing.small.value * 2) / 3
+                // 七个全角字符的标题在 11sp 下约需 77dp；按 fontScale 提前换为纵向。
+                val stacked = fieldWidth < 78f * fontScale
                 val fields: @Composable (Modifier) -> Unit = { fieldModifier ->
                     NumberField(
                         value = reading.systolic,
@@ -331,7 +335,6 @@ private fun NumberField(
                 letterSpacing = 0.sp
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
             textAlign = TextAlign.Center
         )
         OutlinedTextField(
@@ -359,7 +362,7 @@ private fun NumberField(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .heightIn(min = 64.dp)
                 .semantics { contentDescription = accessibleLabel },
             label = null,
             placeholder = null

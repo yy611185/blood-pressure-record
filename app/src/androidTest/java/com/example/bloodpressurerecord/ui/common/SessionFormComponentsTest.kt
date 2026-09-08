@@ -1,14 +1,19 @@
 package com.example.bloodpressurerecord.ui.common
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
-import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -105,6 +110,53 @@ class SessionFormComponentsTest {
 
         composeRule.onNodeWithContentDescription("删除第3组读数").performClick()
         assertTrue(removed)
+    }
+
+    @Test
+    fun measurement_fields_keep_minimum_height_for_three_digit_values() {
+        composeRule.setContent {
+            BloodPressureRecordTheme {
+                MeasurementReadingCard(
+                    index = 0,
+                    reading = SessionReadingInputUi("111", "106", "186"),
+                    removable = false,
+                    onSystolicChange = {},
+                    onDiastolicChange = {},
+                    onPulseChange = {}
+                )
+            }
+        }
+
+        listOf("收缩压（高压）", "舒张压（低压）", "脉搏（选填）").forEach { label ->
+            composeRule.onNodeWithContentDescription("第 1 组$label")
+                .assertHeightIsAtLeast(64.dp)
+        }
+    }
+
+    @Test
+    fun measurement_fields_keep_minimum_height_with_large_font_scale() {
+        composeRule.setContent {
+            val currentDensity = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(currentDensity.density, fontScale = 1.5f)
+            ) {
+                BloodPressureRecordTheme {
+                    MeasurementReadingCard(
+                        index = 1,
+                        reading = SessionReadingInputUi("156", "107", "110"),
+                        removable = false,
+                        onSystolicChange = {},
+                        onDiastolicChange = {},
+                        onPulseChange = {}
+                    )
+                }
+            }
+        }
+
+        listOf("收缩压（高压）", "舒张压（低压）", "脉搏（选填）").forEach { label ->
+            composeRule.onNodeWithContentDescription("第 2 组$label")
+                .assertHeightIsAtLeast(64.dp)
+        }
     }
 
     @Test

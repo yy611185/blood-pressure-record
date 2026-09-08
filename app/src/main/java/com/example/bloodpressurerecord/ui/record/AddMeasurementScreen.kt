@@ -5,7 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,6 +50,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -146,7 +148,9 @@ fun AddMeasurementScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState())
                 .padding(padding)
-                .padding(horizontal = AppDimensions.pageHorizontalPadding),
+                .padding(horizontal = AppDimensions.pageHorizontalPadding)
+                .navigationBarsPadding()
+                .padding(bottom = AppSpacing.xLarge),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
             Text("什么时候测的？", style = MaterialTheme.typography.titleMedium)
@@ -389,27 +393,49 @@ private fun AverageResultCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    avgText,
-                    fontSize = 32.sp,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "mmHg",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-                avgPulse?.let {
-                    Spacer(Modifier.width(AppSpacing.medium))
-                    Text(
-                        "脉搏 $it 次/分",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val fontScale = LocalDensity.current.fontScale
+                // 以等效宽度判断，而不是缩小字号；大字体时会更早切为两行。
+                val stackPulse = maxWidth.value / fontScale < 270f
+                val pressureLine: @Composable () -> Unit = {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            avgText,
+                            fontSize = 32.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "mmHg",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                }
+                val pulseLine: @Composable () -> Unit = {
+                    avgPulse?.let {
+                        Text(
+                            "脉搏 $it 次/分",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                }
+                if (stackPulse && avgPulse != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)) {
+                        pressureLine()
+                        pulseLine()
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        pressureLine()
+                        if (avgPulse != null) {
+                            Spacer(Modifier.width(AppSpacing.medium))
+                            pulseLine()
+                        }
+                    }
                 }
             }
             Text(
@@ -423,7 +449,7 @@ private fun AverageResultCard(
 
 private fun averageComment(categoryLabel: String): String = when {
     categoryLabel == "正常" -> "数值很平稳，记得保持规律作息。"
-    categoryLabel == "正常高值" -> "比理想值稍高一点，注意休息，隔几分钟再看看。"
+    categoryLabel == "正常高值" -> "略高于理想值，休息几分钟后再测一\u2060次\u2060。"
     categoryLabel == "血压偏低" -> "数值偏低，如有头晕乏力请坐下休息。"
     categoryLabel.contains("高血压") -> "数值偏高，休息几分钟再复测一次会更放心。"
     else -> "已按最新读数自动计算平均值。"
