@@ -113,6 +113,24 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
+    fun commonBloodPressureRange_usesTenPointTicksAndVisibleBounds() {
+        val points = listOf(
+            record("low", millis("2026-07-22", 8), 92, 62),
+            record("high", millis("2026-07-23", 8), 123, 89)
+        ).map { it.toTrendPoint() }
+
+        val axis = TrendSeriesCalculator.calculateYAxis(
+            points = points,
+            targetSystolic = null,
+            targetDiastolic = null
+        )
+
+        assertEquals(50, axis.min)
+        assertEquals(150, axis.max)
+        assertEquals(10, axis.tickStep)
+    }
+
+    @Test
     fun tenThousandRecordsBecomeAtMostOnePointPerDayInAllRange() {
         val start = LocalDate.of(2000, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val records = (0 until 10_000).map { index ->

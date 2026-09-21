@@ -8,8 +8,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -485,7 +483,13 @@ private fun ChartReadoutBar(
     isPinned: Boolean,
     crosshairActive: Boolean
 ) {
-    Row(
+    val statusText = if (point.containsHighRiskReading) {
+        "⚠ ${point.category.toChineseCategoryLabel()}"
+    } else {
+        point.category.toChineseCategoryLabel()
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(
@@ -496,73 +500,87 @@ private fun ChartReadoutBar(
                 },
                 RoundedCornerShape(14.dp)
             )
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .horizontalScroll(rememberScrollState()),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(
-            when {
-                point.aggregation == TrendAggregation.DAILY ->
-                    "${formatReadoutDate(point.timestamp)} · ${point.recordCount}次平均"
-                else -> formatReadoutDateTime(point.timestamp)
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
-        )
-        Row(verticalAlignment = Alignment.Bottom) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                "${point.systolic}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = valueColor(point.systolic, SYS_COLOR)
-            )
-            Text(
-                " / ",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "${point.diastolic}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = valueColor(point.diastolic, DIA_COLOR)
-            )
-            Text(
-                " mmHg",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Text(
-            "脉搏 ${point.pulse?.toString() ?: "--"}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
-        )
-        Text(
-            if (point.containsHighRiskReading) {
-                "⚠ ${point.category.toChineseCategoryLabel()}"
-            } else {
-                point.category.toChineseCategoryLabel()
-            },
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = if (point.containsHighRiskReading) {
-                OUTLIER_COLOR
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-            maxLines = 1
-        )
-        if (!isPinned) {
-            Text(
-                "最新",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                when {
+                    point.aggregation == TrendAggregation.DAILY ->
+                        "${formatReadoutDate(point.timestamp)} · ${point.recordCount}次平均"
+                    else -> formatReadoutDateTime(point.timestamp)
+                },
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
+            Text(
+                statusText,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (point.containsHighRiskReading) {
+                    OUTLIER_COLOR
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 1
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "${point.systolic}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = valueColor(point.systolic, SYS_COLOR)
+                )
+                Text(
+                    " / ",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "${point.diastolic}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = valueColor(point.diastolic, DIA_COLOR)
+                )
+                Text(
+                    " mmHg",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "脉搏 ${point.pulse?.toString() ?: "--"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                if (!isPinned) {
+                    Text(
+                        "最新",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
+                }
+            }
         }
     }
 }
@@ -612,14 +630,13 @@ private fun selectNearestPoint(
     return if (minOf(sysDistance, diaDistance) <= hitRadiusPx) point else null
 }
 
-private val CHART_HEIGHT = 280.dp
+private val CHART_HEIGHT = 300.dp
 private val HIT_RADIUS = 32.dp
 // 暖阳设计 3d：收缩压陶土橙、舒张压鼠尾草绿，坐标与网格用暖中性色。
 private val SYS_COLOR = Color(0xFFC67139)
 private val DIA_COLOR = Color(0xFF7A8A5E)
 private val GRID_COLOR = Color(0xFFEEE7DB)
 private val AXIS_COLOR = Color(0xFF82796A)
-private val REFERENCE_COLOR = Color(0xFFC0B6A5)
 private val OUTLIER_COLOR = Color(0xFFB3261E)
 private const val MIN_DRAW_POINTS = 60
 private const val MAX_DRAW_POINTS = 900
@@ -732,8 +749,18 @@ private fun DrawScope.drawYAxisGrid(
     yAxis: TrendYAxis,
     textMeasurer: androidx.compose.ui.text.TextMeasurer
 ) {
-    var value = ((yAxis.min + yAxis.tickStep - 1) / yAxis.tickStep) * yAxis.tickStep
-    while (value <= yAxis.max) {
+    val values = buildList {
+        var value = yAxis.min
+        add(value)
+        while (value + yAxis.tickStep < yAxis.max) {
+            value += yAxis.tickStep
+            add(value)
+        }
+        if (last() != yAxis.max) add(yAxis.max)
+    }
+    val style = TextStyle(color = AXIS_COLOR, fontSize = 10.sp)
+
+    values.distinct().forEach { value ->
         val y = scaler.yOf(value)
         drawLine(
             color = GRID_COLOR,
@@ -742,13 +769,16 @@ private fun DrawScope.drawYAxisGrid(
             strokeWidth = 1f,
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f))
         )
+        val layout = textMeasurer.measure(value.toString(), style)
         drawText(
             textMeasurer = textMeasurer,
             text = value.toString(),
-            topLeft = Offset(8f, y - 8f),
-            style = TextStyle(color = AXIS_COLOR, fontSize = 10.sp)
+            topLeft = Offset(
+                (geometry.left - layout.size.width - 8f).coerceAtLeast(2f),
+                y - layout.size.height / 2f
+            ),
+            style = style
         )
-        value += yAxis.tickStep
     }
 }
 
@@ -758,22 +788,30 @@ private fun DrawScope.drawReferenceLines(
     yAxis: TrendYAxis,
     textMeasurer: androidx.compose.ui.text.TextMeasurer
 ) {
-    listOf(140, 90)
-        .filter { it in yAxis.min..yAxis.max }
-        .forEach { ref ->
-            val y = scaler.yOf(ref)
+    listOf(
+        Triple(140, "收缩压 140", SYS_COLOR),
+        Triple(90, "舒张压 90", DIA_COLOR)
+    )
+        .filter { (value, _, _) -> value in yAxis.min..yAxis.max }
+        .forEach { (value, label, color) ->
+            val y = scaler.yOf(value)
             drawLine(
-                color = REFERENCE_COLOR.copy(alpha = 0.75f),
+                color = color.copy(alpha = 0.25f),
                 start = Offset(geometry.left, y),
                 end = Offset(geometry.right, y),
                 strokeWidth = 1f,
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f))
             )
+            val style = TextStyle(color = color.copy(alpha = 0.72f), fontSize = 9.sp)
+            val layout = textMeasurer.measure(label, style)
             drawText(
                 textMeasurer = textMeasurer,
-                text = ref.toString(),
-                topLeft = Offset(geometry.right + 3f, y - 8f),
-                style = TextStyle(color = REFERENCE_COLOR, fontSize = 9.sp)
+                text = label,
+                topLeft = Offset(
+                    (geometry.right - layout.size.width - 5f).coerceAtLeast(geometry.left + 5f),
+                    (y - layout.size.height - 3f).coerceAtLeast(geometry.top + 2f)
+                ),
+                style = style
             )
         }
 }
