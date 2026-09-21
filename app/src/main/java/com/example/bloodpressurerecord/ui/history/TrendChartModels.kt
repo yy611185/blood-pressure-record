@@ -146,7 +146,7 @@ object TrendChartMath {
     }
 
     fun maxTickCount(canvasWidthPx: Int): Int {
-        return (canvasWidthPx / 88).coerceIn(2, 6)
+        return (canvasWidthPx / 80).coerceIn(3, 7)
     }
 
     fun nonOverlappingTickIndices(
@@ -158,17 +158,37 @@ object TrendChartMath {
     ): List<Int> {
         require(centers.size == widths.size)
         if (centers.isEmpty() || right <= left) return emptyList()
-        val selected = mutableListOf<Int>()
-        var previousRight = Float.NEGATIVE_INFINITY
-        centers.indices.forEach { index ->
+        if (centers.size == 1) return listOf(0)
+
+        fun bounds(index: Int): Pair<Float, Float> {
             val width = widths[index].coerceAtLeast(0f)
             val labelLeft = (centers[index] - width / 2f)
                 .coerceIn(left, (right - width).coerceAtLeast(left))
-            val labelRight = labelLeft + width
-            if (labelLeft >= previousRight + minimumGap) {
+            return labelLeft to (labelLeft + width)
+        }
+
+        // 首尾刻度承载“当前视野从哪里到哪里”的信息，优先保留。
+        // 中间刻度只在不会撞到首尾标签时加入，避免旧的贪心算法把最新日期丢掉。
+        val selected = mutableListOf(0)
+        var previousRight = bounds(0).second
+        val lastIndex = centers.lastIndex
+        val lastLeft = bounds(lastIndex).first
+
+        for (index in 1 until lastIndex) {
+            val (labelLeft, labelRight) = bounds(index)
+            if (labelLeft >= previousRight + minimumGap &&
+                labelRight <= lastLeft - minimumGap
+            ) {
                 selected += index
                 previousRight = labelRight
             }
+        }
+
+        if (lastLeft >= previousRight + minimumGap) {
+            selected += lastIndex
+        } else if (selected.size == 1) {
+            // 极窄视图下仍优先让用户看到范围终点。
+            selected += lastIndex
         }
         return selected
     }
@@ -188,10 +208,10 @@ object TrendChartMath {
         startMillis: Long,
         endMillis: Long,
         zoneId: ZoneId,
-        maxTicks: Int = 6
+        maxTicks: Int = 7
     ): List<TrendTimeTick> {
         if (endMillis <= startMillis) return emptyList()
-        val safeMaxTicks = maxTicks.coerceIn(2, 6)
+        val safeMaxTicks = maxTicks.coerceIn(2, 7)
         val start = Instant.ofEpochMilli(startMillis).atZone(zoneId)
         val end = Instant.ofEpochMilli(endMillis).atZone(zoneId)
         val spanDays = ChronoUnit.HOURS.between(start, end).coerceAtLeast(1) / 24.0
@@ -203,12 +223,26 @@ object TrendChartMath {
         }
     }
 
-    private fun hourlyTicks(start: ZonedDateTime, end: ZonedDateTime, maxTicks: Int): List<TrendTimeTick> {
+    private fun hourlyTicks(
+        start: ZonedDateTime,
+        end: ZonedDateTime,
+        maxTicks: Int
+    ): List<TrendTimeTick> {
         val totalHours = ChronoUnit.HOURS.between(start, end).coerceAtLeast(1)
-        val step = max(1L, ceil(totalHours / maxTicks.toDouble()).toLong())
+        val step = max(1L, ceil(totalHours / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong())
+        val startTick = TrendTimeTick(
+            timestamp = start.toInstant().toEpochMilli(),
+            primary = start.format(DateTimeFormatter.ofPattern("HH:mm")),
+            secondary = start.format(DateTimeFormatter.ofPattern("MM-dd"))
+        )
+        val endTick = TrendTimeTick(
+            timestamp = end.toInstant().toEpochMilli(),
+            primary = end.format(DateTimeFormatter.ofPattern("HH:mm")),
+            secondary = end.format(DateTimeFormatter.ofPattern("MM-dd"))
+        )
         var cursor = start.truncatedTo(ChronoUnit.HOURS).plusHours(step)
-        return buildList {
-            while (!cursor.isAfter(end)) {
+        val interior = buildList {
+            while (cursor.isBefore(end)) {
                 add(
                     TrendTimeTick(
                         timestamp = cursor.toInstant().toEpochMilli(),
@@ -219,51 +253,99 @@ object TrendChartMath {
                 cursor = cursor.plusHours(step)
             }
         }
+        return ticksWithBoundaries(startTick, endTick, interior)
     }
 
-    private fun dailyTicks(start: ZonedDateTime, end: ZonedDateTime, maxTicks: Int): List<TrendTimeTick> {
+    private fun dailyTicks(
+        start: ZonedDateTime,
+        end: ZonedDateTime,
+        maxTicks: Int
+    ): List<TrendTimeTick> {
         val totalDays = ChronoUnit.DAYS.between(start.toLocalDate(), end.toLocalDate()).coerceAtLeast(1)
-        val step = max(1L, ceil(totalDays / maxTicks.toDouble()).toLong())
+        val step = if (totalDays <= 7L) {
+            1L
+        } else {
+            max(1L, ceil(totalDays / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong())
+        }
+        val formatter = DateTimeFormatter.ofPattern("MM-dd")
+        val startTick = TrendTimeTick(
+            timestamp = start.toInstant().toEpochMilli(),
+            primary = start.format(formatter)
+        )
+        val endTick = TrendTimeTick(
+            timestamp = end.toInstant().toEpochMilli(),
+            primary = end.format(formatter)
+        )
         var cursor = start.toLocalDate().plusDays(step).atStartOfDay(start.zone)
-        return buildList {
-            while (!cursor.isAfter(end)) {
+        val interior = buildList {
+            while (cursor.isBefore(end)) {
                 add(
                     TrendTimeTick(
                         timestamp = cursor.toInstant().toEpochMilli(),
-                        primary = cursor.format(DateTimeFormatter.ofPattern("MM-dd"))
+                        primary = cursor.format(formatter)
                     )
                 )
                 cursor = cursor.plusDays(step)
             }
         }
+        return ticksWithBoundaries(startTick, endTick, interior)
     }
 
-    private fun monthlyTicks(start: ZonedDateTime, end: ZonedDateTime, maxTicks: Int): List<TrendTimeTick> {
+    private fun monthlyTicks(
+        start: ZonedDateTime,
+        end: ZonedDateTime,
+        maxTicks: Int
+    ): List<TrendTimeTick> {
         val firstMonth = start.withDayOfMonth(1).toLocalDate()
         val lastMonth = end.withDayOfMonth(1).toLocalDate()
         val months = ChronoUnit.MONTHS.between(firstMonth, lastMonth).coerceAtLeast(1)
-        val step = max(1L, ceil(months / maxTicks.toDouble()).toLong())
+        val step = max(1L, ceil(months / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong())
+        val formatter = if (start.year == end.year) {
+            DateTimeFormatter.ofPattern("MM月")
+        } else {
+            DateTimeFormatter.ofPattern("yy-MM")
+        }
+        val startTick = TrendTimeTick(
+            timestamp = start.toInstant().toEpochMilli(),
+            primary = start.format(formatter)
+        )
+        val endTick = TrendTimeTick(
+            timestamp = end.toInstant().toEpochMilli(),
+            primary = end.format(formatter)
+        )
         var cursor = firstMonth.plusMonths(step).atStartOfDay(start.zone)
-        return buildList {
-            while (!cursor.isAfter(end)) {
+        val interior = buildList {
+            while (cursor.isBefore(end)) {
                 add(
                     TrendTimeTick(
                         timestamp = cursor.toInstant().toEpochMilli(),
-                        primary = cursor.format(DateTimeFormatter.ofPattern("yyyy-MM"))
+                        primary = cursor.format(formatter)
                     )
                 )
                 cursor = cursor.plusMonths(step)
             }
         }
+        return ticksWithBoundaries(startTick, endTick, interior)
     }
 
-    private fun yearlyTicks(start: ZonedDateTime, end: ZonedDateTime, maxTicks: Int): List<TrendTimeTick> {
-        val startYear = start.year
-        val years = (end.year - startYear).coerceAtLeast(1)
-        val step = max(1, ceil(years / maxTicks.toDouble()).toInt())
-        var year = startYear + step
-        return buildList {
-            while (year <= end.year) {
+    private fun yearlyTicks(
+        start: ZonedDateTime,
+        end: ZonedDateTime,
+        maxTicks: Int
+    ): List<TrendTimeTick> {
+        val years = (end.year - start.year).coerceAtLeast(1)
+        val step = max(1, ceil(years / (maxTicks - 1).coerceAtLeast(1).toDouble()).toInt())
+        val startTick = TrendTimeTick(
+            timestamp = start.toInstant().toEpochMilli(),
+            primary = start.year.toString()
+        )
+        val endTick = TrendTimeTick(
+            timestamp = end.toInstant().toEpochMilli(),
+            primary = end.year.toString()
+        )
+        var year = start.year + step
+        val interior = buildList {
+            while (year < end.year) {
                 val cursor = LocalDate.of(year, 1, 1).atStartOfDay(start.zone)
                 add(
                     TrendTimeTick(
@@ -274,6 +356,28 @@ object TrendChartMath {
                 year += step
             }
         }
+        return ticksWithBoundaries(startTick, endTick, interior)
+    }
+
+    private fun ticksWithBoundaries(
+        start: TrendTimeTick,
+        end: TrendTimeTick,
+        interior: List<TrendTimeTick>
+    ): List<TrendTimeTick> {
+        if (start.primary == end.primary && start.secondary == end.secondary) {
+            return listOf(end)
+        }
+        return buildList {
+            add(start)
+            interior.forEach { tick ->
+                val duplicatesStart =
+                    tick.primary == start.primary && tick.secondary == start.secondary
+                val duplicatesEnd =
+                    tick.primary == end.primary && tick.secondary == end.secondary
+                if (!duplicatesStart && !duplicatesEnd) add(tick)
+            }
+            add(end)
+        }.sortedBy { it.timestamp }
     }
 
     private fun List<TrendPoint>.lowerBound(timestamp: Long): Int {
