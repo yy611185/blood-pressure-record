@@ -116,9 +116,8 @@ object TrendSeriesCalculator {
             .toInt()
             .coerceAtMost(CHART_AXIS_MAX)
 
-        // 安全边界裁剪后仍保证 (max - min) 是 tickStep 的整数倍，
-        // 这样首尾值都能成为真实可见刻度。
-        val remainder = (max - min).mod(tickStep)
+        // 尽量让上下界落在同一刻度网格；极端安全边界由绘制层额外补画首尾刻度。
+        val remainder = (max - min) % tickStep
         if (remainder != 0) {
             val expandedMax = max + (tickStep - remainder)
             if (expandedMax <= CHART_AXIS_MAX) {
