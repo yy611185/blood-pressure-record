@@ -57,8 +57,8 @@ fun AppPrimaryButton(
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
-            disabledContainerColor = WarmNeutral300,
-            disabledContentColor = WarmTextMuted
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp),
         contentPadding = PaddingValues(horizontal = AppSpacing.xLarge)

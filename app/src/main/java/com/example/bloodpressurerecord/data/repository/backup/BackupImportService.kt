@@ -299,8 +299,9 @@ class BackupImportService(
             val existingTime = dao.getTimesForMedication(medicationId)
                 .firstOrNull { it.timeText == source.timeText }
             val localTimeId = existingTime?.id ?: dao.insertTime(
-                MedicationTimeEntity(medicationId = medicationId, timeText = source.timeText)
+                MedicationTimeEntity(medicationId = medicationId, timeText = source.timeText, active = source.active)
             )
+            if (existingTime != null) dao.setTimeActive(localTimeId, source.active)
             timeIds[source.backupId] = localTimeId
         }
         preview.medicationLogs.forEach { source ->

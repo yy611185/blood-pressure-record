@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -32,12 +33,14 @@ data class MedicationTimeEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val medicationId: Long,
     /** "HH:mm"，与晨晚提醒时间的存储格式一致。 */
-    val timeText: String
+    val timeText: String,
+    /** 停用时间点保留历史关联，不再用于当前计划和提醒。 */
+    @ColumnInfo(defaultValue = "1") val active: Boolean = true
 )
 
 /**
  * 每日服药勾选历史：某个服药时间点在某一天被勾选“已服”。
- * 取消勾选即删除对应行；时间点被删除时历史级联清理。
+ * 修改计划只停用时间点，保留历史；明确删除药品或清空数据时才级联清理。
  */
 @Entity(
     tableName = "medication_intake_logs",

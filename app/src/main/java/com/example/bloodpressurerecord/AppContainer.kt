@@ -61,6 +61,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
             measurementSessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),
             medicationResync = { medicationReminderCoordinator.resyncAll() },
+            medicationAlarmResync = { medicationReminderCoordinator.resyncAlarms() },
             onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
         )
     }

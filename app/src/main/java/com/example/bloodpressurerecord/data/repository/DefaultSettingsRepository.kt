@@ -34,7 +34,9 @@ class DefaultSettingsRepository(
     /** 服药提醒重排回调（闹钟 + 日历），由 AppContainer 注入避免直接依赖。 */
     private val medicationResync: (suspend () -> Unit)? = null,
     /** 导入、清空等批量变更后刷新桌面小部件。 */
-    private val onDataChanged: (() -> Unit)? = null
+    private val onDataChanged: (() -> Unit)? = null,
+    /** 应用内提醒开关只影响闹钟，不依赖可选的日历授权。 */
+    private val medicationAlarmResync: (suspend () -> Unit)? = null
 ) : SettingsRepository {
     override fun observeSettings(): Flow<SettingsBundle> = combine(
         appSettingsStore.settingsFlow,
@@ -86,10 +88,10 @@ class DefaultSettingsRepository(
         val previous = appSettingsStore.settingsFlow.first().medicationReminderEnabled
         appSettingsStore.setMedicationReminderEnabled(enabled)
         try {
-            medicationResync?.invoke()
+            medicationAlarmResync?.invoke()
         } catch (throwable: Throwable) {
             appSettingsStore.setMedicationReminderEnabled(previous)
-            runCatching { medicationResync?.invoke() }
+            runCatching { medicationAlarmResync?.invoke() }
             throw throwable
         }
     }

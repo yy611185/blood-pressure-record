@@ -25,7 +25,7 @@ class BackupFileWriter {
                 listOf(it.backupId, it.name, it.dosage, it.enabled, it.createdAt)
             })
             writeTableSheet(workbook, "服药时间", headerStyle, MEDICATION_TIME_COLUMNS, payload.medicationTimes.map {
-                listOf(it.backupId, it.medicationBackupId, it.timeText)
+                listOf(it.backupId, it.medicationBackupId, it.timeText, it.active)
             })
             writeTableSheet(workbook, "服药打卡", headerStyle, MEDICATION_LOG_COLUMNS, payload.medicationLogs.map {
                 listOf(it.timeBackupId, it.epochDay, it.takenAt)
@@ -248,7 +248,7 @@ class BackupFileWriter {
             "pulse"
         )
         val MEDICATION_COLUMNS = listOf("backup_id", "name", "dosage", "enabled", "created_at")
-        val MEDICATION_TIME_COLUMNS = listOf("backup_id", "medication_backup_id", "time_text")
+        val MEDICATION_TIME_COLUMNS = listOf("backup_id", "medication_backup_id", "time_text", "active")
         val MEDICATION_LOG_COLUMNS = listOf("time_backup_id", "epoch_day", "taken_at")
     }
 }

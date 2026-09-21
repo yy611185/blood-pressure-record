@@ -227,7 +227,8 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 val vm: TrendViewModel = viewModel(factory = factory)
                 com.example.bloodpressurerecord.ui.history.TrendScreen(
                     viewModel = vm,
-                    onBack = null
+                    onBack = null,
+                    onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) }
                 )
             }
             composable(AppDestination.HistoryDetail.route) { backStack ->

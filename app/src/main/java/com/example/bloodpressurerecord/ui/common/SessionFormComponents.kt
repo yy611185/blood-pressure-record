@@ -261,7 +261,7 @@ fun MeasurementReadingCard(
                     NumberField(
                         value = reading.systolic,
                         onValueChange = onSystolicChange,
-                        label = "收缩压（高压）",
+                        label = "高压",
                         accessibleLabel = "第 ${index + 1} 组收缩压（高压）",
                         imeAction = ImeAction.Next,
                         modifier = fieldModifier
@@ -269,7 +269,7 @@ fun MeasurementReadingCard(
                     NumberField(
                         value = reading.diastolic,
                         onValueChange = onDiastolicChange,
-                        label = "舒张压（低压）",
+                        label = "低压",
                         accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
                         imeAction = ImeAction.Next,
                         isError = relationError,
@@ -278,7 +278,7 @@ fun MeasurementReadingCard(
                     NumberField(
                         value = reading.pulse,
                         onValueChange = onPulseChange,
-                        label = "脉搏（选填）",
+                        label = "脉搏",
                         accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
                         imeAction = ImeAction.Done,
                         modifier = fieldModifier
@@ -329,12 +329,12 @@ private fun NumberField(
         Text(
             label,
             modifier = Modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
                 letterSpacing = 0.sp
             ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center
         )
         OutlinedTextField(

@@ -86,6 +86,11 @@ fun SessionTimeSeriesDualLineChart(
 
     val density = LocalDensity.current
     val nodeBackgroundColor = MaterialTheme.colorScheme.surface
+    val systolicColor = MaterialTheme.colorScheme.primary
+    val diastolicColor = MaterialTheme.colorScheme.secondary
+    val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val referenceColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
     val zoneId = remember { ZoneId.systemDefault() }
     val textMeasurer = rememberTextMeasurer()
     val viewport = remember(series.range, series.rangeStart, series.rangeEnd) {
@@ -159,8 +164,8 @@ fun SessionTimeSeriesDualLineChart(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            LegendItem("收缩压", SYS_COLOR)
-            LegendItem("舒张压", DIA_COLOR)
+            LegendItem("收缩压（实线）", systolicColor)
+            LegendItem("舒张压（虚线）", diastolicColor, dashed = true)
         }
         Text(
             text = "数据处理方式：" +
@@ -198,13 +203,17 @@ fun SessionTimeSeriesDualLineChart(
                     endMillis = viewport.endMillis,
                     yAxis = series.yAxis
                 )
-                drawYAxisGrid(currentGeometry, scaler, series.yAxis, textMeasurer)
-                drawReferenceLines(currentGeometry, scaler, series.yAxis, textMeasurer)
+                drawYAxisGrid(
+                    currentGeometry, scaler, series.yAxis, textMeasurer, gridColor, axisColor
+                )
+                drawReferenceLines(
+                    currentGeometry, scaler, series.yAxis, textMeasurer, referenceColor
+                )
                 targetSystolic?.takeIf { it in series.yAxis.min..series.yAxis.max }?.let {
-                    drawTargetLine(scaler.yOf(it), currentGeometry, "目标收缩压 $it", SYS_COLOR, textMeasurer)
+                    drawTargetLine(scaler.yOf(it), currentGeometry, "目标收缩压 $it", systolicColor, textMeasurer)
                 }
                 targetDiastolic?.takeIf { it in series.yAxis.min..series.yAxis.max }?.let {
-                    drawTargetLine(scaler.yOf(it), currentGeometry, "目标舒张压 $it", DIA_COLOR, textMeasurer)
+                    drawTargetLine(scaler.yOf(it), currentGeometry, "目标舒张压 $it", diastolicColor, textMeasurer)
                 }
             }
 
@@ -391,7 +400,7 @@ fun SessionTimeSeriesDualLineChart(
                         val x = scaler.xOf(point.timestamp)
                         // 十字指针激活时用更醒目的实线，点按选中时用浅色细线。
                         drawLine(
-                            color = if (crosshairActive) Color(0xCC645C50) else Color(0x88A19786),
+                            color = axisColor.copy(alpha = if (crosshairActive) 0.9f else 0.55f),
                             start = Offset(x, currentGeometry.top),
                             end = Offset(x, currentGeometry.bottom),
                             strokeWidth = if (crosshairActive) 2f else 1.4f
@@ -400,10 +409,10 @@ fun SessionTimeSeriesDualLineChart(
                 }
 
                 if (showSystolic) {
-                    drawSeriesLine(renderPoints, scaler, SYS_COLOR, systolic = true, path = sysPath)
+                    drawSeriesLine(renderPoints, scaler, systolicColor, systolic = true, path = sysPath)
                 }
                 if (showDiastolic) {
-                    drawSeriesLine(renderPoints, scaler, DIA_COLOR, systolic = false, path = diaPath)
+                    drawSeriesLine(renderPoints, scaler, diastolicColor, systolic = false, path = diaPath)
                 }
 
                 val pointSpacing = (currentGeometry.right - currentGeometry.left) /
@@ -416,7 +425,7 @@ fun SessionTimeSeriesDualLineChart(
                             drawPointNode(
                                 x = x,
                                 y = scaler.yOf(point.systolic),
-                                color = valueColor(point.systolic, SYS_COLOR),
+                                color = valueColor(point.systolic, systolicColor),
                                 backgroundColor = nodeBackgroundColor,
                                 selected = isSelected
                             )
@@ -425,7 +434,7 @@ fun SessionTimeSeriesDualLineChart(
                             drawPointNode(
                                 x = x,
                                 y = scaler.yOf(point.diastolic),
-                                color = valueColor(point.diastolic, DIA_COLOR),
+                                color = valueColor(point.diastolic, diastolicColor),
                                 backgroundColor = nodeBackgroundColor,
                                 selected = isSelected
                             )
@@ -438,7 +447,7 @@ fun SessionTimeSeriesDualLineChart(
                             drawPointNode(
                                 x = scaler.xOf(point.timestamp),
                                 y = scaler.yOf(point.systolic),
-                                color = valueColor(point.systolic, SYS_COLOR),
+                                color = valueColor(point.systolic, systolicColor),
                                 backgroundColor = nodeBackgroundColor,
                                 selected = true
                             )
@@ -447,7 +456,7 @@ fun SessionTimeSeriesDualLineChart(
                             drawPointNode(
                                 x = scaler.xOf(point.timestamp),
                                 y = scaler.yOf(point.diastolic),
-                                color = valueColor(point.diastolic, DIA_COLOR),
+                                color = valueColor(point.diastolic, diastolicColor),
                                 backgroundColor = nodeBackgroundColor,
                                 selected = true
                             )
@@ -456,7 +465,7 @@ fun SessionTimeSeriesDualLineChart(
                 }
 
                 if (!isInteracting) {
-                    drawTimeAxisLabels(axisTicks, scaler, currentGeometry, textMeasurer)
+                    drawTimeAxisLabels(axisTicks, scaler, currentGeometry, textMeasurer, axisColor)
                 }
             }
 
@@ -646,10 +655,16 @@ private fun AverageSummary(
 }
 
 @Composable
-private fun LegendItem(text: String, color: Color) {
+private fun LegendItem(text: String, color: Color, dashed: Boolean = false) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(modifier = Modifier.size(8.dp)) {
-            drawCircle(color = color, radius = size.minDimension / 2f)
+        Canvas(modifier = Modifier.size(width = 18.dp, height = 8.dp)) {
+            drawLine(
+                color = color,
+                start = Offset(0f, size.height / 2f),
+                end = Offset(size.width, size.height / 2f),
+                strokeWidth = 3f,
+                pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 4f)) else null
+            )
         }
         Text(
             text,
@@ -730,13 +745,15 @@ private fun DrawScope.drawYAxisGrid(
     geometry: ChartGeometry,
     scaler: ChartScaler,
     yAxis: TrendYAxis,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    gridColor: Color,
+    axisColor: Color
 ) {
     var value = ((yAxis.min + yAxis.tickStep - 1) / yAxis.tickStep) * yAxis.tickStep
     while (value <= yAxis.max) {
         val y = scaler.yOf(value)
         drawLine(
-            color = GRID_COLOR,
+            color = gridColor,
             start = Offset(geometry.left, y),
             end = Offset(geometry.right, y),
             strokeWidth = 1f,
@@ -746,7 +763,7 @@ private fun DrawScope.drawYAxisGrid(
             textMeasurer = textMeasurer,
             text = value.toString(),
             topLeft = Offset(8f, y - 8f),
-            style = TextStyle(color = AXIS_COLOR, fontSize = 10.sp)
+            style = TextStyle(color = axisColor, fontSize = 12.sp)
         )
         value += yAxis.tickStep
     }
@@ -756,14 +773,15 @@ private fun DrawScope.drawReferenceLines(
     geometry: ChartGeometry,
     scaler: ChartScaler,
     yAxis: TrendYAxis,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    referenceColor: Color
 ) {
     listOf(140, 90)
         .filter { it in yAxis.min..yAxis.max }
         .forEach { ref ->
             val y = scaler.yOf(ref)
             drawLine(
-                color = REFERENCE_COLOR.copy(alpha = 0.75f),
+                color = referenceColor,
                 start = Offset(geometry.left, y),
                 end = Offset(geometry.right, y),
                 strokeWidth = 1f,
@@ -773,7 +791,7 @@ private fun DrawScope.drawReferenceLines(
                 textMeasurer = textMeasurer,
                 text = ref.toString(),
                 topLeft = Offset(geometry.right + 3f, y - 8f),
-                style = TextStyle(color = REFERENCE_COLOR, fontSize = 9.sp)
+                style = TextStyle(color = referenceColor, fontSize = 11.sp)
             )
         }
 }
@@ -796,7 +814,7 @@ private fun DrawScope.drawTargetLine(
         textMeasurer = textMeasurer,
         text = label,
         topLeft = Offset(geometry.left + 8f, y - 18f),
-        style = TextStyle(color = color, fontSize = 10.sp)
+        style = TextStyle(color = color, fontSize = 11.sp)
     )
 }
 
@@ -820,16 +838,24 @@ private fun DrawScope.drawSeriesLine(
             path.lineTo(offset.x, offset.y)
         }
     }
-    drawPath(path, color, style = Stroke(width = 3f))
+    drawPath(
+        path,
+        color,
+        style = Stroke(
+            width = 3f,
+            pathEffect = if (systolic) null else PathEffect.dashPathEffect(floatArrayOf(10f, 6f))
+        )
+    )
 }
 
 private fun DrawScope.drawTimeAxisLabels(
     ticks: List<TrendTimeTick>,
     scaler: ChartScaler,
     geometry: ChartGeometry,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    axisColor: Color
 ) {
-    val primaryStyle = TextStyle(color = AXIS_COLOR, fontSize = 10.sp)
+    val primaryStyle = TextStyle(color = axisColor, fontSize = 12.sp)
     val layouts = ticks.map { textMeasurer.measure(it.primary, primaryStyle) }
     val centers = ticks.map { scaler.xOf(it.timestamp) }
     val visibleIndices = TrendChartMath.nonOverlappingTickIndices(
@@ -855,7 +881,7 @@ private fun DrawScope.drawTimeAxisLabels(
             style = primaryStyle
         )
         tick.secondary?.let { secondary ->
-            val secondaryStyle = TextStyle(color = AXIS_COLOR.copy(alpha = 0.72f), fontSize = 9.sp)
+            val secondaryStyle = TextStyle(color = axisColor.copy(alpha = 0.82f), fontSize = 11.sp)
             val secondaryLayout = textMeasurer.measure(secondary, secondaryStyle)
             drawText(
                 textMeasurer = textMeasurer,

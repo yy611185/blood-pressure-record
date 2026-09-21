@@ -49,6 +49,7 @@ import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.ui.common.AppBackButton
+import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import java.time.Instant
 import java.time.ZoneId
@@ -58,7 +59,8 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun TrendScreen(
     viewModel: TrendViewModel,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    onAddMeasurement: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -87,28 +89,64 @@ fun TrendScreen(
             )
         }
         Text(
-            "横轴按真实时间排列；可用图表手势，也可用图表下方按钮逐点查看。",
+            "点选查看读数，双指缩放；下方按钮可逐点浏览。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        TrendTextSummaryCard(uiState.summary, uiState.range)
+        SegmentedControl(
+            items = TrendRange.entries,
+            selected = uiState.range,
+            label = { it.label },
+            onSelected = viewModel::setRange,
+            accent = true
+        )
 
-        TrendCard(
-            series = uiState.series,
-            metric = uiState.metric,
-            targetSystolic = uiState.targetSystolic,
-            targetDiastolic = uiState.targetDiastolic,
-            selectedRange = uiState.range,
-            onRangeChange = viewModel::setRange,
-            onMetricChange = viewModel::setMetric,
-            onPointActivated = viewModel::openPointDetails
-        )
-        AccessibleTrendControls(
-            series = uiState.series,
-            onOpenDetails = viewModel::openPointDetails
-        )
+        if (uiState.series.points.isEmpty()) {
+            TrendEmptySection(range = uiState.range, onAddMeasurement = onAddMeasurement)
+        } else {
+            TrendCard(
+                series = uiState.series,
+                metric = uiState.metric,
+                targetSystolic = uiState.targetSystolic,
+                targetDiastolic = uiState.targetDiastolic,
+                selectedRange = uiState.range,
+                onMetricChange = viewModel::setMetric,
+                onPointActivated = viewModel::openPointDetails
+            )
+            TrendTextSummaryCard(uiState.summary, uiState.range)
+            AccessibleTrendControls(
+                series = uiState.series,
+                onOpenDetails = viewModel::openPointDetails
+            )
+        }
         Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun TrendEmptySection(range: TrendRange, onAddMeasurement: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text("${range.title}暂无记录", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "记录后会在这里显示变化曲线和范围统计。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            AppPrimaryButton(
+                text = "记一次血压",
+                onClick = onAddMeasurement,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -276,7 +314,6 @@ private fun TrendCard(
     targetSystolic: Int?,
     targetDiastolic: Int?,
     selectedRange: TrendRange,
-    onRangeChange: (TrendRange) -> Unit,
     onMetricChange: (TrendMetricType) -> Unit,
     onPointActivated: (com.example.bloodpressurerecord.domain.model.TrendPoint) -> Unit
 ) {
@@ -289,13 +326,6 @@ private fun TrendCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SegmentedControl(
-                items = TrendRange.entries,
-                selected = selectedRange,
-                label = { it.label },
-                onSelected = onRangeChange,
-                accent = true
-            )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     selectedRange.title,
@@ -381,7 +411,7 @@ private fun <T> SegmentedControl(
                     )
                     .background(
                         when {
-                            isSelected && accent -> MaterialTheme.colorScheme.primary
+                            isSelected && accent -> MaterialTheme.colorScheme.primaryContainer
                             isSelected -> MaterialTheme.colorScheme.surface
                             else -> Color.Transparent
                         },
@@ -398,7 +428,7 @@ private fun <T> SegmentedControl(
                     text = label(item),
                     style = MaterialTheme.typography.labelMedium,
                     color = when {
-                        isSelected && accent -> MaterialTheme.colorScheme.onPrimary
+                        isSelected && accent -> MaterialTheme.colorScheme.onPrimaryContainer
                         isSelected -> MaterialTheme.colorScheme.onSurface
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },

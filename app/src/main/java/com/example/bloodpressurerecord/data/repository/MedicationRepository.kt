@@ -8,6 +8,7 @@ import com.example.bloodpressurerecord.data.db.entity.MedicationTimeEntity
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 
 /** 首页/小部件展示用：一条“时间点 × 药品”的打卡行。 */
 data class MedicationSlot(
@@ -52,7 +53,9 @@ class DefaultMedicationRepository(
 ) : MedicationRepository {
 
     override fun observeMedicationsWithTimes(): Flow<List<MedicationWithTimes>> =
-        dao.observeMedicationsWithTimes()
+        dao.observeMedicationsWithTimes().map { medications ->
+            medications.map { it.copy(times = it.times.filter { time -> time.active }) }
+        }
 
     override fun observeSlotsForDay(date: LocalDate): Flow<List<MedicationSlot>> =
         combine(
@@ -73,7 +76,7 @@ class DefaultMedicationRepository(
         return meds
             .filter { it.medication.enabled }
             .flatMap { med ->
-                med.times.map { time ->
+                med.times.filter { it.active }.map { time ->
                     MedicationSlot(
                         medicationId = med.medication.id,
                         timeId = time.id,

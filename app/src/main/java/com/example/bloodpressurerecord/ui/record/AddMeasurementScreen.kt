@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -42,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -59,11 +62,13 @@ import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
 import com.example.bloodpressurerecord.ui.common.MeasurementTags
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
 import com.example.bloodpressurerecord.ui.common.SessionSaveBottomBar
+import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
 
 /** 存储值保持“无症状”不变，仅展示时使用口语化文案。 */
 private fun symptomLabel(symptom: String): String =
@@ -79,6 +84,7 @@ fun AddMeasurementScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showExitDialog by remember { mutableStateOf(false) }
+    var showAdditionalDetails by rememberSaveable { mutableStateOf(false) }
     val requestBack = {
         if (state.isDirty) showExitDialog = true else onBack()
     }
@@ -140,6 +146,15 @@ fun AddMeasurementScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AppTopBar(title = "记一次血压", onBack = requestBack, hideOnScroll = topBarScroll)
+        },
+        bottomBar = {
+            SessionSaveBottomBar(
+                canSave = state.canSave,
+                disabledReason = state.saveDisabledReason,
+                isSaving = state.isSaving,
+                buttonText = "保存这次记录",
+                onSave = viewModel::onSaveClicked
+            )
         }
     ) { padding ->
         Column(
@@ -241,37 +256,50 @@ fun AddMeasurementScreen(
                 }
             }
 
-            Text("有没有可能影响血压的情况？", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "比如刚喝了咖啡、没睡好，记下来方便对照数值。（可多选）",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
+            TextButton(
+                onClick = { showAdditionalDetails = !showAdditionalDetails },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                MeasurementTags.factors.forEach { factor ->
-                    WarmChip(
-                        text = factor,
-                        selected = factor in state.selectedFactors,
-                        onClick = { viewModel.toggleFactor(factor) }
-                    )
-                }
+                Icon(
+                    if (showAdditionalDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null
+                )
+                Spacer(Modifier.width(AppSpacing.xSmall))
+                Text(if (showAdditionalDetails) "收起补充信息" else "补充影响因素和备注（选填）")
             }
-            OutlinedTextField(
-                value = state.note,
-                onValueChange = viewModel::updateNote,
-                placeholder = {
-                    Text(
-                        "想补充点什么？比如「早饭前测的」（选填）",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                minLines = 3
-            )
+            if (showAdditionalDetails || state.selectedFactors.isNotEmpty() || state.note.isNotBlank()) {
+                Text("有没有可能影响血压的情况？", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "比如刚喝了咖啡、没睡好，记下来方便对照数值。（可多选）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
+                ) {
+                    MeasurementTags.factors.forEach { factor ->
+                        WarmChip(
+                            text = factor,
+                            selected = factor in state.selectedFactors,
+                            onClick = { viewModel.toggleFactor(factor) }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = state.note,
+                    onValueChange = viewModel::updateNote,
+                    placeholder = {
+                        Text(
+                            "想补充点什么？比如「早饭前测的」（选填）",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    minLines = 3
+                )
+            }
             if (state.formMessage.isNotBlank() && !state.isSaving && !state.saved) {
                 Text(
                     state.formMessage,
@@ -283,14 +311,6 @@ fun AddMeasurementScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-            SessionSaveBottomBar(
-                canSave = state.canSave,
-                disabledReason = state.saveDisabledReason,
-                isSaving = state.isSaving,
-                buttonText = "保存这次记录",
-                onSave = viewModel::onSaveClicked,
-                embedded = true
-            )
         }
     }
 }
@@ -315,8 +335,8 @@ private fun WarmChip(
         colors = FilterChipDefaults.filterChipColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             labelColor = MaterialTheme.colorScheme.onSurface,
-            selectedContainerColor = MaterialTheme.colorScheme.primary,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
         ),
         border = if (selected) {
             null
@@ -378,10 +398,16 @@ private fun AverageResultCard(
     avgPulse: Int?,
     categoryLabel: String
 ) {
+    val visualStatus = when (categoryLabel) {
+        "正常" -> BloodPressureVisualStatus.NORMAL
+        "血压偏低" -> BloodPressureVisualStatus.LOW
+        "正常高值" -> BloodPressureVisualStatus.ELEVATED
+        else -> BloodPressureVisualStatus.HIGH
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
@@ -391,7 +417,7 @@ private fun AverageResultCard(
             Text(
                 groupLabel,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val fontScale = LocalDensity.current.fontScale
@@ -402,13 +428,13 @@ private fun AverageResultCard(
                         Text(
                             avgText,
                             fontSize = 32.sp,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "mmHg",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 4.dp)
                         )
                     }
@@ -418,7 +444,7 @@ private fun AverageResultCard(
                         Text(
                             "脉搏 $it 次/分",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 4.dp)
                         )
                     }
@@ -438,10 +464,15 @@ private fun AverageResultCard(
                     }
                 }
             }
+            StatusChip(
+                text = categoryLabel,
+                isAbnormal = visualStatus != BloodPressureVisualStatus.NORMAL,
+                status = visualStatus
+            )
             Text(
                 averageComment(categoryLabel),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

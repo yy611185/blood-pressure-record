@@ -55,7 +55,8 @@ data class BackupMedicationRow(
 data class BackupMedicationTimeRow(
     val backupId: String,
     val medicationBackupId: String,
-    val timeText: String
+    val timeText: String,
+    val active: Boolean = true
 )
 
 data class BackupMedicationLogRow(

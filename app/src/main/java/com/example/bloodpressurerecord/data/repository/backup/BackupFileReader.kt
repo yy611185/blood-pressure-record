@@ -159,7 +159,7 @@ class BackupFileReader {
                         } else emptyList(),
                         medicationTimes = if (version >= 4) {
                             readMedicationTimes(workbook.getSheet(SHEET_MEDICATION_TIMES)
-                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_TIMES"))
+                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_TIMES"), version)
                         } else emptyList(),
                         medicationLogs = if (version >= 4) {
                             readMedicationLogs(workbook.getSheet(SHEET_MEDICATION_LOGS)
@@ -389,9 +389,10 @@ class BackupFileReader {
         }
     }
 
-    private fun readMedicationTimes(sheet: Sheet): List<BackupMedicationTimeRow> {
+    private fun readMedicationTimes(sheet: Sheet, version: Int): List<BackupMedicationTimeRow> {
         val columns = sheet.headerColumns()
         requireColumns(columns, "backup_id", "medication_backup_id", "time_text")
+        if (version >= 5) requireColumns(columns, "active")
         return sheet.dataRows().map { (rowIndex, row) ->
             val id = row.text(columns, "backup_id").trim()
             val medicationId = row.text(columns, "medication_backup_id").trim()
@@ -399,7 +400,9 @@ class BackupFileReader {
             if (id.isBlank() || medicationId.isBlank() || !TIME_PATTERN.matches(time)) {
                 throw BackupFormatException("服药时间第 ${rowIndex + 1} 行字段无效")
             }
-            BackupMedicationTimeRow(id, medicationId, time)
+            val active = if (version >= 5) row.strictBoolean(columns, "active")
+                ?: throw BackupFormatException("服药时间第 ${rowIndex + 1} 行启用状态无效") else true
+            BackupMedicationTimeRow(id, medicationId, time, active)
         }
     }
 
@@ -510,7 +513,7 @@ class BackupFileReader {
         private const val SHEET_MEDICATION_TIMES = "服药时间"
         private const val SHEET_MEDICATION_LOGS = "服药打卡"
         private const val XML_TOKEN_OVERLAP = 8
-        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3, 4)
+        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3, 4, 5)
         private val TIME_PATTERN = Regex("^(?:[01]\\d|2[0-3]):[0-5]\\d$")
 
     }

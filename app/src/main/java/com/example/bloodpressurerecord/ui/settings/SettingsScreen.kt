@@ -73,8 +73,8 @@ fun SettingsScreen(
                 onClick = onOpenProfile
             )
             SettingListItem(
-                title = "提醒设置",
-                subtitle = "晨间/晚间测量提醒和提醒时间",
+                title = "测量与用药提醒",
+                subtitle = "测量提醒、药品管理、服药时间和日历同步",
                 icon = Icons.Outlined.Notifications,
                 warm = false,
                 onClick = onOpenReminder
@@ -94,7 +94,7 @@ fun SettingsScreen(
                 onClick = onOpenDataManagement
             )
             SettingListItem(
-                title = "应用说明与更新说明",
+                title = "关于与帮助",
                 subtitle = "查看应用功能、使用边界和版本变化",
                 icon = Icons.Outlined.Info,
                 warm = true,
@@ -130,8 +130,16 @@ fun SettingListItem(
             // 橙绿交替的 46dp 圆形图标底座
             RoundIconBadge(
                 icon = icon,
-                containerColor = if (warm) Terracotta200 else Sage200,
-                contentColor = if (warm) Terracotta800 else Sage800
+                containerColor = if (warm) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.secondaryContainer
+                },
+                contentColor = if (warm) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                }
             )
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -149,7 +157,7 @@ fun SettingListItem(
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = WarmTextFaint,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
         }
