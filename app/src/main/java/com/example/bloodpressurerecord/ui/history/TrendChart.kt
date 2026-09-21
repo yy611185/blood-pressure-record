@@ -637,7 +637,6 @@ private val SYS_COLOR = Color(0xFFC67139)
 private val DIA_COLOR = Color(0xFF7A8A5E)
 private val GRID_COLOR = Color(0xFFEEE7DB)
 private val AXIS_COLOR = Color(0xFF82796A)
-private val REFERENCE_COLOR = Color(0xFFC0B6A5)
 private val OUTLIER_COLOR = Color(0xFFB3261E)
 private const val MIN_DRAW_POINTS = 60
 private const val MAX_DRAW_POINTS = 900
