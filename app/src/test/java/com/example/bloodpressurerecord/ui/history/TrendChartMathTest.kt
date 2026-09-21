@@ -188,6 +188,19 @@ class TrendChartMathTest {
         assertEquals(listOf(0, 2, 4), selected)
     }
 
+    @Test
+    fun tickCollisionFilter_keepsOnlyEndWhenBoundaryLabelsCannotFitTogether() {
+        val selected = TrendChartMath.nonOverlappingTickIndices(
+            centers = listOf(0f, 40f, 80f),
+            widths = listOf(48f, 48f, 48f),
+            left = 0f,
+            right = 80f,
+            minimumGap = 8f
+        )
+
+        assertEquals(listOf(2), selected)
+    }
+
     private fun point(
         timestamp: Long,
         id: String = "p-$timestamp",
