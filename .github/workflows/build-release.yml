@@ -23,6 +23,10 @@ jobs:
           distribution: temurin
           cache: gradle
       - uses: android-actions/setup-android@v3
+        with:
+          # setup-android@v3 defaults to installing the legacy "tools" package,
+          # which is no longer published and makes the action fail before Gradle runs.
+          packages: ""
       - name: Install Android 16 SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - name: Validate Gradle wrapper
@@ -63,6 +67,10 @@ jobs:
           distribution: temurin
           cache: gradle
       - uses: android-actions/setup-android@v3
+        with:
+          # setup-android@v3 defaults to installing the legacy "tools" package,
+          # which is no longer published and makes the action fail before Gradle runs.
+          packages: ""
       - name: Install Android 16 SDK
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - name: Resolve and verify release version

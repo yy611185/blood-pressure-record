@@ -90,6 +90,7 @@ object TrendSeriesCalculator {
                 add(point.systolic.coerceIn(40, CHART_SAFE_MAX))
                 add(point.diastolic.coerceIn(20, 200))
             }
+            // 参考阈值也参与默认视野，避免常见血压区间看不到 90 / 140 的参考线。
             add(90)
             add(140)
             targetSystolic?.takeIf { it in 40..CHART_SAFE_MAX }?.let(::add)
@@ -97,14 +98,38 @@ object TrendSeriesCalculator {
         }
         val rawMin = values.minOrNull() ?: 80
         val rawMax = values.maxOrNull() ?: 160
-        val min = (floor((rawMin - 10) / 10.0) * 10).toInt().coerceAtLeast(20)
-        val max = (ceil((rawMax + 10) / 10.0) * 10).toInt().coerceAtMost(CHART_AXIS_MAX)
-        val span = (max - min).coerceAtLeast(20)
+
+        // 先根据数据跨度选择刻度，再把上下界吸附到同一刻度网格。
+        // 旧实现先按 10 取整、后决定 20/40 步长，会得到 50–150 + 20 这种
+        // “边界不落在刻度上”的组合，最终只画出 60–140，视觉上像数据被裁掉。
+        val paddedSpan = (rawMax - rawMin + 20).coerceAtLeast(20)
         val tickStep = when {
-            span <= 70 -> 10
-            span <= 140 -> 20
+            paddedSpan <= 120 -> 10
+            paddedSpan <= 220 -> 20
             else -> 40
         }
+
+        var min = (floor((rawMin - 10) / tickStep.toDouble()) * tickStep)
+            .toInt()
+            .coerceAtLeast(20)
+        var max = (ceil((rawMax + 10) / tickStep.toDouble()) * tickStep)
+            .toInt()
+            .coerceAtMost(CHART_AXIS_MAX)
+
+        // 尽量让上下界落在同一刻度网格；极端安全边界由绘制层额外补画首尾刻度。
+        val remainder = (max - min) % tickStep
+        if (remainder != 0) {
+            val expandedMax = max + (tickStep - remainder)
+            if (expandedMax <= CHART_AXIS_MAX) {
+                max = expandedMax
+            } else {
+                min = (min - remainder).coerceAtLeast(20)
+            }
+        }
+        if (max <= min) {
+            max = (min + tickStep).coerceAtMost(CHART_AXIS_MAX)
+        }
+
         return TrendYAxis(min = min, max = max, tickStep = tickStep)
     }
 

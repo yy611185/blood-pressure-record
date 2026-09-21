@@ -133,9 +133,46 @@ class TrendChartMathTest {
 
     @Test
     fun tickCount_isDynamicAndBoundedByCanvasWidth() {
-        assertEquals(2, TrendChartMath.maxTickCount(120))
-        assertEquals(4, TrendChartMath.maxTickCount(400))
-        assertEquals(6, TrendChartMath.maxTickCount(2_000))
+        assertEquals(3, TrendChartMath.maxTickCount(120))
+        assertEquals(5, TrendChartMath.maxTickCount(400))
+        assertEquals(7, TrendChartMath.maxTickCount(2_000))
+    }
+
+    @Test
+    fun thirtyDayTicks_keepViewportStartAndEndVisible() {
+        val zone = ZoneId.of("Asia/Taipei")
+        val start = java.time.LocalDate.of(2026, 8, 23)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        val end = java.time.LocalDate.of(2026, 9, 21)
+            .atTime(10, 0)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
+
+        val ticks = TrendChartMath.timeTicks(start, end, zone, maxTicks = 7)
+
+        assertEquals("08-23", ticks.first().primary)
+        assertEquals("09-21", ticks.last().primary)
+    }
+
+    @Test
+    fun monthlyTicks_useCompactLabelsAndKeepEveryMonthWhenTheyFit() {
+        val zone = ZoneId.of("Asia/Taipei")
+        val start = java.time.LocalDate.of(2026, 5, 1)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        val end = java.time.LocalDate.of(2026, 9, 21)
+            .atTime(10, 0)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
+
+        val ticks = TrendChartMath.timeTicks(start, end, zone, maxTicks = 7)
+
+        assertEquals(listOf("05月", "06月", "07月", "08月", "09月"), ticks.map { it.primary })
     }
 
     @Test

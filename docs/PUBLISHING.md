@@ -1,7 +1,7 @@
 # 发布清单（Publishing Guide）
 
 > 面向**维护者**（作者本人）的发布操作手册。从构建到上架，每个步骤按顺序执行。
-> 最后更新：2026-08 · 适用版本：1.8.x
+> 最后更新：2026-09 · 适用版本：1.8.x
 
 ---
 
@@ -24,7 +24,7 @@
 
 ### 1.1 前置条件
 
-- Android Studio Koala+ / JDK 17 / Android SDK 35 / Gradle 8.7
+- Android Studio Koala+ / JDK 17 / Android SDK 36 / Gradle 8.11.1
 - 本机已配置 release 签名环境变量（见 1.2）
 - 干净的 git 工作区（`git status` 无未提交改动）
 
@@ -76,8 +76,8 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 | 项 | 当前值 | 规则 |
 |---|---|---|
-| `versionCode` | 30 | 每次发布**必须递增**（整数，只增不减） |
-| `versionName` | 1.8.3 | 语义化版本，随功能/修复调整 |
+| `versionCode` | 31 | 每次发布**必须递增**（整数，只增不减） |
+| `versionName` | 1.8.4 | 语义化版本，随功能/修复调整 |
 | `applicationId` | `com.yang.bloodpressure` | **首次正式分发后永不再改**——改动会被 Android 视为全新应用，旧用户无法覆盖升级 |
 
 修改位置：`app/build.gradle.kts` → `defaultConfig`。
