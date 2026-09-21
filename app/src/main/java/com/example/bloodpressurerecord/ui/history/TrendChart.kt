@@ -45,6 +45,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -89,7 +90,7 @@ fun SessionTimeSeriesDualLineChart(
     val systolicColor = MaterialTheme.colorScheme.primary
     val diastolicColor = MaterialTheme.colorScheme.secondary
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
     val referenceColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
     val zoneId = remember { ZoneId.systemDefault() }
     val textMeasurer = rememberTextMeasurer()
@@ -123,16 +124,30 @@ fun SessionTimeSeriesDualLineChart(
     val renderPoints = remember(visiblePoints, maxDrawPoints) {
         TrendChartMath.sampleShared(visiblePoints, maxDrawPoints)
     }
-    val maxTicks = remember(canvasSize.width) {
-        TrendChartMath.maxTickCount(canvasSize.width)
+    val maxTicks = remember(canvasSize.width, density) {
+        TrendChartMath.maxTickCount((canvasSize.width / density.density - 74f).roundToInt())
     }
-    val axisTicks = remember(viewportStart, viewportEnd, canvasSize.width, zoneId) {
+    val axisTicks = remember(viewportStart, viewportEnd, maxTicks, zoneId) {
         TrendChartMath.timeTicks(
             startMillis = viewportStart,
             endMillis = viewportEnd,
             zoneId = zoneId,
             maxTicks = maxTicks
         )
+    }
+    // 日期与时间作为一个完整文本块测量，行高、底部留白和横向避让使用同一尺寸。
+    val axisLabelStyle = TextStyle(color = axisColor, fontSize = 12.sp, lineHeight = 16.sp)
+    val axisLabelLayouts = axisTicks.map { tick ->
+        textMeasurer.measure(
+            text = listOfNotNull(tick.primary, tick.secondary).joinToString("\n"),
+            style = axisLabelStyle,
+            softWrap = false
+        )
+    }
+    val axisBottomPadding = with(density) {
+        // 始终预留两行，缩放切换小时/日期刻度时绘图区和手势坐标保持不变。
+        textMeasurer.measure("00:00\n00-00", axisLabelStyle, softWrap = false).size.height +
+            16.dp.toPx()
     }
     // 读数栏内容：指针/点按选中的点，否则回落到可见范围内最新一点。
     val readoutPoint = activePoint ?: visiblePoints.lastOrNull() ?: points.last()
@@ -164,8 +179,8 @@ fun SessionTimeSeriesDualLineChart(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            LegendItem("收缩压（实线）", systolicColor)
-            LegendItem("舒张压（虚线）", diastolicColor, dashed = true)
+            LegendItem("收缩压", systolicColor)
+            LegendItem("舒张压", diastolicColor)
         }
         Text(
             text = "数据处理方式：" +
@@ -195,7 +210,8 @@ fun SessionTimeSeriesDualLineChart(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val currentGeometry = ChartGeometry.create(
                     size = IntSize(size.width.roundToInt(), size.height.roundToInt()),
-                    density = density.density
+                    density = density.density,
+                    bottomPadding = axisBottomPadding
                 )
                 val scaler = ChartScaler(
                     geometry = currentGeometry,
@@ -207,7 +223,7 @@ fun SessionTimeSeriesDualLineChart(
                     currentGeometry, scaler, series.yAxis, textMeasurer, gridColor, axisColor
                 )
                 drawReferenceLines(
-                    currentGeometry, scaler, series.yAxis, textMeasurer, referenceColor
+                    currentGeometry, scaler, series.yAxis, referenceColor
                 )
                 targetSystolic?.takeIf { it in series.yAxis.min..series.yAxis.max }?.let {
                     drawTargetLine(scaler.yOf(it), currentGeometry, "目标收缩压 $it", systolicColor, textMeasurer)
@@ -220,14 +236,14 @@ fun SessionTimeSeriesDualLineChart(
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(points, series.range) {
+                    .pointerInput(points, series.range, density, axisBottomPadding) {
                         var lastTapAt = 0L
                         var lastTapPosition = Offset(-10_000f, -10_000f)
 
                         // 按 x 坐标把指针吸附到最近的可见数据点（从完整点集 + 实时
                         // viewport 计算，避免捕获过期的可见点列表）。
                         fun snapCrosshairTo(x: Float) {
-                            val currentGeometry = ChartGeometry.create(size, density.density)
+                            val currentGeometry = ChartGeometry.create(size, density.density, axisBottomPadding)
                             val clampedX = x.coerceIn(currentGeometry.left, currentGeometry.right)
                             val time = TrendChartMath.timeAtX(
                                 x = clampedX,
@@ -249,7 +265,7 @@ fun SessionTimeSeriesDualLineChart(
                             zoom: Float,
                             pan: Offset
                         ) {
-                            val currentGeometry = ChartGeometry.create(size, density.density)
+                            val currentGeometry = ChartGeometry.create(size, density.density, axisBottomPadding)
                             val centroid = event.calculateCentroid(useCurrent = true)
                             val focusMillis = TrendChartMath.timeAtX(
                                 x = centroid.x,
@@ -365,7 +381,7 @@ fun SessionTimeSeriesDualLineChart(
                                                 viewport.startMillis,
                                                 viewport.endMillis
                                             ),
-                                            geometry = ChartGeometry.create(size, density.density),
+                                            geometry = ChartGeometry.create(size, density.density, axisBottomPadding),
                                             viewport = viewport,
                                             yAxis = series.yAxis,
                                             showSystolic = showSystolic,
@@ -384,7 +400,8 @@ fun SessionTimeSeriesDualLineChart(
             ) {
                 val currentGeometry = ChartGeometry.create(
                     size = IntSize(size.width.roundToInt(), size.height.roundToInt()),
-                    density = density.density
+                    density = density.density,
+                    bottomPadding = axisBottomPadding
                 )
                 val scaler = ChartScaler(
                     geometry = currentGeometry,
@@ -465,7 +482,7 @@ fun SessionTimeSeriesDualLineChart(
                 }
 
                 if (!isInteracting) {
-                    drawTimeAxisLabels(axisTicks, scaler, currentGeometry, textMeasurer, axisColor)
+                    drawTimeAxisLabels(axisTicks, axisLabelLayouts, scaler, currentGeometry)
                 }
             }
 
@@ -655,15 +672,14 @@ private fun AverageSummary(
 }
 
 @Composable
-private fun LegendItem(text: String, color: Color, dashed: Boolean = false) {
+private fun LegendItem(text: String, color: Color) {
     Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         Canvas(modifier = Modifier.size(width = 18.dp, height = 8.dp)) {
             drawLine(
                 color = color,
                 start = Offset(0f, size.height / 2f),
                 end = Offset(size.width, size.height / 2f),
-                strokeWidth = 3f,
-                pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 4f)) else null
+                strokeWidth = 1.5.dp.toPx()
             )
         }
         Text(
@@ -702,7 +718,7 @@ private data class ChartGeometry(
     val bottom: Float
 ) {
     companion object {
-        fun create(size: IntSize, density: Float): ChartGeometry {
+        fun create(size: IntSize, density: Float, bottomPadding: Float): ChartGeometry {
             val width = size.width.toFloat().coerceAtLeast(1f)
             val height = size.height.toFloat().coerceAtLeast(1f)
             return ChartGeometry(
@@ -711,7 +727,7 @@ private data class ChartGeometry(
                 left = 50f * density,
                 right = (width - 24f * density).coerceAtLeast(51f * density),
                 top = 18f * density,
-                bottom = (height - 44f * density).coerceAtLeast(19f * density)
+                bottom = (height - bottomPadding).coerceAtLeast(19f * density)
             )
         }
     }
@@ -756,14 +772,19 @@ private fun DrawScope.drawYAxisGrid(
             color = gridColor,
             start = Offset(geometry.left, y),
             end = Offset(geometry.right, y),
-            strokeWidth = 1f,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f))
+            strokeWidth = 1.dp.toPx()
+        )
+        val label = textMeasurer.measure(
+            value.toString(),
+            TextStyle(color = axisColor, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            softWrap = false
         )
         drawText(
-            textMeasurer = textMeasurer,
-            text = value.toString(),
-            topLeft = Offset(8f, y - 8f),
-            style = TextStyle(color = axisColor, fontSize = 12.sp)
+            textLayoutResult = label,
+            topLeft = Offset(
+                (geometry.left - 8.dp.toPx() - label.size.width).coerceAtLeast(0f),
+                y - label.size.height / 2f
+            )
         )
         value += yAxis.tickStep
     }
@@ -773,7 +794,6 @@ private fun DrawScope.drawReferenceLines(
     geometry: ChartGeometry,
     scaler: ChartScaler,
     yAxis: TrendYAxis,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer,
     referenceColor: Color
 ) {
     listOf(140, 90)
@@ -784,14 +804,8 @@ private fun DrawScope.drawReferenceLines(
                 color = referenceColor,
                 start = Offset(geometry.left, y),
                 end = Offset(geometry.right, y),
-                strokeWidth = 1f,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f))
-            )
-            drawText(
-                textMeasurer = textMeasurer,
-                text = ref.toString(),
-                topLeft = Offset(geometry.right + 3f, y - 8f),
-                style = TextStyle(color = referenceColor, fontSize = 11.sp)
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
             )
         }
 }
@@ -841,32 +855,25 @@ private fun DrawScope.drawSeriesLine(
     drawPath(
         path,
         color,
-        style = Stroke(
-            width = 3f,
-            pathEffect = if (systolic) null else PathEffect.dashPathEffect(floatArrayOf(10f, 6f))
-        )
+        style = Stroke(width = 1.5.dp.toPx())
     )
 }
 
 private fun DrawScope.drawTimeAxisLabels(
     ticks: List<TrendTimeTick>,
+    layouts: List<TextLayoutResult>,
     scaler: ChartScaler,
-    geometry: ChartGeometry,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer,
-    axisColor: Color
+    geometry: ChartGeometry
 ) {
-    val primaryStyle = TextStyle(color = axisColor, fontSize = 12.sp)
-    val layouts = ticks.map { textMeasurer.measure(it.primary, primaryStyle) }
     val centers = ticks.map { scaler.xOf(it.timestamp) }
     val visibleIndices = TrendChartMath.nonOverlappingTickIndices(
         centers = centers,
         widths = layouts.map { it.size.width.toFloat() },
         left = geometry.left,
         right = geometry.right,
-        minimumGap = 8f
+        minimumGap = 8.dp.toPx()
     )
     visibleIndices.forEach { index ->
-        val tick = ticks[index]
         val primaryLayout = layouts[index]
         val centerX = centers[index]
         val labelX = (centerX - primaryLayout.size.width / 2f)
@@ -875,27 +882,9 @@ private fun DrawScope.drawTimeAxisLabels(
                 (geometry.right - primaryLayout.size.width).coerceAtLeast(geometry.left)
             )
         drawText(
-            textMeasurer = textMeasurer,
-            text = tick.primary,
-            topLeft = Offset(labelX, geometry.bottom + 10f),
-            style = primaryStyle
+            textLayoutResult = primaryLayout,
+            topLeft = Offset(labelX, geometry.bottom + 8.dp.toPx())
         )
-        tick.secondary?.let { secondary ->
-            val secondaryStyle = TextStyle(color = axisColor.copy(alpha = 0.82f), fontSize = 11.sp)
-            val secondaryLayout = textMeasurer.measure(secondary, secondaryStyle)
-            drawText(
-                textMeasurer = textMeasurer,
-                text = secondary,
-                topLeft = Offset(
-                    (centerX - secondaryLayout.size.width / 2f).coerceIn(
-                        geometry.left,
-                        (geometry.right - secondaryLayout.size.width).coerceAtLeast(geometry.left)
-                    ),
-                    geometry.bottom + 23f
-                ),
-                style = secondaryStyle
-            )
-        }
     }
 }
 

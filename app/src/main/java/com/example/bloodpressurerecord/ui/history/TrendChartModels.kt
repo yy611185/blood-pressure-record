@@ -145,8 +145,8 @@ object TrendChartMath {
         return kept.distinct().sorted().map(points::get)
     }
 
-    fun maxTickCount(canvasWidthPx: Int): Int {
-        return (canvasWidthPx / 80).coerceIn(3, 7)
+    fun maxTickCount(plotWidthDp: Int): Int {
+        return (plotWidthDp / 80).coerceIn(3, 7)
     }
 
     fun nonOverlappingTickIndices(
@@ -187,8 +187,8 @@ object TrendChartMath {
         if (lastLeft >= previousRight + minimumGap) {
             selected += lastIndex
         } else if (selected.size == 1) {
-            // 极窄视图下仍优先让用户看到范围终点。
-            selected += lastIndex
+            // 极窄视图只保留终点，不能为了首尾同时显示而允许文字重叠。
+            return listOf(lastIndex)
         }
         return selected
     }
