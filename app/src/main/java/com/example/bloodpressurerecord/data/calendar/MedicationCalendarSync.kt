@@ -8,10 +8,12 @@ import android.content.pm.PackageManager
 import android.provider.CalendarContract
 import androidx.core.content.ContextCompat
 import com.example.bloodpressurerecord.data.repository.MedicationSlot
+import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -28,6 +30,7 @@ class MedicationCalendarSync(
     private val zoneId: ZoneId = ZoneId.systemDefault()
 ) {
     private val rebuildMutex = Mutex()
+    private val settingsStore = AppSettingsStore(context)
 
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
@@ -44,14 +47,21 @@ class MedicationCalendarSync(
     suspend fun rebuild(slots: List<MedicationSlot>, enabled: Boolean): Int? =
         rebuildMutex.withLock {
             withContext(Dispatchers.IO) {
-            if (!hasPermission()) return@withContext null
+            if (!hasPermission()) {
+                // 从未创建日程的用户不需要为关闭的可选功能授权。
+                return@withContext if (!enabled && !settingsStore.calendarEventsMayExist.first()) 0 else null
+            }
             val existingEventIds = findOurEventIds()
+            if (existingEventIds.isNotEmpty()) settingsStore.setCalendarEventsMayExist(true)
             if (!enabled) {
                 existingEventIds.forEach(::deleteEvent)
+                settingsStore.setCalendarEventsMayExist(false)
                 return@withContext 0
             }
             // 先确认目标日历可写，再改动旧日程；没有可写日历时保留现状。
             val calendarId = findWritableCalendarId() ?: return@withContext null
+            // 先记状态再创建，进程退出或创建失败时仍能重试清理。
+            if (slots.isNotEmpty()) settingsStore.setCalendarEventsMayExist(true)
             var created = 0
             val createdEventIds = mutableListOf<Long>()
             try {
@@ -61,6 +71,7 @@ class MedicationCalendarSync(
                 }
                 // 新集合完整创建后才移除旧集合，创建阶段失败不会丢失原有提醒。
                 existingEventIds.forEach(::deleteEvent)
+                settingsStore.setCalendarEventsMayExist(createdEventIds.isNotEmpty())
             } catch (throwable: Throwable) {
                 // 只回滚本轮创建的事件，避免把其他合法的本应用日程一并删除。
                 createdEventIds.asReversed().forEach { eventId ->

@@ -57,6 +57,9 @@ interface MedicationDao {
     @Insert
     suspend fun insertTime(time: MedicationTimeEntity): Long
 
+    @Query("UPDATE medication_times SET active = :active WHERE id = :id")
+    suspend fun setTimeActive(id: Long, active: Boolean)
+
     @Query("DELETE FROM medication_times WHERE medicationId = :medicationId")
     suspend fun deleteTimesForMedication(medicationId: Long)
 
@@ -100,8 +103,8 @@ interface MedicationDao {
     }
 
     /**
-     * 按时间文本做差量更新。未改变的 MedicationTimeEntity 会保留原 id，
-     * 因而其既有服药打卡历史不会再被级联删除。
+     * 按时间文本切换计划；移除的时间点只停用，保留其全部历史打卡。
+     * 再次启用同一时间沿用原 id，避免重复计划及同日打卡。
      */
     @Transaction
     suspend fun updateMedicationWithTimes(
@@ -112,10 +115,10 @@ interface MedicationDao {
         val desired = timeTexts.toSet()
         val existing = getTimesForMedication(medication.id)
         val keptTexts = hashSetOf<String>()
-        val idsToDelete = existing.mapNotNull { time ->
-            if (time.timeText in desired && keptTexts.add(time.timeText)) null else time.id
+        existing.sortedByDescending { it.active }.forEach { time ->
+            val active = time.timeText in desired && keptTexts.add(time.timeText)
+            if (time.active != active) setTimeActive(time.id, active)
         }
-        if (idsToDelete.isNotEmpty()) deleteTimesByIds(idsToDelete)
         desired.filterNot(keptTexts::contains).sorted().forEach { timeText ->
             insertTime(MedicationTimeEntity(medicationId = medication.id, timeText = timeText))
         }

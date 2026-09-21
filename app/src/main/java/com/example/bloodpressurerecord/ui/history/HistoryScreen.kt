@@ -9,6 +9,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +31,8 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
@@ -312,14 +316,14 @@ private fun MonthEncouragementBar(month: Int, recordedDays: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Sage200, MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.large)
             .padding(horizontal = AppSpacing.large, vertical = AppSpacing.medium),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             Icons.Default.WbSunny,
             contentDescription = null,
-            tint = Terracotta600,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp)
         )
         Spacer(Modifier.width(AppSpacing.small))
@@ -327,7 +331,7 @@ private fun MonthEncouragementBar(month: Int, recordedDays: Int) {
             "$month 月你已经记录了 $recordedDays 天，真不错",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
-            color = Sage900
+            color = MaterialTheme.colorScheme.onSecondaryContainer
         )
     }
 }
@@ -386,7 +390,7 @@ private fun <T> SelectionRow(
                     .heightIn(min = 44.dp)
                     .clip(MaterialTheme.shapes.large)
                     .background(
-                        if (isSelected) MaterialTheme.colorScheme.surface
+                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
                         else Color.Transparent
                     )
                     .semantics {
@@ -401,7 +405,7 @@ private fun <T> SelectionRow(
                     label,
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isSelected) {
-                        Terracotta800
+                        MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -607,18 +611,18 @@ internal fun CalendarDay(
             if (selected) append("，已选择")
         }
     }
-    // 暖阳设计：38dp 圆形日期，靠底色区分状态。
+    // 日期状态使用主题语义色，确保亮暗主题下都有足够对比。
     val background = when {
-        selected -> Terracotta600
-        summary?.containsHighRisk == true -> Terracotta300
-        enabled -> Sage300
+        selected -> MaterialTheme.colorScheme.primaryContainer
+        summary?.containsHighRisk == true -> MaterialTheme.colorScheme.errorContainer
+        enabled -> MaterialTheme.colorScheme.secondaryContainer
         else -> Color.Transparent
     }
     val contentColor = when {
-        selected -> Color(0xFFFFF7EF)
-        summary?.containsHighRisk == true -> Terracotta900
-        enabled -> Sage900
-        else -> WarmTextFaint
+        selected -> MaterialTheme.colorScheme.onPrimaryContainer
+        summary?.containsHighRisk == true -> MaterialTheme.colorScheme.onErrorContainer
+        enabled -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     var cellModifier = modifier
         .heightIn(min = AppDimensions.calendarDayMinHeight)
@@ -654,41 +658,60 @@ internal fun CalendarDay(
                 fontWeight = if (enabled || selected) FontWeight.Bold else FontWeight.Normal
             )
         }
-        // 备注红点：该日期存在带自定义备注的记录；双击可跳转查看。
+        // 备注使用中性文档标记，避免与高风险警示争夺红色语义。
         if (summary?.hasNote == true) {
-            Box(
-                Modifier
+            Icon(
+                imageVector = Icons.Outlined.Description,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 1.dp)
-                    .size(5.dp)
-                    .background(WarmError, CircleShape)
+                    .size(11.dp)
             )
         }
     }
 }
 
-/** 日历图例：有记录 / 含偏高读数 / 含备注 / 选中。 */
+/** 日历图例可作为整体换行，避免大字模式丢项。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CalendarLegend() {
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth().padding(top = AppSpacing.small),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.medium)
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.medium),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
     ) {
-        LegendItem(color = Sage300, label = "有记录")
-        LegendItem(color = Terracotta300, label = "含偏高读数")
-        LegendItem(color = WarmError, label = "含备注")
-        LegendItem(color = Terracotta600, label = "选中")
+        LegendItem(color = MaterialTheme.colorScheme.secondaryContainer, label = "有记录")
+        LegendItem(
+            color = MaterialTheme.colorScheme.error,
+            label = "含高风险读数",
+            icon = Icons.Outlined.WarningAmber
+        )
+        LegendItem(
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            label = "含备注",
+            icon = Icons.Outlined.Description
+        )
+        LegendItem(color = MaterialTheme.colorScheme.primaryContainer, label = "选中")
     }
 }
 
 @Composable
-private fun LegendItem(color: Color, label: String) {
+private fun LegendItem(
+    color: Color,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .size(10.dp)
-                .background(color, CircleShape)
-        )
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+        } else {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .background(color, CircleShape)
+            )
+        }
         Spacer(Modifier.width(5.dp))
         Text(
             label,
@@ -770,7 +793,7 @@ fun HistorySessionCard(
                         session.avgBloodPressureText,
                         fontSize = 22.sp,
                         fontFamily = NumberFontFamily,
-                        color = Terracotta700
+                        color = MaterialTheme.colorScheme.primary
                     )
                     StatusChip(
                         text = if (session.containsHighRiskReading) "含高风险读数" else session.categoryText,

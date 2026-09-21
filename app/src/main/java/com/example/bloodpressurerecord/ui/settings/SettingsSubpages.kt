@@ -106,6 +106,26 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     var authorizationStatus by remember {
         mutableStateOf(ReminderAuthorization.status(context))
     }
+    var pendingMedicationDelete by remember { mutableStateOf<Pair<Long, String>?>(null) }
+
+    pendingMedicationDelete?.let { (id, name) ->
+        AlertDialog(
+            onDismissRequest = { pendingMedicationDelete = null },
+            title = { Text("删除药品？") },
+            text = { Text("将删除「$name」及其全部服药时间。删除后无法恢复。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteMedication(id)
+                        pendingMedicationDelete = null
+                    }
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingMedicationDelete = null }) { Text("取消") }
+            }
+        )
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -163,7 +183,7 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         }
     }
 
-    SettingsSubPageShell("提醒设置", onBack) {
+    SettingsSubPageShell("测量与用药提醒", onBack) {
         Text(
             text = when (authorizationStatus) {
                 ReminderAuthorizationStatus.GRANTED -> "通知授权状态：可用"
@@ -311,7 +331,9 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                             times = med.times.map { it.timeText }.sorted()
                         )
                     }) { Text("编辑") }
-                    TextButton(onClick = { viewModel.deleteMedication(med.medication.id) }) {
+                    TextButton(onClick = {
+                        pendingMedicationDelete = med.medication.id to med.medication.name
+                    }) {
                         Text("删除", color = MaterialTheme.colorScheme.error)
                     }
                 }

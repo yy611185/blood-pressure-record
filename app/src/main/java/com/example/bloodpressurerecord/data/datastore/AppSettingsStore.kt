@@ -116,6 +116,16 @@ class AppSettingsStore(
             .toSet()
     }
 
+    /** 创建前记录，清理成功后清除；兼容旧版本已经开启日历同步的用户。 */
+    val calendarEventsMayExist: Flow<Boolean> = context.appDataStore.data.map { prefs ->
+        prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST]
+            ?: (prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false)
+    }
+
+    suspend fun setCalendarEventsMayExist(value: Boolean) {
+        context.appDataStore.edit { it[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = value }
+    }
+
     suspend fun setScheduledMedicationTimeIds(ids: Collection<Long>) {
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS] = ids
@@ -174,6 +184,12 @@ class AppSettingsStore(
 
     /** 清空全部设置（含上次导出时间），恢复为默认值。 */
     suspend fun clearAll() {
-        context.appDataStore.edit { prefs -> prefs.clear() }
+        context.appDataStore.edit { prefs ->
+            val pendingCalendarCleanup = prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST]
+                ?: (prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false)
+            prefs.clear()
+            // 权限撤销时清空数据仍需保留后续清理外部日程的能力。
+            if (pendingCalendarCleanup) prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = true
+        }
     }
 }

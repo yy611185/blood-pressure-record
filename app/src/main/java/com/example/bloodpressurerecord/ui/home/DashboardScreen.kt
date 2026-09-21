@@ -84,17 +84,19 @@ fun DashboardScreen(
             StreakCard(streakDays = state.streakDays, weekRecorded = state.weekRecorded)
         }
 
-        AppPrimaryButton(
-            text = "记一次血压",
-            icon = Icons.Default.Add,
-            onClick = onAddMeasurement,
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (state.latest != null) {
+            AppPrimaryButton(
+                text = "记一次血压",
+                icon = Icons.Default.Add,
+                onClick = onAddMeasurement,
+                modifier = Modifier.fillMaxWidth()
+            )
 
-        TodayOverviewCard(
-            state = state,
-            onViewTodayRecords = onViewTodayRecords
-        )
+            TodayOverviewCard(
+                state = state,
+                onViewTodayRecords = onViewTodayRecords
+            )
+        }
 
         MedicationTodayCard(
             slots = state.medicationSlots,
@@ -125,7 +127,7 @@ private fun MedicationTodayCard(
                         "已服 ${slots.count { it.taken }}/${slots.size}",
                         style = MaterialTheme.typography.labelMedium,
                         color = if (slots.all { it.taken }) {
-                            Sage600
+                            MaterialTheme.colorScheme.onSecondaryContainer
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         }
@@ -146,7 +148,7 @@ private fun MedicationTodayCard(
                         "去添加药品和提醒 →",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Terracotta700
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             } else {
@@ -162,7 +164,7 @@ private fun MedicationTodayCard(
                             color = if (slot.taken) {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             } else {
-                                Terracotta700
+                                MaterialTheme.colorScheme.primary
                             }
                         )
                         Spacer(Modifier.width(AppSpacing.medium))
@@ -217,14 +219,19 @@ private fun GreetingHeader(state: DashboardUiState) {
 @Composable
 private fun FirstMeasurementCard(onAdd: () -> Unit) {
     DataCard {
-        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.large)) {
             Text("还没有血压记录", style = MaterialTheme.typography.titleLarge)
             Text(
-                "完成第一次测量后，这里会优先显示最近血压和今天的测量情况。",
+                "找个安静的时间休息五分钟，然后记下第一次测量。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            TextButton(onClick = onAdd) { Text("开始第一次测量") }
+            AppPrimaryButton(
+                text = "记一次血压",
+                icon = Icons.Default.Add,
+                onClick = onAdd,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -255,7 +262,7 @@ fun RecentReadingCard(session: LatestSessionSummary) {
                 Text(
                     "${session.avgSystolic} / ${session.avgDiastolic}",
                     style = MaterialTheme.typography.displayMedium,
-                    color = Terracotta700,
+                    color = MaterialTheme.colorScheme.primary,
                     maxLines = 1
                 )
                 Spacer(Modifier.width(AppSpacing.small))
@@ -277,10 +284,10 @@ fun RecentReadingCard(session: LatestSessionSummary) {
 
 private fun friendlyStatusText(session: LatestSessionSummary): String = when {
     session.containsHighRiskReading -> "含高风险读数，注意休息"
-    session.category.uppercase() == "NORMAL" -> "血压平稳，继续保持"
-    session.category.uppercase() == "LOW" -> "这次偏低，留意身体感觉"
-    session.category.uppercase() == "HIGH_NORMAL" -> "比理想值稍高，放松一下"
-    else -> "这次偏高，注意休息"
+    session.category.uppercase() == "NORMAL" -> "正常 · 血压平稳，继续保持"
+    session.category.uppercase() == "LOW" -> "血压偏低 · 留意身体感觉"
+    session.category.uppercase() == "HIGH_NORMAL" -> "正常高值 · 放松后可再测一次"
+    else -> "${CategoryPresentation.label(session.category)} · 休息后可再测一次"
 }
 
 @Composable
@@ -288,7 +295,7 @@ private fun StreakCard(streakDays: Int, weekRecorded: List<Boolean>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = Sage200),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
@@ -300,7 +307,7 @@ private fun StreakCard(streakDays: Int, weekRecorded: List<Boolean>) {
             Icon(
                 Icons.Default.LocalFireDepartment,
                 contentDescription = null,
-                tint = Terracotta600,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(26.dp)
             )
             Spacer(Modifier.width(AppSpacing.medium))
@@ -309,12 +316,12 @@ private fun StreakCard(streakDays: Int, weekRecorded: List<Boolean>) {
                     if (streakDays > 0) "已连续记录 $streakDays 天" else "今天测一次，开始连续打卡",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Sage900
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
                 Text(
                     if (streakDays > 0) "坚持得很好，为自己鼓个掌" else "一天一次，慢慢来就好",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Sage600
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.78f)
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -323,13 +330,17 @@ private fun StreakCard(streakDays: Int, weekRecorded: List<Boolean>) {
                         androidx.compose.foundation.layout.Box(
                             modifier = Modifier
                                 .size(10.dp)
-                                .background(Sage600, CircleShape)
+                                .background(MaterialTheme.colorScheme.onSecondaryContainer, CircleShape)
                         )
                     } else {
                         androidx.compose.foundation.layout.Box(
                             modifier = Modifier
                                 .size(10.dp)
-                                .border(1.5.dp, Sage500, CircleShape)
+                                .border(
+                                    1.5.dp,
+                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.55f),
+                                    CircleShape
+                                )
                         )
                     }
                 }
@@ -361,7 +372,7 @@ private fun TodayOverviewCard(
                             "看看今天的记录 →",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = Terracotta700
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -370,27 +381,32 @@ private fun TodayOverviewCard(
                 state.todayAverageSystolic != null &&
                 state.todayAverageDiastolic != null
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("今天已经测了 ", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "${state.todayCount}",
-                        fontSize = 20.sp,
-                        color = Terracotta700,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("今天已经测了 ", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "${state.todayCount}",
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+                            )
                         )
-                    )
-                    Text(" 次，平均 ", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "${state.todayAverageSystolic} / ${state.todayAverageDiastolic}",
-                        fontSize = 20.sp,
-                        color = Terracotta700,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+                        Text(" 次", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("平均 ", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "${state.todayAverageSystolic} / ${state.todayAverageDiastolic}",
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+                            )
                         )
-                    )
-                    Text(" mmHg", style = MaterialTheme.typography.bodyMedium)
+                        Text(" mmHg", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             } else {
                 Text(

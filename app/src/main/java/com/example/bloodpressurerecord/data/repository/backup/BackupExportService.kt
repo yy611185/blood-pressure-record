@@ -61,7 +61,8 @@ class BackupExportService(
                 BackupMedicationTimeRow(
                     backupId = "medication_time:${time.id}",
                     medicationBackupId = "medication:${item.medication.id}",
-                    timeText = time.timeText
+                    timeText = time.timeText,
+                    active = time.active
                 )
             }
         }
@@ -285,6 +286,6 @@ class BackupExportService(
     }
 
     companion object {
-        const val EXPORT_FORMAT_VERSION = 4
+        const val EXPORT_FORMAT_VERSION = 5
     }
 }
