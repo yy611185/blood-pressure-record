@@ -26,6 +26,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +47,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -232,68 +235,54 @@ fun MeasurementReadingCard(
     val diastolic = reading.diastolic.toIntOrNull()
     val relationError = systolic != null && diastolic != null && diastolic >= systolic
 
-    DataCard {
-        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("第 ${index + 1} 组", style = MaterialTheme.typography.titleMedium)
-                if (removable) {
-                    IconButton(
-                        onClick = onRemove,
-                        modifier = Modifier
-                    ) {
-                        Icon(
-                            Icons.Default.DeleteOutline,
-                            contentDescription = "删除第${index + 1}组读数"
-                        )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (removable) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = onRemove) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = "删除第${index + 1}组读数")
                     }
                 }
             }
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val fontScale = LocalDensity.current.fontScale
-                val fieldWidth = (maxWidth.value - AppSpacing.small.value * 2) / 3
-                // 七个全角字符的标题在 11sp 下约需 77dp；按 fontScale 提前换为纵向。
-                val stacked = fieldWidth < 78f * fontScale
-                val fields: @Composable (Modifier) -> Unit = { fieldModifier ->
+                val stacked = maxWidth.value / fontScale < 275f
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     NumberField(
                         value = reading.systolic,
                         onValueChange = onSystolicChange,
-                        label = "高压",
+                        label = "收缩压 · 高压",
                         accessibleLabel = "第 ${index + 1} 组收缩压（高压）",
                         imeAction = ImeAction.Next,
-                        modifier = fieldModifier
-                    )
-                    NumberField(
-                        value = reading.diastolic,
-                        onValueChange = onDiastolicChange,
-                        label = "低压",
-                        accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
-                        imeAction = ImeAction.Next,
-                        isError = relationError,
-                        modifier = fieldModifier
-                    )
-                    NumberField(
-                        value = reading.pulse,
-                        onValueChange = onPulseChange,
-                        label = "脉搏",
-                        accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
-                        imeAction = ImeAction.Done,
-                        modifier = fieldModifier
-                    )
-                }
-                if (stacked) {
-                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
-                        fields(Modifier.fillMaxWidth())
-                    }
-                } else {
-                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
-                    ) {
-                        fields(Modifier.weight(1f))
+                        prominent = true
+                    )
+                    val lowerFields: @Composable (Modifier) -> Unit = { fieldModifier ->
+                        NumberField(
+                            value = reading.diastolic,
+                            onValueChange = onDiastolicChange,
+                            label = "舒张压 · 低压",
+                            accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
+                            imeAction = ImeAction.Next,
+                            isError = relationError,
+                            modifier = fieldModifier
+                        )
+                        NumberField(
+                            value = reading.pulse,
+                            onValueChange = onPulseChange,
+                            label = "脉搏 · 选填",
+                            accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
+                            imeAction = ImeAction.Done,
+                            modifier = fieldModifier
+                        )
+                    }
+                    if (stacked) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            lowerFields(Modifier.fillMaxWidth())
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            lowerFields(Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -305,13 +294,9 @@ fun MeasurementReadingCard(
                 )
             }
             if (index == 0) {
-                Text(
-                    "建议连续测两次，间隔 1-2 分钟，取平均更准。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("建议连续测两次，间隔 1–2 分钟。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
     }
 }
 
@@ -323,21 +308,10 @@ private fun NumberField(
     accessibleLabel: String,
     imeAction: ImeAction,
     modifier: Modifier = Modifier,
-    isError: Boolean = false
+    isError: Boolean = false,
+    prominent: Boolean = false
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            label,
-            modifier = Modifier.fillMaxWidth(),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-                letterSpacing = 0.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center
-        )
-        OutlinedTextField(
+    OutlinedTextField(
             value = value,
             onValueChange = { next ->
                 if (next.all(Char::isDigit) && next.length <= 3) onValueChange(next)
@@ -348,26 +322,55 @@ private fun NumberField(
             ),
             isError = isError,
             singleLine = true,
-            shape = MaterialTheme.shapes.large,
+            shape = RoundedCornerShape(24.dp),
             textStyle = TextStyle(
-                fontSize = 24.sp,
-                textAlign = TextAlign.Center,
+                fontSize = if (prominent) 70.sp else 44.sp,
+                lineHeight = if (prominent) 76.sp else 48.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Start,
                 color = MaterialTheme.colorScheme.onSurface
             ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                unfocusedBorderColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
             ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 64.dp)
+            modifier = modifier
+                .heightIn(min = if (prominent) 132.dp else 106.dp)
                 .semantics { contentDescription = accessibleLabel },
-            label = null,
-            placeholder = null
+            label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+            placeholder = {
+                Text("—", style = TextStyle(
+                    fontSize = if (prominent) 70.sp else 44.sp,
+                    lineHeight = if (prominent) 76.sp else 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                ))
+            }
         )
-    }
+}
+
+@Composable
+fun SessionChoiceChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold) },
+        shape = RoundedCornerShape(50),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            labelColor = MaterialTheme.colorScheme.onSurface,
+            selectedContainerColor = MaterialTheme.colorScheme.onSurface,
+            selectedLabelColor = MaterialTheme.colorScheme.surface
+        ),
+        border = if (selected) null else FilterChipDefaults.filterChipBorder(
+            enabled = true, selected = false, borderColor = MaterialTheme.colorScheme.outlineVariant
+        ),
+        modifier = Modifier.heightIn(min = 48.dp)
+    )
 }
 
 @Composable
@@ -381,7 +384,7 @@ fun SessionSaveBottomBar(
     embedded: Boolean = false
 ) {
     val containerShape = if (embedded) {
-        MaterialTheme.shapes.medium
+        MaterialTheme.shapes.large
     } else {
         RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     }

@@ -40,6 +40,9 @@ data class HomeUiState(
     val avgSystolic: Int? = null,
     val avgDiastolic: Int? = null,
     val avgPulse: Int? = null,
+    val averagedGroupCount: Int = 0,
+    val discardedFirstReading: Boolean = false,
+    val containsHighRiskReading: Boolean = false,
     val categoryLabel: String = "待计算",
     val formMessage: String = "",
     val formMessageIsError: Boolean = false,
@@ -49,6 +52,8 @@ data class HomeUiState(
     val abnormalConfirmMessage: String = "",
     val isSaving: Boolean = false,
     val canSave: Boolean = false,
+    val canContinueReadings: Boolean = false,
+    val readingsDisabledReason: String = "至少填写两组有效读数。",
     val saveDisabledReason: String = "把两组的高压和低压都填好，就可以保存啦",
     val isDirty: Boolean = false
 )
@@ -359,13 +364,19 @@ class HomeViewModel(
             requiredCount = 2,
             strategy = averageStrategy()
         )
+        val readingError = SessionFormLogic.saveDisabledReason(allReadings(state))
         return state.copy(
             avgSystolic = derived.avgSystolic,
             avgDiastolic = derived.avgDiastolic,
             avgPulse = derived.avgPulse,
+            averagedGroupCount = derived.averagedGroupCount,
+            discardedFirstReading = derived.discardedFirstReading,
+            containsHighRiskReading = derived.containsHighRiskReading,
             categoryLabel = derived.categoryLabel,
-            canSave = SessionFormLogic.saveDisabledReason(allReadings(state)) == null,
-            saveDisabledReason = SessionFormLogic.saveDisabledReason(allReadings(state)).orEmpty()
+            canContinueReadings = readingError == null,
+            readingsDisabledReason = readingError.orEmpty(),
+            canSave = readingError == null,
+            saveDisabledReason = readingError.orEmpty()
         )
     }
 

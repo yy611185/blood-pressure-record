@@ -13,6 +13,7 @@ import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.flow.first
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -388,6 +389,70 @@ class BackupExportServiceAndroidTest {
         assertFalse(restored.medication.enabled)
         assertEquals(listOf("08:00", "20:00"), restored.times.map { it.timeText }.sorted())
         assertEquals(1, dao.getLogsForDay(20_000).size)
+    }
+
+    @Test
+    fun version4_roundTripsOptionalAppearanceSettingsWhenSelected() = runTest {
+        val store = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        store.clearAll()
+        try {
+            store.setAppearanceMode("dark")
+            store.setShowBuddy(false)
+            val bytes = exportSingleSession(
+                "appearance-roundtrip",
+                listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+            )
+            store.setAppearanceMode("light")
+            store.setShowBuddy(true)
+
+            val service = BackupImportService(database, store)
+            val preview = service.previewXlsx(ByteArrayInputStream(bytes))
+            assertTrue(preview.changesDisplaySettings)
+            service.commitImport(preview, BackupImportOptions(
+                importMeasurements = false,
+                restoreDisplaySettings = true
+            ))
+
+            assertEquals("dark", store.settingsFlow.first().appearanceMode)
+            assertFalse(store.settingsFlow.first().showBuddy)
+        } finally {
+            store.clearAll()
+        }
+    }
+
+    @Test
+    fun oldVersion4WithoutAppearanceKeysKeepsCurrentPreferences() = runTest {
+        val store = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        store.clearAll()
+        try {
+            val bytes = exportSingleSession(
+                "appearance-legacy",
+                listOf(Triple(120, 80, 70), Triple(122, 82, 72))
+            )
+            val oldFile = mutateWorkbook(bytes) { workbook ->
+                val sheet = workbook.getSheet("用户资料")
+                for (index in sheet.lastRowNum downTo 1) {
+                    val row = sheet.getRow(index) ?: continue
+                    if (row.getCell(0)?.stringCellValue in setOf("appearance_mode", "show_buddy")) {
+                        sheet.removeRow(row)
+                    }
+                }
+            }
+            store.setAppearanceMode("dark")
+            store.setShowBuddy(false)
+
+            val service = BackupImportService(database, store)
+            val preview = service.previewXlsx(ByteArrayInputStream(oldFile))
+            service.commitImport(preview, BackupImportOptions(
+                importMeasurements = false,
+                restoreDisplaySettings = true
+            ))
+
+            assertEquals("dark", store.settingsFlow.first().appearanceMode)
+            assertFalse(store.settingsFlow.first().showBuddy)
+        } finally {
+            store.clearAll()
+        }
     }
 
     @Test

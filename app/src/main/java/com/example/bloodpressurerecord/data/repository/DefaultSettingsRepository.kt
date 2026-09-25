@@ -60,6 +60,14 @@ class DefaultSettingsRepository(
         appSettingsStore.setShowTrendChart(enabled)
     }
 
+    override suspend fun setAppearanceMode(mode: String) {
+        appSettingsStore.setAppearanceMode(mode)
+    }
+
+    override suspend fun setShowBuddy(enabled: Boolean) {
+        appSettingsStore.setShowBuddy(enabled)
+    }
+
     override suspend fun setDiscardFirstReading(enabled: Boolean) {
         appSettingsStore.setDiscardFirstReading(enabled)
     }

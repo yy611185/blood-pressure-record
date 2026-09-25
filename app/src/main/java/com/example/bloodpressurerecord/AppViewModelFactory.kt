@@ -52,7 +52,8 @@ class AppViewModelFactory(
                 DashboardViewModel(
                     repository = container.bloodPressureRepository,
                     medicationRepository = container.medicationRepository,
-                    todayTicks = dayTicks()
+                    todayTicks = dayTicks(),
+                    settingsRepository = container.settingsRepository
                 ) as T
             }
 
@@ -60,7 +61,8 @@ class AppViewModelFactory(
                 HistoryViewModel(
                     repository = container.bloodPressureRepository,
                     savedStateHandle = savedStateHandle,
-                    todayTicks = dayTicks()
+                    todayTicks = dayTicks(),
+                    settingsRepository = container.settingsRepository
                 ) as T
             }
 

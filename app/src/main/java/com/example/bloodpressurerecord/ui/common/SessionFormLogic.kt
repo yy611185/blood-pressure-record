@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.ui.common
 import com.example.bloodpressurerecord.data.repository.SessionReadingInput
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
 import com.example.bloodpressurerecord.domain.calculator.ReadingValidationError
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
@@ -18,7 +19,9 @@ data class SessionDerivedResult(
     val avgDiastolic: Int?,
     val avgPulse: Int?,
     val categoryLabel: String,
-    val containsHighRiskReading: Boolean = false
+    val containsHighRiskReading: Boolean = false,
+    val averagedGroupCount: Int = 0,
+    val discardedFirstReading: Boolean = false
 )
 
 data class SessionValidationResult(
@@ -28,12 +31,8 @@ data class SessionValidationResult(
 )
 
 object SessionFormLogic {
-    /**
-     * 表单允许的最大读数组数（交互体验上限）。
-     * 必须 ≤ [MeasurementInputRules.MAX_READING_COUNT]（存储与导入的硬上限），
-     * 旧备份中超过本值、不超过硬上限的记录仍可正常导入与展示。
-     */
-    const val UI_MAX_READING_COUNT = 10
+    /** UI 与存储使用同一个上限，旧记录的全部组数始终可编辑。 */
+    const val UI_MAX_READING_COUNT = MeasurementInputRules.MAX_READING_COUNT
 
     fun saveDisabledReason(
         readings: List<SessionReadingInputUi>,
@@ -59,15 +58,23 @@ object SessionFormLogic {
             value?.takeIf { MeasurementInputRules.validateReading(it) == null }
         }
         if (validReadings.size < requiredCount) {
-            return SessionDerivedResult(null, null, null, "待计算")
+            return SessionDerivedResult(
+                null, null, null, "待计算",
+                containsHighRiskReading = validReadings.any {
+                    BloodPressureRules.isHighRisk(it.systolic, it.diastolic)
+                }
+            )
         }
         val derived = MeasurementDerivation.derive(validReadings, strategy)
+        val discardedFirst = strategy == AverageStrategy.DISCARD_FIRST && validReadings.size >= 2
         return SessionDerivedResult(
             avgSystolic = derived.average.avgSystolic,
             avgDiastolic = derived.average.avgDiastolic,
             avgPulse = derived.average.avgPulse,
             categoryLabel = CategoryPresentation.label(derived.category),
-            containsHighRiskReading = derived.containsHighRiskReading
+            containsHighRiskReading = derived.containsHighRiskReading,
+            averagedGroupCount = validReadings.size - if (discardedFirst) 1 else 0,
+            discardedFirstReading = discardedFirst
         )
     }
 

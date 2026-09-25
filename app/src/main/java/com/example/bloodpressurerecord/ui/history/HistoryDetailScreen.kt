@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -11,8 +12,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
+import com.example.bloodpressurerecord.domain.model.AverageStrategy
+import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import com.example.bloodpressurerecord.ui.common.*
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HistoryDetailScreen(
     viewModel: HistoryDetailViewModel,
@@ -40,9 +47,15 @@ fun HistoryDetailScreen(
     }
 
     if (session == null) {
-        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            AppTopBar(title = "记录详情", onBack = onBack)
-            Text("未找到记录", modifier = Modifier.padding(16.dp))
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            Column {
+                AppTopBar(title = "记录详情", onBack = onBack)
+                Text(if (uiState.deleted) "记录已删除" else "未找到记录", modifier = Modifier.padding(16.dp))
+            }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
         return
     }
@@ -51,7 +64,7 @@ fun HistoryDetailScreen(
         AlertDialog(
             onDismissRequest = viewModel::dismissDelete,
             title = { Text("确认删除") },
-            text = { Text("是否删除这条测量记录？") },
+            text = { Text("${uiState.measuredAtText} · ${session.avgSystolic}/${session.avgDiastolic}。删除后可在提示条里撤销。") },
             confirmButton = {
                 TextButton(onClick = viewModel::confirmDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
@@ -85,102 +98,117 @@ fun HistoryDetailScreen(
             ) {
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("测量时间", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${uiState.measuredAtText} · ${session.scene}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        uiState.measuredAtText,
-                        style = MaterialTheme.typography.titleLarge
+                        "${session.avgSystolic}/${session.avgDiastolic}",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontFamily = NumberFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        StatusChip(
+                            text = categoryText,
+                            isAbnormal = isAbnormal,
+                            status = bloodPressureVisualStatus(session.category, false)
+                        )
+                        if (session.containsHighRiskReading) {
+                            StatusChip(
+                                text = "含高风险读数",
+                                isAbnormal = true,
+                                status = bloodPressureVisualStatus(session.category, true)
+                            )
+                        }
+                    }
+                    Text(
+                        (if (session.averageStrategy == AverageStrategy.DISCARD_FIRST && session.readings.size >= 2)
+                            "弃用第 1 组，取其余 ${session.readings.size - 1} 组平均"
+                        else "${session.readings.size} 组全部平均") +
+                            (session.avgPulse?.let { " · 脉搏 $it" } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
             DataCard {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("自动计算结果", style = MaterialTheme.typography.titleMedium)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("平均收缩压", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${session.avgSystolic} mmHg", style = MaterialTheme.typography.bodyLarge)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("平均舒张压", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${session.avgDiastolic} mmHg", style = MaterialTheme.typography.bodyLarge)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("平均脉搏", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(session.avgPulse?.let { "$it 次/分" } ?: "--", style = MaterialTheme.typography.bodyLarge)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("分级结果", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        StatusChip(text = categoryText, isAbnormal = isAbnormal)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("高风险状态", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        StatusChip(
-                            text = if (session.containsHighRiskReading) "包含高风险读数" else "未检出",
-                            isAbnormal = session.containsHighRiskReading
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("原始读数", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    DetailReadingRow("组", "高压", "低压", "脉搏", header = true)
+                    session.readings.forEachIndexed { index, reading ->
+                        DetailReadingRow(
+                            label = "第${index + 1}组" + if (session.averageStrategy == AverageStrategy.DISCARD_FIRST && index == 0 && session.readings.size >= 2) "（不计）" else "",
+                            systolic = reading.systolic.toString(),
+                            diastolic = reading.diastolic.toString(),
+                            pulse = reading.pulse?.toString() ?: "—",
+                            highRisk = BloodPressureRules.isHighRisk(reading.systolic, reading.diastolic)
                         )
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("测量场景", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(session.scene, style = MaterialTheme.typography.bodyLarge)
-                    }
-                    val (symptomTags, factorTags) = remember(session.symptoms) {
-                        MeasurementTags.splitSymptomsAndFactors(session.symptoms)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("伴随症状", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            symptomTags.takeIf { it.isNotEmpty() }?.joinToString("、") ?: "无",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    }
-                    if (factorTags.isNotEmpty()) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("影响因素", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(factorTags.joinToString("、"), style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                    if (!session.note.isNullOrBlank()) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("备注", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(session.note, style = MaterialTheme.typography.bodyLarge)
-                        }
                     }
                 }
             }
-
-            session.readings.forEachIndexed { index, reading ->
+            val (symptomTags, factorTags) = remember(session.symptoms) {
+                MeasurementTags.splitSymptomsAndFactors(session.symptoms)
+            }
+            if (symptomTags.isNotEmpty() || factorTags.isNotEmpty() || !session.note.isNullOrBlank()) {
                 DataCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("第 ${index + 1} 组读数", style = MaterialTheme.typography.titleMedium)
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("收缩压 / 舒张压", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${reading.systolic} / ${reading.diastolic} mmHg")
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("脉搏", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(reading.pulse?.let { "$it 次/分" } ?: "--")
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("测量备注", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (symptomTags.isNotEmpty()) Text("症状：${symptomTags.joinToString("、")}")
+                        if (factorTags.isNotEmpty()) Text("影响因素：${factorTags.joinToString("、")}")
+                        session.note?.takeIf { it.isNotBlank() }?.let { Text("“$it”") }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            AppSecondaryButton(
-                text = "编辑记录",
-                onClick = { onEdit(sessionId) },
-                modifier = Modifier.fillMaxWidth()
-            )
-            AppDangerButton(
-                text = "删除记录",
-                onClick = viewModel::requestDelete,
-                modifier = Modifier.fillMaxWidth()
-            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AppDangerButton("删除", viewModel::requestDelete, Modifier.weight(1f))
+                AppSecondaryButton("编辑", { onEdit(sessionId) }, Modifier.weight(1f))
+            }
             }
         }
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+    }
+}
+
+@Composable
+private fun DetailReadingRow(
+    label: String,
+    systolic: String,
+    diastolic: String,
+    pulse: String,
+    header: Boolean = false,
+    highRisk: Boolean = false
+) {
+    val foreground = when {
+        highRisk -> MaterialTheme.colorScheme.onErrorContainer
+        header -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .background(
+                if (highRisk) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(10.dp)
+            ).padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, modifier = Modifier.weight(1.5f), style = MaterialTheme.typography.labelMedium, color = foreground)
+        listOf(systolic, diastolic, pulse).forEach { value ->
+            Text(
+                value,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = if (header) null else NumberFontFamily,
+                fontWeight = if (header) FontWeight.Medium else FontWeight.Bold,
+                color = foreground
+            )
+        }
     }
 }

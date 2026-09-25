@@ -127,7 +127,7 @@ class HistoryViewModelTest {
     }
 
     @Test
-    fun `有记录日期可选择且当天记录按时间正序`() = runTest {
+    fun `有记录日期可选择且当天记录按时间倒序`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
             summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), null, false))
@@ -140,17 +140,19 @@ class HistoryViewModelTest {
         advanceUntilIdle()
 
         assertEquals(date, vm.uiState.value.selectedDate)
-        assertEquals(listOf("early", "late"), vm.uiState.value.selectedDayRecords.map { it.id })
+        assertEquals(listOf("late", "early"), vm.uiState.value.selectedDayRecords.map { it.id })
     }
 
     @Test
-    fun `无记录日期不可选择`() = runTest {
+    fun `无记录日期可选择并显示空日`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
         val vm = HistoryViewModel(FakeRepository(), SavedStateHandle(), zone, todayProvider = { date })
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
         advanceUntilIdle()
         vm.selectDate(date)
-        assertNull(vm.uiState.value.selectedDate)
+        advanceUntilIdle()
+        assertEquals(date, vm.uiState.value.selectedDate)
+        assertTrue(vm.uiState.value.selectedDayRecords.isEmpty())
     }
 
     @Test
@@ -173,7 +175,30 @@ class HistoryViewModelTest {
     }
 
     @Test
-    fun `删除最后一条后清除选择并禁用日期`() = runTest {
+    fun `日历分级由当天各次平均血压计算`() = runTest {
+        val date = LocalDate.of(2026, 7, 25)
+        val repo = FakeRepository().apply {
+            summaries.value = listOf(
+                CalendarSessionSummary(epoch(date, 8), null, false),
+                CalendarSessionSummary(epoch(date, 20), null, false)
+            )
+            records.value = listOf(
+                record("morning", epoch(date, 8)).copy(avgSystolic = 130, avgDiastolic = 85),
+                record("evening", epoch(date, 20)).copy(avgSystolic = 150, avgDiastolic = 95)
+            )
+        }
+        val vm = HistoryViewModel(repo, SavedStateHandle(), zone, todayProvider = { date })
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val day = vm.uiState.value.daySummaries.getValue(date)
+        assertEquals(140, day.averageSystolic)
+        assertEquals(90, day.averageDiastolic)
+        assertEquals(com.example.bloodpressurerecord.domain.model.BloodPressureCategory.STAGE1, day.category)
+    }
+
+    @Test
+    fun `删除最后一条后保留所选日期显示空日`() = runTest {
         val date = LocalDate.of(2026, 7, 25)
         val repo = FakeRepository().apply {
             summaries.value = listOf(CalendarSessionSummary(epoch(date, 9), null, false))
@@ -188,7 +213,7 @@ class HistoryViewModelTest {
         repo.summaries.value = emptyList()
         advanceUntilIdle()
 
-        assertNull(vm.uiState.value.selectedDate)
+        assertEquals(date, vm.uiState.value.selectedDate)
         assertTrue(vm.uiState.value.daySummaries.isEmpty())
     }
 

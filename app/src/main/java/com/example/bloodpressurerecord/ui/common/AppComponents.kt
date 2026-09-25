@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material3.Button
@@ -40,6 +42,7 @@ import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
 import com.example.bloodpressurerecord.ui.theme.WarmNeutral300
 import com.example.bloodpressurerecord.ui.theme.WarmTextMuted
 import com.example.bloodpressurerecord.ui.theme.style
+import com.example.bloodpressurerecord.ui.theme.bloodPressureChipColors
 
 @Composable
 fun AppPrimaryButton(
@@ -52,7 +55,7 @@ fun AppPrimaryButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(AppDimensions.primaryButtonHeight),
+        modifier = modifier.heightIn(min = 54.dp),
         shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
@@ -61,7 +64,7 @@ fun AppPrimaryButton(
             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp),
-        contentPadding = PaddingValues(horizontal = AppSpacing.xLarge)
+        contentPadding = PaddingValues(horizontal = AppSpacing.xLarge, vertical = 12.dp)
     ) {
         if (icon != null) {
             Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(22.dp))
@@ -79,7 +82,7 @@ fun AppSecondaryButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(AppDimensions.primaryButtonHeight),
+        modifier = modifier.heightIn(min = 54.dp),
         shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -99,7 +102,7 @@ fun AppDangerButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(AppDimensions.primaryButtonHeight),
+        modifier = modifier.heightIn(min = 54.dp),
         shape = MaterialTheme.shapes.large,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -117,7 +120,7 @@ fun DataCard(
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
-    // 暖阳设计：28dp 圆角、柔和投影、无描边细线。
+    // 原稿 26dp 圆角、奶白卡片与轻微投影。
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -141,38 +144,32 @@ fun StatusChip(
     modifier: Modifier = Modifier,
     status: BloodPressureVisualStatus? = null
 ) {
-    val resolved = status?.style(MaterialTheme.colorScheme)
-    val containerColor = resolved?.containerColor ?: if (isAbnormal) {
-        MaterialTheme.colorScheme.tertiaryContainer
-    } else {
-        MaterialTheme.colorScheme.secondaryContainer
-    }
-    val contentColor = resolved?.contentColor ?: if (isAbnormal) {
-        MaterialTheme.colorScheme.onTertiaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    }
+    val resolvedStatus = status ?: if (isAbnormal) BloodPressureVisualStatus.HIGH else BloodPressureVisualStatus.NORMAL
+    val chip = bloodPressureChipColors(text, resolvedStatus, MaterialTheme.colorScheme)
 
     Row(
         modifier = modifier
-            .background(color = containerColor, shape = MaterialTheme.shapes.large)
-            .padding(horizontal = AppSpacing.medium, vertical = 6.dp),
+            .background(color = chip.container, shape = RoundedCornerShape(50))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        resolved?.let {
+        if (resolvedStatus == BloodPressureVisualStatus.HIGH_RISK || text.contains("高风险")) {
             Icon(
-                imageVector = it.icon,
+                imageVector = BloodPressureVisualStatus.HIGH_RISK.style(MaterialTheme.colorScheme).icon,
                 contentDescription = null,
-                tint = contentColor,
+                tint = chip.content,
                 modifier = Modifier.size(15.dp)
             )
             Spacer(Modifier.width(AppSpacing.xSmall))
+        } else {
+            Box(Modifier.size(9.dp).background(chip.dot, CircleShape))
+            Spacer(Modifier.width(6.dp))
         }
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            color = contentColor,
-            fontWeight = FontWeight.SemiBold
+            color = chip.content,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -203,7 +200,7 @@ fun AppTopBar(
     Row(
         modifier = collapseModifier
             .fillMaxWidth()
-            .height(AppDimensions.primaryButtonHeight + AppSpacing.small)
+            .heightIn(min = 68.dp)
             .padding(horizontal = AppDimensions.pageHorizontalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -211,8 +208,8 @@ fun AppTopBar(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(44.dp)
-                    .background(MaterialTheme.colorScheme.surface, CircleShape)
+                    .size(48.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(16.dp))
             ) {
                 Icon(
                     imageVector = Icons.Default.ChevronLeft,
@@ -225,11 +222,11 @@ fun AppTopBar(
 
         Text(
             text = title,
-            // 一级页面 24sp 大标题，带返回键的子页 22sp。
+            // 一级页面沿用原稿约 30sp；子页使用较紧凑标题。
             style = if (onBack != null) {
                 MaterialTheme.typography.titleLarge
             } else {
-                MaterialTheme.typography.headlineMedium
+                MaterialTheme.typography.headlineLarge
             },
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f)

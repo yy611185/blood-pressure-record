@@ -9,19 +9,24 @@ import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.R
 
 /**
- * 数字展示字体 Caprasimo（Google Fonts, OFL），仅覆盖拉丁与数字；
+ * 原稿数字字体 Bricolage Grotesque（Google Fonts, OFL），离线打包；
  * 中文字符自动回退系统字体。用于血压大数字与统计数值。
  */
-val NumberFontFamily = FontFamily(Font(R.font.caprasimo_regular))
+val NumberFontFamily = FontFamily(
+    Font(R.font.bricolage_grotesque, weight = FontWeight.Normal),
+    Font(R.font.bricolage_grotesque, weight = FontWeight.SemiBold),
+    Font(R.font.bricolage_grotesque, weight = FontWeight.Bold)
+)
 
 val AppTypography = Typography(
     // 最近血压大数字：54sp / 行高 1
     displayMedium = TextStyle(
         fontFamily = NumberFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontWeight = FontWeight.Bold,
         fontSize = 54.sp,
         lineHeight = 54.sp,
-        letterSpacing = 0.sp
+        letterSpacing = (-1).sp,
+        fontFeatureSettings = "tnum"
     ),
     // 页面大标题（测量首页问候）30sp
     headlineLarge = TextStyle(
@@ -34,8 +39,8 @@ val AppTypography = Typography(
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
-        lineHeight = 32.sp
+        fontSize = 30.sp,
+        lineHeight = 38.sp
     ),
     // 子页顶栏标题 22sp
     titleLarge = TextStyle(
@@ -48,8 +53,8 @@ val AppTypography = Typography(
     titleMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 22.sp
+        fontSize = 17.sp,
+        lineHeight = 24.sp
     ),
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,

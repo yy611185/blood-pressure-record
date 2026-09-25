@@ -42,6 +42,10 @@ interface SettingsRepository {
 
     suspend fun setShowTrendChart(enabled: Boolean)
 
+    suspend fun setAppearanceMode(mode: String)
+
+    suspend fun setShowBuddy(enabled: Boolean)
+
     suspend fun setDiscardFirstReading(enabled: Boolean)
 
     suspend fun setMorningReminderEnabled(enabled: Boolean)

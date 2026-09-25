@@ -54,7 +54,8 @@ data class TrendUiState(
     val targetSystolic: Int? = null,
     val targetDiastolic: Int? = null,
     val dayDetails: TrendDayDetails? = null,
-    val summary: TrendTextSummary = TrendTextSummary()
+    val summary: TrendTextSummary = TrendTextSummary(),
+    val insights: TrendInsights = TrendInsights()
 )
 
 data class TrendTextSummary(
@@ -103,8 +104,13 @@ class TrendViewModel(
             } else {
                 trendRepository.observeStatistics(previousStart, start)
             },
+            if (previousStart == null) {
+                kotlinx.coroutines.flow.flowOf(emptyList<TrendRecord>())
+            } else {
+                trendRepository.observeRecords(previousStart, start)
+            },
             settingsRepository.observeSettings()
-        ) { records, statistics, previousStatistics, settings ->
+        ) { records, statistics, previousStatistics, previousRecords, settings ->
             val now = clockMillis()
             val targetSystolic = settings.userProfile.targetSystolic
             val targetDiastolic = settings.userProfile.targetDiastolic
@@ -119,6 +125,13 @@ class TrendViewModel(
                 ),
                 statistics = statistics,
                 previousStatistics = previousStatistics,
+                insights = TrendInsightCalculator.calculate(
+                    records = records.filter { it.measuredAt in start until endExclusive && it.measuredAt <= now },
+                    previousRecords = previousRecords,
+                    targetSystolic = targetSystolic,
+                    targetDiastolic = targetDiastolic,
+                    zoneId = zoneId
+                ),
                 targetSystolic = targetSystolic,
                 targetDiastolic = targetDiastolic
             )
@@ -138,7 +151,8 @@ class TrendViewModel(
             targetSystolic = seriesState.targetSystolic,
             targetDiastolic = seriesState.targetDiastolic,
             dayDetails = dayDetails,
-            summary = buildSummary(seriesState.statistics, seriesState.previousStatistics)
+            summary = buildSummary(seriesState.statistics, seriesState.previousStatistics),
+            insights = seriesState.insights
         )
     }.stateIn(
         scope = viewModelScope,
@@ -185,6 +199,7 @@ class TrendViewModel(
         val series: TrendSeries,
         val statistics: PeriodStatistics,
         val previousStatistics: PeriodStatistics,
+        val insights: TrendInsights,
         val targetSystolic: Int?,
         val targetDiastolic: Int?
     )

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-25T15:57:57+08:00",
+  "title": "Design System: 血压记录",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "珊瑚橙", "canonical": "#DF6A55", "tonalRamp": ["#4B1A13", "#713023", "#963F30", "#B85440", "#DF6A55", "#EC927F", "#F7C7BA", "#FFF2EB"] },
+      "healthy": { "role": "secondary", "displayName": "正常绿", "canonical": "#45996C", "tonalRamp": ["#102E20", "#19442F", "#235A40", "#327A55", "#45996C", "#75BA90", "#B8DDC4", "#F0FAE1"] },
+      "background": { "role": "neutral", "displayName": "暖纸底色", "canonical": "#FAF6EF", "tonalRamp": ["#241E19", "#40362E", "#605249", "#82746B", "#A99B91", "#CFC3B8", "#E7DDD3", "#FAF6EF"] },
+      "surface": { "role": "neutral", "displayName": "卡片白", "canonical": "#FFFDFA", "tonalRamp": ["#25201D", "#433A33", "#665950", "#887B71", "#AC9F95", "#D4C9C0", "#EEE6DF", "#FFFDFA"] },
+      "text": { "role": "neutral", "displayName": "深棕正文", "canonical": "#27201B", "tonalRamp": ["#27201B", "#443A33", "#62564D", "#827469", "#A6988C", "#C5B9AE", "#E0D7CE", "#F6F0E9"] },
+      "dark-background": { "role": "neutral", "displayName": "深色底", "canonical": "#1A1512", "tonalRamp": ["#1A1512", "#332B26", "#51453E", "#71635A", "#91837A", "#B3A59B", "#D6C8BC", "#F3EAE1"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "读数", "purpose": "最近读数及统计数字；本地打包 Bricolage Grotesque，SIL OFL 1.1。" },
+      "body": { "displayName": "中文正文", "purpose": "系统中文字体支持设备字号。" }
+    },
+    "shadows": [
+      { "name": "card-low", "value": "0 1px 0 oklch(0.9 0.01 70), 0 8px 24px -12px oklch(0.5 0.04 60 / .25)", "purpose": "根目录原型浅色卡片的柔和投影；Compose 用低 elevation 近似。" },
+      { "name": "dark-outline", "value": "0 0 0 1px oklch(0.3 0.01 60)", "purpose": "深色卡片的轮廓分层。" }
+    ],
+    "motion": [
+      { "name": "screen-enter", "value": "380ms cubic-bezier(.2,.8,.2,1)", "purpose": "原型页面进入节奏；原生导航按平台手势适配。" }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "主要保存或继续操作。",
+      "html": "<button class=\"ds-button-primary\">保存记录</button>",
+      "css": ".ds-button-primary{min-height:54px;padding:12px 22px;border:0;border-radius:20px;background:#DF6A55;color:#fff;font:700 17px system-ui;cursor:pointer;transition:transform .15s,filter .2s}.ds-button-primary:hover{filter:brightness(.96)}.ds-button-primary:focus-visible{outline:3px solid #FFB7A5;outline-offset:2px}.ds-button-primary:active{transform:scale(.97)}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "次级行动与返回操作。",
+      "html": "<button class=\"ds-button-secondary\">稍后再说</button>",
+      "css": ".ds-button-secondary{min-height:54px;padding:12px 22px;border:0;border-radius:20px;background:#F2ECE3;color:#27201B;font:600 16px system-ui;cursor:pointer}.ds-button-secondary:hover{background:#E9E2D7}.ds-button-secondary:focus-visible{outline:3px solid #DF6A55;outline-offset:2px}.ds-button-secondary:active{transform:scale(.97)}"
+    },
+    {
+      "name": "Data Card",
+      "kind": "card",
+      "refersTo": "data-card",
+      "description": "读数与历史记录的主要容器。",
+      "html": "<article class=\"ds-data-card\"><strong>126 / 82</strong><span>mmHg · 今天 08:30</span></article>",
+      "css": ".ds-data-card{display:grid;gap:6px;padding:18px;border-radius:26px;background:#FFFDFA;color:#27201B;box-shadow:0 1px 0 #E3DDD5,0 8px 24px -12px #645C5540}.ds-data-card strong{font:700 32px 'Bricolage Grotesque',system-ui;font-variant-numeric:tabular-nums}.ds-data-card span{font:400 13px system-ui;color:#645C55}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "颜色、圆点和文字共同表达血压状态。",
+      "html": "<span class=\"ds-status-chip\"><i></i>正常</span>",
+      "css": ".ds-status-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:#DFF4E9;color:#287958;font:700 13px system-ui}.ds-status-chip i{width:9px;height:9px;border-radius:50%;background:#69C49D}.ds-status-chip:focus-visible{outline:3px solid #DF6A55;outline-offset:2px}"
+    },
+    {
+      "name": "Reading Inputs",
+      "kind": "form",
+      "refersTo": "reading-input",
+      "description": "收缩压大格在上；舒张压和脉搏各占一个独立输入格，圆角均为 24dp。",
+      "html": "<div class=\"ds-reading-inputs\"><input aria-label=\"收缩压\"><div><input aria-label=\"舒张压\"><input aria-label=\"脉搏\"></div></div>",
+      "css": ".ds-reading-inputs{display:grid;gap:10px}.ds-reading-inputs>div{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ds-reading-inputs input{min-width:0;min-height:106px;border:1px solid #E3DDD5;border-radius:24px;background:#FFFDFA;color:#27201B;text-align:left;font:700 44px 'Bricolage Grotesque',system-ui}.ds-reading-inputs>input{min-height:132px;font-size:70px}.ds-reading-inputs input:focus-visible{outline:2px solid #DF6A55;outline-offset:2px}"
+    },
+    {
+      "name": "Bottom Navigation",
+      "kind": "nav",
+      "refersTo": "bottom-navigation",
+      "description": "四页导航与居中新增入口。",
+      "html": "<nav class=\"ds-bottom-nav\" aria-label=\"主导航\"><span>首页</span><span>历史</span><button aria-label=\"新增记录\">+</button><span>趋势</span><span>我的</span></nav>",
+      "css": ".ds-bottom-nav{display:grid;grid-template-columns:1fr 1fr 84px 1fr 1fr;align-items:center;text-align:center;min-height:72px;padding:0 6px;border-radius:30px;background:#FFFDFA;color:#645C55;box-shadow:0 0 0 1px #E3DDD5,0 12px 26px -12px #645C5560;font:600 12px system-ui}.ds-bottom-nav button{width:64px;height:64px;margin:auto;border:0;border-radius:24px;background:#DF6A55;color:#fff;font:700 32px system-ui;cursor:pointer;transform:translateY(-14px)}.ds-bottom-nav button:hover{filter:brightness(.96)}.ds-bottom-nav button:focus-visible{outline:3px solid #963828;outline-offset:2px}.ds-bottom-nav button:active{transform:translateY(-14px) scale(.95)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "温暖的血压记录本",
+    "overview": "视觉依据是根目录 UIredesign 原型。原型以柔和纸色、圆角卡片、清晰的大数字和珊瑚橙操作形成连续的记录体验。Android 使用真实数据和系统控件。",
+    "keyCharacteristics": ["浅色奶白底与略亮的卡片，深色保留暖棕层次。", "血压大数字用 Bricolage Grotesque；中文与长篇正文使用系统中文字体。", "底部四个页面入口围绕居中的新增记录按钮，状态不单靠颜色表达。"],
+    "rules": [
+      { "name": "The Status Text Rule", "body": "所有血压等级和高风险提示同时写明状态，不能只给色块。", "section": "colors" },
+      { "name": "The Number First Rule", "body": "数值、mmHg、日期和状态要能一眼对应；缩小屏幕时先让内容换行与滚动，不能截断读数。", "section": "typography" }
+    ],
+    "dos": ["以根目录原型对照页面层级、颜色和形状；以领域源码判断记录和分级结果。", "在小屏、大字、深浅色、空数据和真实数据下检查可读性与键盘避让。"],
+    "donts": ["把原型样例数据或演示控件当作持久化功能。", "用 v1-原稿 覆盖本次已选定的视觉基准。"]
+  }
+}

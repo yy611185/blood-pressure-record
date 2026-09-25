@@ -7,6 +7,7 @@ import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -27,6 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,8 +42,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.heightIn
+import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
+import com.example.bloodpressurerecord.ui.common.DataCard
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
@@ -61,6 +68,10 @@ import java.time.LocalTime
 fun SettingsProfileScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     SettingsSubPageShell("用户资料", onBack) {
+        Text("个人信息与目标值", style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold)
+        DataCard {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedTextField(uiState.name, viewModel::updateName, label = { Text("姓名") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(
             uiState.ageText,
@@ -90,9 +101,10 @@ fun SettingsProfileScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             isError = uiState.targetDiastolicError != null,
             supportingText = uiState.targetDiastolicError?.let { error -> { Text(error) } }
         )
-        Button(onClick = viewModel::saveUserProfile, modifier = Modifier.fillMaxWidth()) {
-            Text("保存资料")
         }
+        }
+        AppPrimaryButton(text = "保存资料", onClick = viewModel::saveUserProfile,
+            modifier = Modifier.fillMaxWidth())
         SettingsMessage(uiState.message)
     }
 }
@@ -183,19 +195,16 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         }
     }
 
-    SettingsSubPageShell("测量与用药提醒", onBack) {
-        Text(
-            text = when (authorizationStatus) {
-                ReminderAuthorizationStatus.GRANTED -> "通知授权状态：可用"
-                ReminderAuthorizationStatus.RUNTIME_PERMISSION_REQUIRED -> "通知授权状态：未授予"
-                ReminderAuthorizationStatus.SYSTEM_DISABLED -> "通知授权状态：系统已关闭"
-            },
-            color = if (authorizationStatus == ReminderAuthorizationStatus.GRANTED) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.error
+    SettingsSubPageShell("提醒中心", onBack) {
+        if (authorizationStatus != ReminderAuthorizationStatus.GRANTED) {
+            DataCard {
+                Text(
+                    "通知权限未开启。提醒仍会按时触发，但不会显示系统通知。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
-        )
+        }
         if (authorizationStatus != ReminderAuthorizationStatus.GRANTED) {
             Button(
                 onClick = {
@@ -206,6 +215,7 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 Text("前往系统通知设置")
             }
         }
+        Text("测量提醒", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         SettingsSwitchRow(
             "晨间提醒",
             uiState.morningReminderEnabled
@@ -236,8 +246,7 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        HorizontalDivider()
-        Text("服药提醒", style = MaterialTheme.typography.titleMedium)
+        Text("服药提醒", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
             "为每种降压药设置每天的服药时间，到点提醒，吃完在首页打个勾。",
             style = MaterialTheme.typography.bodySmall,
@@ -267,6 +276,7 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 viewModel.setMedicationReminderEnabled(false)
             }
         }
+        Text("系统日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         SettingsSwitchRow(
             "同步到系统日历",
             uiState.medicationCalendarSyncEnabled
@@ -299,9 +309,11 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        Text("药品与服药时间", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         var editorState by remember { mutableStateOf<MedicationEditorState?>(null) }
         uiState.medications.forEach { med ->
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -474,7 +486,8 @@ private fun ReminderTimePickerButton(
     }
     OutlinedButton(
         onClick = { showPicker = true },
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        shape = RoundedCornerShape(16.dp)
     ) {
         Text("$label：$timeText")
     }
@@ -538,6 +551,7 @@ fun SettingsInfoReleaseNotesScreen(onBack: () -> Unit) {
         AppReleaseNotes.notes.forEach { note ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(
@@ -573,8 +587,8 @@ private fun SettingsSubPageShell(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             content = content
         )
     }
@@ -582,16 +596,23 @@ private fun SettingsSubPageShell(
 
 @Composable
 private fun SettingsSwitchRow(title: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .heightIn(min = 64.dp)
+                .toggleable(value = checked, role = Role.Switch, onValueChange = onChecked)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(title)
-            Switch(checked = checked, onCheckedChange = onChecked)
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f))
+            Switch(checked = checked, onCheckedChange = null)
         }
     }
 }

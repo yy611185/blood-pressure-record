@@ -9,6 +9,7 @@ import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.data.repository.SessionRecord
 import com.example.bloodpressurerecord.data.repository.SessionSummary
+import com.example.bloodpressurerecord.data.repository.SessionReading
 import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import java.time.LocalDate
@@ -58,6 +59,75 @@ class DashboardViewModelTest {
         todayTicks.value = day2
         advanceUntilIdle()
         assertEquals(1, vm.uiState.value.todayCount)
+        assertEquals(day2, vm.uiState.value.today)
+        assertEquals(day2, vm.uiState.value.week.last().date)
+        assertEquals(null, vm.uiState.value.todayMorning)
+        assertEquals(null, vm.uiState.value.todayEvening)
+    }
+
+    @Test
+    fun `today uses the last morning and evening session and week uses each day's mean`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val yesterday = today.minusDays(1)
+        val repo = FakeRepository(
+            countsByRangeStart = mapOf(today.toEpochMillisRange(zone).startInclusive to 4),
+            summaries = listOf(
+                summary("evening-first", today, 18, 30, 150, 90),
+                summary("morning-last", today, 11, 45, 130, 85),
+                summary("prior-day", yesterday, 8, 0, 110, 70),
+                summary("evening-last", today, 22, 0, 140, 90),
+                summary("morning-first", today, 7, 0, 120, 80)
+            )
+        )
+        val vm = DashboardViewModel(repo, zoneId = zone, todayTicks = flowOf(today))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals("morning-last", state.todayMorning?.id)
+        assertEquals("evening-last", state.todayEvening?.id)
+        assertEquals(4, state.todayCount)
+        assertEquals(7, state.week.size)
+        assertEquals(yesterday, state.week[5].date)
+        assertEquals(110, state.week[5].averageSystolic)
+        assertEquals(70, state.week[5].averageDiastolic)
+        assertEquals(today, state.week[6].date)
+        assertEquals(135, state.week[6].averageSystolic)
+        assertEquals(86, state.week[6].averageDiastolic)
+        assertTrue(state.week[6].recorded)
+        assertEquals(null, state.week[4].averageSystolic)
+        assertFalse(state.week[4].recorded)
+    }
+
+    @Test
+    fun `latest detail follows its summary id when latest record changes`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val earlier = record("earlier", today, 8, 0, "测试旧记录")
+        val newest = record("newest", today, 20, 0, "测试新记录")
+        val latest = MutableStateFlow<LatestSessionSummary?>(latestSummary(earlier))
+        val earlierFlow = MutableStateFlow<SessionRecord?>(earlier)
+        val newestFlow = MutableStateFlow<SessionRecord?>(newest)
+        val repo = FakeRepository(
+            countsByRangeStart = emptyMap(),
+            latestFlow = latest,
+            sessionFlows = mapOf("earlier" to earlierFlow, "newest" to newestFlow)
+        )
+        val vm = DashboardViewModel(repo, zoneId = zone, todayTicks = flowOf(today))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+        assertEquals("earlier", vm.uiState.value.latest?.id)
+        assertEquals("测试旧记录", vm.uiState.value.latestSession?.note)
+
+        latest.value = latestSummary(newest)
+        advanceUntilIdle()
+        assertEquals("newest", vm.uiState.value.latest?.id)
+        assertEquals("newest", vm.uiState.value.latestSession?.id)
+        assertEquals("测试新记录", vm.uiState.value.latestSession?.note)
+
+        earlierFlow.value = earlier.copy(note = "过期详情不应覆盖最新记录")
+        advanceUntilIdle()
+        assertEquals("newest", vm.uiState.value.latestSession?.id)
+        assertEquals("测试新记录", vm.uiState.value.latestSession?.note)
     }
 
     @Test
@@ -99,19 +169,72 @@ class DashboardViewModelTest {
         assertFalse(vm.uiState.value.pendingMedicationTimeIds.contains(slot.timeId))
     }
 
+    private fun summary(
+        id: String,
+        day: LocalDate,
+        hour: Int,
+        minute: Int,
+        systolic: Int,
+        diastolic: Int
+    ) = SessionSummary(
+        id = id,
+        measuredAt = day.atTime(hour, minute).atZone(zone).toInstant().toEpochMilli(),
+        avgSystolic = systolic,
+        avgDiastolic = diastolic,
+        avgPulse = 70,
+        category = "NORMAL",
+        scene = "MORNING",
+        noteSummary = null,
+        containsHighRiskReading = false
+    )
+
+    private fun record(id: String, day: LocalDate, hour: Int, minute: Int, note: String) =
+        SessionRecord(
+            id = id,
+            measuredAt = day.atTime(hour, minute).atZone(zone).toInstant().toEpochMilli(),
+            scene = "MORNING",
+            note = note,
+            symptoms = emptyList(),
+            avgSystolic = 135,
+            avgDiastolic = 85,
+            avgPulse = 70,
+            category = "NORMAL",
+            containsHighRiskReading = false,
+            readings = listOf(SessionReading("$id-reading", 1, 135, 85, 70))
+        )
+
+    private fun latestSummary(record: SessionRecord) = LatestSessionSummary(
+        id = record.id,
+        measuredAt = record.measuredAt,
+        avgSystolic = record.avgSystolic,
+        avgDiastolic = record.avgDiastolic,
+        category = record.category,
+        containsHighRiskReading = record.containsHighRiskReading
+    )
+
     private class FakeRepository(
-        private val countsByRangeStart: Map<Long, Int>
+        private val countsByRangeStart: Map<Long, Int>,
+        private val summaries: List<SessionSummary> = emptyList(),
+        private val latestFlow: Flow<LatestSessionSummary?> = flowOf(null),
+        private val sessionFlows: Map<String, Flow<SessionRecord?>> = emptyMap()
     ) : BloodPressureRepository {
-        override fun observeSession(sessionId: String): Flow<SessionRecord?> = flowOf(null)
-        override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = flowOf(null)
+        override fun observeSession(sessionId: String): Flow<SessionRecord?> =
+            sessionFlows[sessionId] ?: flowOf(null)
+        override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = latestFlow
         override fun observeCalendarSessionSummaries(
             startInclusive: Long,
             endExclusive: Long
-        ): Flow<List<CalendarSessionSummary>> = flowOf(emptyList())
+        ): Flow<List<CalendarSessionSummary>> = flowOf(
+            summaries.filter { it.measuredAt in startInclusive until endExclusive }.map {
+                CalendarSessionSummary(it.measuredAt, it.noteSummary, it.containsHighRiskReading)
+            }
+        )
         override fun observeSessionSummariesInRange(
             startInclusive: Long,
             endExclusive: Long
-        ): Flow<List<SessionSummary>> = flowOf(emptyList())
+        ): Flow<List<SessionSummary>> = flowOf(
+            summaries.filter { it.measuredAt in startInclusive until endExclusive }
+        )
         override fun observePeriodStatistics(
             startInclusive: Long,
             endExclusive: Long
