@@ -62,8 +62,8 @@ class TrendViewModelTest {
         )
         advanceUntilIdle()
 
-        // 30 天默认按每日平均聚合，所以单条记录对应当天一个每日节点。
-        assertEquals(listOf("day:2026-07-25"), vm.uiState.value.series.points.map { it.id })
+        // 30 天显示每次原始测量，所以新记录直接作为自己的节点进入折线。
+        assertEquals(listOf("later"), vm.uiState.value.series.points.map { it.id })
         assertEquals(1, vm.uiState.value.series.rawRecordCount)
         assertEquals(1, vm.uiState.value.series.points.single().recordCount)
     }

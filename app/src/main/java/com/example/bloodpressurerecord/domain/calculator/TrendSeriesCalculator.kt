@@ -18,8 +18,9 @@ object TrendSeriesCalculator {
     const val CHART_SAFE_MIN = 40
     /** 输入规则允许的最高收缩压；261–300 必须仍可在趋势图中看见。 */
     const val CHART_SAFE_MAX = 300
-    private const val CHART_AXIS_MIN = 20
-    private const val CHART_AXIS_MAX = 320
+    /** Y 轴绝对上下界；图表自适应时不得越过，防止脏值把网格压扁。 */
+    const val CHART_AXIS_MIN = 20
+    const val CHART_AXIS_MAX = 320
 
     /** 舒张压的安全边界：输入规则允许 20–200。 */
     private const val DIASTOLIC_SAFE_MIN = 20
@@ -43,12 +44,13 @@ object TrendSeriesCalculator {
     }
 
     /**
-     * 数据粒度：7 天保留每次测量，30 天与全部记录都按自然日聚合成每日平均。
+     * 数据粒度：7 天与 30 天保留每次测量，只有「全部」按自然日聚合成每日平均。
      * 每日平均节点仍保留当天的半开区间，点击后可回查当天全部原始记录。
      */
     fun aggregationFor(range: TrendRange): TrendAggregation = when (range) {
-        TrendRange.DAYS_7 -> TrendAggregation.RAW
-        TrendRange.DAYS_30,
+        TrendRange.DAYS_7,
+        TrendRange.DAYS_30 -> TrendAggregation.RAW
+
         TrendRange.ALL -> TrendAggregation.DAILY
     }
 

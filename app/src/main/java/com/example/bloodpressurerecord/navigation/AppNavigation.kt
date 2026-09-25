@@ -98,8 +98,8 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
         // 系统栏 inset 全部交给页面自己处理（见 ui/common/AppInsets.kt）：
         // 根布局只做容器，避免出现「innerPadding + 页面 navigationBarsPadding」的重复叠加。
         contentWindowInsets = WindowInsets(0.dp)
-    ) { _ ->
-        Box(Modifier.fillMaxSize()) {
+    ) { innerPadding ->
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
             NavHost(
                 navController = navController,
                 startDestination = AppDestination.Measure.route,

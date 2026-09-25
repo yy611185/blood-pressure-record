@@ -12,6 +12,7 @@ import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
+import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import java.time.ZoneId
 import java.time.Instant
 import java.time.LocalDate
@@ -169,12 +170,18 @@ class TrendViewModel(
         selectedMetric.value = metric
     }
 
+    /**
+     * 打开某一点所属日期的原始测量明细。
+     *
+     * 7 天 / 30 天的节点是单次测量，但明细按**自然日**给出当天全部记录；
+     * 「全部」范围的节点本身就是每日平均，半开区间已经是当天。
+     */
     fun openPointDetails(point: TrendPoint) {
-        if (point.aggregation != TrendAggregation.DAILY) return
         details.value = TrendDayDetails(point = point)
         viewModelScope.launch {
+            val (startInclusive, endExclusive) = dayRangeOf(point)
             runCatching {
-                trendRepository.getRecords(point.intervalStart, point.intervalEndExclusive)
+                trendRepository.getRecords(startInclusive, endExclusive)
             }.onSuccess { records ->
                 details.update { current ->
                     if (current?.point?.id != point.id) current else current.copy(
@@ -189,6 +196,16 @@ class TrendViewModel(
                 }
             }
         }
+    }
+
+    /** 节点所属自然日的半开区间。 */
+    private fun dayRangeOf(point: TrendPoint): Pair<Long, Long> {
+        if (point.aggregation == TrendAggregation.DAILY) {
+            return point.intervalStart to point.intervalEndExclusive
+        }
+        val date = Instant.ofEpochMilli(point.timestamp).atZone(zoneId).toLocalDate()
+        val range = date.toEpochMillisRange(zoneId)
+        return range.startInclusive to range.endExclusive
     }
 
     fun dismissDayDetails() {

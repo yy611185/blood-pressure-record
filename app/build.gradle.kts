@@ -14,8 +14,8 @@ android {
         applicationId = "com.yang.bloodpressure"
         minSdk = 26
         targetSdk = 36
-        versionCode = 32
-        versionName = "1.8.5"
+        versionCode = 33
+        versionName = "2.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

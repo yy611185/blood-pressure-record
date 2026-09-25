@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.ui.history
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendRange
+import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.abs
@@ -23,13 +24,18 @@ class TrendChartMathTest {
         assertEquals(90f, lateX, 0.001f)
     }
 
+    /**
+     * 可视窗口边界仍然按「排序后的时间」二分：窗口外的点只多带左右各一个，
+     * 用来让折线连到绘图区边界。
+     */
     @Test
     fun visiblePoints_usesSortedTimeWindowBoundaries() {
         val points = (0 until 10).map { point(timestamp = it * 1_000L) }
 
         val visible = TrendChartMath.visiblePoints(points, 2_500L, 6_000L)
 
-        assertEquals(listOf(3_000L, 4_000L, 5_000L, 6_000L), visible.map { it.timestamp })
+        // 窗口内 3_000–6_000，外加左右各一个边界点。
+        assertEquals(listOf(2_000L, 3_000L, 4_000L, 5_000L, 6_000L, 7_000L), visible.map { it.timestamp })
     }
 
     @Test
@@ -43,7 +49,8 @@ class TrendChartMathTest {
 
         val visible = TrendChartMath.visiblePoints(points, 2_000L, 2_000L)
 
-        assertEquals(listOf("b", "c"), visible.map { it.id })
+        // 同刻度的点一个都不能漏，窗口外同样各带一个边界点。
+        assertEquals(listOf("a", "b", "c", "d"), visible.map { it.id })
     }
 
     @Test
@@ -90,35 +97,207 @@ class TrendChartMathTest {
     fun viewport_handlesSinglePointRangeWithoutInvalidBounds() {
         val viewport = TrendTimeViewportState()
 
-        viewport.reset(defaultStart = 5_000L, defaultEnd = 5_001L)
-        viewport.zoomBy(
-            zoomChange = 2f,
-            focusMillis = 5_000L,
-            seriesStart = 5_000L,
-            seriesEnd = 5_001L,
-            minSpanMillis = TrendChartMath.minViewportSpan(TrendRange.DAYS_7)
+        viewport.reset(
+            domainStart = 5_000L,
+            domainEnd = 5_001L,
+            defaultStart = 5_000L,
+            defaultEnd = 5_001L
         )
+        viewport.zoomBy(zoomChange = 2f, focusRatio = 0.0, minSpanRatio = 0.01)
 
-        assertEquals(5_000L, viewport.startMillis)
-        assertEquals(5_001L, viewport.endMillis)
+        assertEquals(5_000L, viewport.startMillis())
+        assertEquals(5_001L, viewport.endMillis())
     }
 
     @Test
-    fun viewport_panClampsAtBothSeriesBoundaries() {
+    fun viewport_panClampsAtBothDomainBoundaries() {
         val viewport = TrendTimeViewportState()
-        viewport.reset(defaultStart = 0L, defaultEnd = 10_000L)
-        viewport.zoomBy(
-            zoomChange = 2f,
-            focusMillis = 5_000L,
-            seriesStart = 0L,
-            seriesEnd = 10_000L,
-            minSpanMillis = 1_000L
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = 10_000L,
+            defaultStart = 0L,
+            defaultEnd = 10_000L
+        )
+        viewport.zoomBy(zoomChange = 2f, focusRatio = 0.5, minSpanRatio = 0.01)
+
+        // 放大后向左拖过头：窗口停在数据域起点，不会拖出真实数据范围。
+        viewport.panBy(deltaRatio = -100.0)
+        assertEquals(0L, viewport.startMillis())
+        // 向右拖过头：窗口右端停在数据域终点。
+        viewport.panBy(deltaRatio = 100.0)
+        assertEquals(10_000L, viewport.endMillis())
+        // 平移不改变缩放倍数，窗口仍然是放大后的宽度。
+        assertEquals(2f, viewport.zoom, 0.001f)
+    }
+
+    @Test
+    fun viewport_zoomKeepsGestureCentreAnchored() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = 10_000L,
+            defaultStart = 0L,
+            defaultEnd = 10_000L
+        )
+        // 以视野中心为缩放中心放大一倍：该点对应的时间不应移动。
+        val focusRatio = 0.5
+        val anchorBefore = viewport.startMillis() +
+            (viewport.endMillis() - viewport.startMillis()) * focusRatio
+
+        viewport.zoomBy(zoomChange = 2f, focusRatio = focusRatio, minSpanRatio = 0.01)
+
+        assertEquals(2f, viewport.zoom, 0.05f)
+        val anchorAfter = viewport.startMillis() +
+            (viewport.endMillis() - viewport.startMillis()) * focusRatio
+        assertTrue("缩放中心应保持不动", abs(anchorAfter - anchorBefore) <= 5L)
+    }
+
+    @Test
+    fun viewport_zoomIsMonotonicAndBoundedByMaxZoom() {
+        val viewport = TrendTimeViewportState()
+        val oneYear = 365L * 24L * 60L * 60L * 1_000L
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = oneYear,
+            defaultStart = 0L,
+            defaultEnd = oneYear
         )
 
-        viewport.panBy(deltaMillis = -100_000L, seriesStart = 0L, seriesEnd = 10_000L)
-        assertEquals(0L, viewport.startMillis)
-        viewport.panBy(deltaMillis = 100_000L, seriesStart = 0L, seriesEnd = 10_000L)
-        assertEquals(10_000L, viewport.endMillis)
+        // 反复放大会单调收紧窗口，并最终被 MAX_ZOOM 拦住。
+        var previousZoom = viewport.zoom
+        repeat(40) {
+            viewport.zoomBy(zoomChange = 5f, focusRatio = 0.5, minSpanRatio = 0.0000001)
+            assertTrue("缩放应单调不降", viewport.zoom >= previousZoom - 0.001f)
+            previousZoom = viewport.zoom
+        }
+
+        assertTrue("缩放倍数必须有上限", viewport.zoom <= TrendChartMath.MAX_ZOOM)
+        assertEquals(TrendChartMath.MAX_ZOOM, viewport.zoom, 0.5f)
+        assertTrue(viewport.endMillis() > viewport.startMillis())
+        assertTrue(viewport.startMillis() >= 0L)
+        assertTrue(viewport.endMillis() <= oneYear)
+    }
+
+    @Test
+    fun viewport_doubleTapRestoresDefaultWindow() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = 10_000L,
+            defaultStart = 4_000L,
+            defaultEnd = 6_000L
+        )
+        viewport.zoomBy(zoomChange = 3f, focusRatio = 0.5, minSpanRatio = 0.001)
+        viewport.panBy(deltaRatio = 0.3)
+
+        assertTrue(!viewport.isAtDefault)
+
+        viewport.resetToDefault()
+
+        assertTrue(viewport.isAtDefault)
+        assertEquals(4_000L, viewport.startMillis())
+        assertEquals(6_000L, viewport.endMillis())
+    }
+
+    @Test
+    fun panIsNoOpAtDefaultZoom() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = 10_000L,
+            defaultStart = 0L,
+            defaultEnd = 10_000L
+        )
+
+        viewport.panBy(deltaRatio = 0.4)
+
+        assertEquals(0L, viewport.startMillis())
+        assertEquals(10_000L, viewport.endMillis())
+    }
+
+    /**
+     * 「上一条 / 下一条」把选中点带回视野：窗口宽度不变，目标时间落在正中，
+     * 并且靠近数据域边界时不会把窗口拖出域外。
+     */
+    @Test
+    fun centerOnRatio_keepsSpanAndClampsAtDomainEdges() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = 1_000L,
+            defaultStart = 0L,
+            defaultEnd = 1_000L
+        )
+        viewport.zoomBy(zoomChange = 5f, focusRatio = 0.5, minSpanRatio = 0.05)
+        val span = viewport.endMillis() - viewport.startMillis()
+        assertEquals(200L, span)
+
+        viewport.centerOnRatio(500L)
+        assertEquals(400L, viewport.startMillis())
+        assertEquals(600L, viewport.endMillis())
+
+        viewport.centerOnRatio(900L)
+        assertEquals(1_000L, viewport.endMillis())
+        assertEquals(1_000L - span, viewport.startMillis())
+    }
+
+    /**
+     * 视窗版本号只在窗口真的变化时自增：图表靠它区分「用户自己在缩放/平移」
+     * 和「上一条 / 下一条换了选点」，避免选中一个点之后再也拖不动图表。
+     */
+    @Test
+    fun viewportRevisionOnlyChangesWhenWindowActuallyMoves() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(
+            domainStart = 0L,
+            domainEnd = 10_000L,
+            defaultStart = 0L,
+            defaultEnd = 10_000L
+        )
+
+        viewport.zoomBy(zoomChange = 2f, focusRatio = 0.5, minSpanRatio = 0.01)
+        val afterZoom = viewport.revision
+        assertTrue(afterZoom > 0)
+
+        // 已经在数据域边界还继续往外拖：窗口没动，版本号不应该再涨。
+        viewport.panBy(deltaRatio = -100.0)
+        viewport.panBy(deltaRatio = -100.0)
+        val afterClampedPan = viewport.revision
+
+        // 真正拖得动的一次平移必须让版本号变化。
+        viewport.panBy(deltaRatio = 0.2)
+        assertTrue(viewport.revision > afterClampedPan)
+
+        // 「恢复默认」同样会改变窗口内容。
+        val beforeReset = viewport.revision
+        viewport.resetToDefault()
+        assertTrue(viewport.revision > beforeReset)
+        assertTrue(viewport.isAtDefault)
+    }
+
+    /**
+     * 折线取「窗口内的点 + 左右各一个点」：曲线在缩放/平移时能连到绘图区边界，
+     * 又不会像旧写法那样把窗口之外直到样本首尾的点全部喂给绘制层——那些点会被
+     * 钳在 ±5% 处，在 Plot Area 之外堆成一条竖直的点列（折线越界的来源）。
+     */
+    @Test
+    fun visiblePoints_extendsWindowByExactlyOnePointOnEachSide() {
+        val points = (0L..50L).map { index -> point(timestamp = index * 20_000L) }
+
+        val visible = TrendChartMath.visiblePoints(points, 300_000L, 500_000L)
+
+        // 窗口内 11 个点（300s–500s），左右各外扩一个点。
+        assertEquals(13, visible.size)
+        assertEquals(280_000L, visible.first().timestamp)
+        assertEquals(520_000L, visible.last().timestamp)
+        assertTrue(visible.count { it.timestamp in 300_000L..500_000L } == 11)
+
+        // 窗口远离样本边界时，不再吃进边界附近的点。
+        assertEquals(points.size, TrendChartMath.visiblePoints(points, 0L, 1_000_000L).size)
+        assertEquals(
+            listOf(0L, 20_000L),
+            TrendChartMath.visiblePoints(points, 0L, 0L).map { it.timestamp }
+        )
     }
 
     @Test
@@ -328,6 +507,87 @@ class TrendChartMathTest {
         assertEquals(middle.toFloat(), TrendChartMath.timeAtX(middleX, 0f, 200f, start, end).toFloat(), 1f)
     }
 
+    @Test
+    fun hitTest_prefersNodeInsideTouchRadiusAndFallsBackToNearestX() {
+        val visible = listOf(
+            point(timestamp = 0L, id = "a", systolic = 120, diastolic = 80),
+            point(timestamp = 5_000L, id = "b", systolic = 150, diastolic = 95)
+        )
+        val chart = projection(visibleStart = 0L, visibleEnd = 5_000L)
+
+        // 触点落在 b 的收缩压节点附近（热区内），应命中 b。
+        val nodeX = chart.xOfTime(5_000L)
+        val nodeY = chart.yOfValue(150)
+        assertEquals(
+            "b",
+            TrendChartMath.hitTest(
+                projection = chart,
+                visible = visible,
+                x = nodeX + 6f,
+                y = nodeY + 6f,
+                showSystolic = true,
+                showDiastolic = true,
+                touchRadiusPx = 22f
+            )?.id
+        )
+
+        // 触点远离任何节点：退化到「按 X 最近的可见点」。
+        assertEquals(
+            "a",
+            TrendChartMath.hitTest(
+                projection = chart,
+                visible = visible,
+                x = chart.geometry.left + 1f,
+                y = chart.geometry.top,
+                showSystolic = true,
+                showDiastolic = true,
+                touchRadiusPx = 22f
+            )?.id
+        )
+    }
+
+    @Test
+    fun stableYAxis_neverClipsVisibleDataAndKeepsTenMillimetreSteps() {
+        val previous = TrendYAxis(min = 60, max = 160, tickStep = 10)
+
+        // 常规数据：刻度间隔保持 10 mmHg。
+        val normal = listOf(
+            point(timestamp = 0L, systolic = 128, diastolic = 82),
+            point(timestamp = 1_000L, systolic = 134, diastolic = 86)
+        )
+        val normalAxis = TrendChartMath.stableYAxis(previous, normal)
+        assertEquals(10, normalAxis.tickStep)
+        assertTrue(normal.all { it.systolic in normalAxis.min..normalAxis.max })
+        assertTrue(normal.all { it.diastolic in normalAxis.min..normalAxis.max })
+        // 参考线 90 / 140 落在默认视野内，参考虚线仍然可见。
+        assertTrue(140 in normalAxis.min..normalAxis.max)
+        assertTrue(90 in normalAxis.min..normalAxis.max)
+
+        // 超出默认范围的数据必须自动扩展，不能被裁切。
+        val extreme = listOf(
+            point(timestamp = 0L, systolic = 280, diastolic = 170),
+            point(timestamp = 1_000L, systolic = 95, diastolic = 45)
+        )
+        val extremeAxis = TrendChartMath.stableYAxis(previous, extreme)
+        assertTrue(extreme.all { it.systolic in extremeAxis.min..extremeAxis.max })
+        assertTrue(extreme.all { it.diastolic in extremeAxis.min..extremeAxis.max })
+        assertTrue(extremeAxis.max > previous.max)
+        assertTrue(extremeAxis.min < previous.min)
+    }
+
+    @Test
+    fun stableYAxis_keepsPreviousAxisWhileDataBarelyChanges() {
+        val previous = TrendYAxis(min = 60, max = 160, tickStep = 10)
+        val slightlyDifferent = listOf(
+            point(timestamp = 0L, systolic = 126, diastolic = 80)
+        )
+
+        val axis = TrendChartMath.stableYAxis(previous, slightlyDifferent)
+
+        // 变化未超过稳定带：沿用旧轴，拖动时不会逐帧抖动。
+        assertEquals(previous, axis)
+    }
+
     private fun point(
         timestamp: Long,
         id: String = "p-$timestamp",
@@ -346,6 +606,28 @@ class TrendChartMathTest {
             containsHighRiskReading = false,
             recordCount = 1,
             aggregation = TrendAggregation.RAW
+        )
+    }
+
+    private fun projection(
+        visibleStart: Long,
+        visibleEnd: Long,
+        yAxis: TrendYAxis = TrendYAxis(min = 60, max = 160, tickStep = 10)
+    ): ChartProjection {
+        return ChartProjection(
+            geometry = ChartGeometry(
+                width = 400f,
+                height = 260f,
+                left = 40f,
+                right = 380f,
+                top = 20f,
+                bottom = 220f
+            ),
+            domainStart = visibleStart,
+            domainEnd = visibleEnd,
+            startRatio = 0.0,
+            endRatio = 1.0,
+            yAxis = yAxis
         )
     }
 }

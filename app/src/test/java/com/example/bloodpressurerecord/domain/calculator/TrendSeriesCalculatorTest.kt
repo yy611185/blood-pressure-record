@@ -31,7 +31,7 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
-    fun thirtyDays_aggregatesByLocalDateInsteadOfDrawingEveryMeasurement() {
+    fun thirtyDays_keepsEveryRawMeasurement() {
         val records = listOf(
             record("d1-a", millis("2026-07-10", 7), 120, 80),
             record("d1-b", millis("2026-07-10", 21), 130, 90),
@@ -42,16 +42,16 @@ class TrendSeriesCalculatorTest {
 
         val series = TrendSeriesCalculator.build(records, TrendRange.DAYS_30, now, zone)
 
+        // 30 天改为显示每次原始测量，不再聚合成每日平均。
         assertEquals(5, series.rawRecordCount)
-        assertEquals(3, series.points.size)
-        assertTrue(series.points.all { it.aggregation == TrendAggregation.DAILY })
-        assertEquals(listOf(2, 1, 2), series.points.map { it.recordCount })
-        assertEquals(125, series.points.first().systolic)
-        assertEquals(85, series.points.first().diastolic)
-        assertEquals("day:2026-07-10", series.points.first().id)
-        // 每日节点保留当天半开区间，点击后可回查当天全部原始记录。
+        assertEquals(5, series.points.size)
+        assertTrue(series.points.all { it.aggregation == TrendAggregation.RAW })
+        assertTrue(series.points.all { it.recordCount == 1 })
+        assertEquals(records.map { it.measuredAt }, series.points.map { it.timestamp })
+        assertEquals(records.map { it.id }, series.points.map { it.id })
+        // 原始点保留单点半开区间，点击后仍能回查到该次测量。
         assertEquals(
-            millis("2026-07-11", 0) - millis("2026-07-10", 0),
+            1L,
             series.points.first().intervalEndExclusive - series.points.first().intervalStart
         )
     }
@@ -62,8 +62,9 @@ class TrendSeriesCalculatorTest {
             TrendAggregation.RAW,
             TrendSeriesCalculator.aggregationFor(TrendRange.DAYS_7)
         )
+        // 30 天改为显示原始测量；只有「全部」按自然日聚合成每日平均。
         assertEquals(
-            TrendAggregation.DAILY,
+            TrendAggregation.RAW,
             TrendSeriesCalculator.aggregationFor(TrendRange.DAYS_30)
         )
         assertEquals(
@@ -188,7 +189,13 @@ class TrendSeriesCalculatorTest {
         assertEquals(2, series.points.first().recordCount)
         assertEquals(125, series.points.first().systolic)
         assertEquals(85, series.points.first().diastolic)
+        assertEquals("day:2026-07-20", series.points.first().id)
         assertTrue(series.points.all { it.aggregation == TrendAggregation.DAILY })
+        // 每日节点保留当天半开区间，点击后可回查当天全部原始记录。
+        assertEquals(
+            millis("2026-07-21", 0) - millis("2026-07-20", 0),
+            series.points.first().intervalEndExclusive - series.points.first().intervalStart
+        )
     }
 
     @Test
@@ -329,7 +336,7 @@ class TrendSeriesCalculatorTest {
         assertEquals(35, weekSeries.points.size)
         assertTrue(weekSeries.points.all { it.aggregation == TrendAggregation.RAW })
 
-        // 30 天约 181 条：聚合后每天一个节点。
+        // 30 天约 180 条：保留每次测量，不再聚合成每日平均。
         val windowStart = TrendSeriesCalculator.rangeStart(TrendRange.DAYS_30, now, zone)
         val thirtyDayRecords = (0 until 180).map { index ->
             record(
@@ -342,9 +349,9 @@ class TrendSeriesCalculatorTest {
         val thirtyDaySeries =
             TrendSeriesCalculator.build(thirtyDayRecords, TrendRange.DAYS_30, now, zone)
         assertEquals(180, thirtyDaySeries.rawRecordCount)
-        assertEquals(30, thirtyDaySeries.points.size)
-        assertTrue(thirtyDaySeries.points.all { it.aggregation == TrendAggregation.DAILY })
-        assertEquals(6, thirtyDaySeries.points.first().recordCount)
+        assertEquals(180, thirtyDaySeries.points.size)
+        assertTrue(thirtyDaySeries.points.all { it.aggregation == TrendAggregation.RAW })
+        assertEquals(1, thirtyDaySeries.points.first().recordCount)
 
         // 全部约 1000 条：同样按自然日聚合，耗时可控。
         val allRecords = (0 until 1_000).map { index ->

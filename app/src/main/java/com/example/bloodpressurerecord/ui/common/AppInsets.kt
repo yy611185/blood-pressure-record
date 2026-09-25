@@ -3,7 +3,7 @@ package com.example.bloodpressurerecord.ui.common
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -21,10 +21,16 @@ import com.example.bloodpressurerecord.ui.theme.AppDimensions
  *   两者都**已经包含**导航栏安全区，页面不要再额外加 `navigationBarsPadding()`。
  */
 
-/** 状态栏占位（已包含页面自身的常规顶部间距）。 */
+/**
+ * 状态栏占位（已包含页面自身的常规顶部间距）。
+ *
+ * 取 `safeDrawing` 的顶部而不是只取 `statusBars`：前者同时覆盖状态栏与刘海/挖孔
+ * 的 display cutout，在 Android 15 强制 edge-to-edge 的机型上也能给出非零值，
+ * 因此标题不会被状态栏压住——且全程由系统 inset 推导，没有任何机型硬编码高度。
+ */
 @Composable
 fun statusBarTopPadding(extra: Dp = 0.dp): Dp =
-    WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + extra
+    WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding() + extra
 
 /** 导航栏安全区高度，用于自定义贴底元素（如 Snackbar、Dock）。 */
 @Composable
