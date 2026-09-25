@@ -7,8 +7,17 @@ enum class TrendRange(val label: String, val title: String) {
 }
 
 enum class TrendAggregation {
+    /** 每条测量记录一个节点（仅 7 天范围使用）。 */
     RAW,
+
+    /** 每个自然日一个节点，数值为当天全部记录的平均值。 */
     DAILY
+}
+
+/** 页面展示用的粒度文案，和实际聚合方式同源，避免标题与数据不一致。 */
+fun TrendAggregation.displayLabel(): String = when (this) {
+    TrendAggregation.RAW -> "每次测量"
+    TrendAggregation.DAILY -> "每日平均"
 }
 
 data class TrendRecord(
@@ -49,5 +58,13 @@ data class TrendSeries(
     val averageDiastolic: Int?,
     val yAxis: TrendYAxis,
     val rangeStart: Long,
-    val rangeEnd: Long
+    val rangeEnd: Long,
+    /** 本范围的聚合方式：7 天为原始记录，30 天与全部为每日平均。 */
+    val aggregation: TrendAggregation = TrendAggregation.RAW,
+    /** 范围起点（自然周期边界），与真实样本区间区分开。 */
+    val windowStart: Long = rangeStart,
+    /** 范围内第一次测量的时间；没有记录时为 null。 */
+    val firstMeasuredAt: Long? = null,
+    /** 范围内最后一次测量的时间；没有记录时为 null。 */
+    val lastMeasuredAt: Long? = null
 )

@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.AppTopBar
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
@@ -129,15 +130,20 @@ fun EditSessionScreen(
         // 顶部安全区由 topBar 槽承担；底部安全区由滚动内容自己负责。
         contentWindowInsets = WindowInsets(0.dp),
         topBar = {
-            AppTopBar(title = when (step) {
-                1 -> "修改读数"
-                2 -> "测量情况"
-                else -> "已更新"
-            }, onBack = requestBack, hideOnScroll = topBarScroll)
+            // 与新增记录页一致：contentWindowInsets 归零后，顶栏外层的状态栏安全区
+            // 必须自己补，否则标题、返回按钮会与系统状态栏图标重叠。
+            Box(modifier = Modifier.padding(top = statusBarTopPadding())) {
+                AppTopBar(title = when (step) {
+                    1 -> "修改读数"
+                    2 -> "测量情况"
+                    else -> "已更新"
+                }, onBack = requestBack, hideOnScroll = topBarScroll)
+            }
         }
     ) { padding ->
         if (state.loading) {
-            Text("正在加载记录…", modifier = Modifier.padding(padding).padding(AppSpacing.large).statusBarsPadding())
+            // 顶部安全区已由 topBar 槽承担，这里只保留页面内边距。
+            Text("正在加载记录…", modifier = Modifier.padding(padding).padding(AppSpacing.large))
             return@Scaffold
         }
         Column(

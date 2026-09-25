@@ -52,8 +52,13 @@ object AppDimensions {
     /** 有悬浮 Dock 的页面，内容与 Dock 胶囊顶边之间额外保留的间距。 */
     val dockContentGap = 12.dp
 
-    /** 血压输入框高度（紧凑三栏布局）。 */
-    val numberFieldHeight = 64.dp
+    /**
+     * 血压输入框高度（紧凑三栏布局）。
+     *
+     * 必须留得下「三位数字 + 光标」：数字字号上限 38sp 时，单行实际行高约 46–50dp，
+     * 64dp 会把数字的上下缘贴到边框上（视觉上像被裁切），因此放宽到 76dp。
+     */
+    val numberFieldHeight = 76.dp
 }
 
 enum class BloodPressureVisualStatus {

@@ -385,9 +385,11 @@ private fun CompactNumberField(
             isError = isError,
             singleLine = true,
             shape = MaterialTheme.shapes.large,
+            // 不要显式写 lineHeight = numberSize：单行输入框的行高被压到与字号相等时，
+            // 数字的上下升降部（以及光标）会被行框裁掉，三位数看起来像缺一截。
+            // 交给字体自身的默认行高，配合 76dp 的输入框高度自然垂直居中。
             textStyle = TextStyle(
                 fontSize = numberSize,
-                lineHeight = numberSize,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 color = colors.onSurface
@@ -404,10 +406,10 @@ private fun CompactNumberField(
                 .height(AppDimensions.numberFieldHeight)
                 .semantics { contentDescription = accessibleLabel },
             placeholder = {
+                // 占位符与输入文字共用同一套垂直度量，避免占位态与输入态高度不一致。
                 Text(
                     "—",
                     fontSize = numberSize,
-                    lineHeight = numberSize,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                     color = colors.onSurfaceVariant.copy(alpha = 0.45f)
@@ -423,8 +425,13 @@ private fun CompactNumberField(
     }
 }
 
-/** 单栏数字字号上限（普通机型）。 */
-private const val MaxNumberFieldFontSize = 48f
+/**
+ * 单栏数字字号上限（普通机型）。
+ *
+ * 三栏一行时每栏可用宽度约 90–100dp，48sp 的 Bold 三位数（如 199）会超出栏宽被横向裁切，
+ * 收窄到 38sp 后三位数仍醒目，同时留有足够宽度与光标空间。
+ */
+private const val MaxNumberFieldFontSize = 38f
 /** 大字体/窄屏下允许的最小字号。 */
 private const val MinNumberFieldFontSize = 32f
 /** 一行放下三栏所需的最小可用宽度（dp，已按 fontScale 折算）。 */

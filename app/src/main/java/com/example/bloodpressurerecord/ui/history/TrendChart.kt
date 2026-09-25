@@ -8,35 +8,32 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -44,6 +41,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
@@ -55,11 +55,11 @@ import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.domain.calculator.TrendSeriesCalculator
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
+import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
-import com.example.bloodpressurerecord.ui.common.StatusChip
-import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
-import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
+import com.example.bloodpressurerecord.domain.model.displayLabel
+import com.example.bloodpressurerecord.ui.theme.WarmError
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -70,17 +70,54 @@ import kotlin.math.roundToLong
 /** 图表手势状态机：待定 → 平移缩放 / 长按十字指针 / 点按。 */
 private enum class ChartGestureMode { PENDING, TRANSFORM, CROSSHAIR }
 
+/**
+ * 图表内所有颜色在这里统一取值，绘制函数不再各写各的常量。
+ * 收缩压沿用陶土橙（主色），舒张压沿用蓝色（三级容器前景色）。
+ */
+@Immutable
+private data class TrendChartPalette(
+    val systolic: Color,
+    val diastolic: Color,
+    val axis: Color,
+    val grid: Color,
+    val reference: Color,
+    val targetDim: Float,
+    val nodeBackground: Color,
+    val selectionRing: Color,
+    val outlier: Color,
+    val hint: Color
+)
+
+@Composable
+private fun trendChartPalette(): TrendChartPalette {
+    val scheme = MaterialTheme.colorScheme
+    // 颜色来源：主色 = 收缩压，三级容器前景色 = 舒张压；其余中性色从同一套
+    // 主题派生。旧文件里未被引用的 SYS_/DIA_/GRID_/AXIS_/REFERENCE_ 常量已删除。
+    return TrendChartPalette(
+        systolic = scheme.primary,
+        diastolic = scheme.onTertiaryContainer,
+        axis = scheme.onSurfaceVariant,
+        grid = scheme.onSurfaceVariant.copy(alpha = 0.16f),
+        reference = scheme.onSurfaceVariant.copy(alpha = 0.5f),
+        targetDim = 0.42f,
+        nodeBackground = scheme.surface,
+        selectionRing = scheme.primary,
+        outlier = WarmError,
+        hint = scheme.onSurfaceVariant
+    )
+}
+
 @Composable
 fun SessionTimeSeriesDualLineChart(
     series: TrendSeries,
+    selectedPoint: TrendPoint?,
+    onPointSelected: (TrendPoint?, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     targetSystolic: Int? = null,
     targetDiastolic: Int? = null,
     showSystolic: Boolean = true,
     showDiastolic: Boolean = true,
-    emptyTitle: String = "暂无趋势数据",
-    averageLabel: String = "平均",
-    onPointActivated: (TrendPoint) -> Unit = {}
+    emptyTitle: String = "暂无趋势数据"
 ) {
     val points = series.points
     if (points.isEmpty()) {
@@ -89,30 +126,26 @@ fun SessionTimeSeriesDualLineChart(
     }
 
     val density = LocalDensity.current
-    val nodeBackgroundColor = MaterialTheme.colorScheme.surface
-    val systolicColor = MaterialTheme.colorScheme.primary
-    val diastolicColor = MaterialTheme.colorScheme.onTertiaryContainer
-    val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
-    val referenceColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
+    val palette = trendChartPalette()
     val zoneId = remember { ZoneId.systemDefault() }
     val textMeasurer = rememberTextMeasurer()
-    val viewport = remember(series.range, series.rangeStart, series.rangeEnd) {
-        TrendTimeViewportState()
-    }
-    // activePoint：点按选中或十字指针当前吸附的数据点；读数栏优先显示它。
-    var activePoint by remember(points) { mutableStateOf<TrendPoint?>(null) }
-    var crosshairActive by remember(points) { mutableStateOf(false) }
+    val viewport = remember(series.range) { TrendTimeViewportState() }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var isInteracting by remember { mutableStateOf(false) }
     val sysPath = remember { Path() }
     val diaPath = remember { Path() }
     val haptics = LocalHapticFeedback.current
 
+    // 默认视野：聚焦真实有数据的区间。范围切换或跨零点才重置，
+    // 同一天内新增记录不会把用户已经缩放/平移过的视野拉回去。
     LaunchedEffect(series.range, series.rangeStart, series.rangeEnd) {
-        viewport.reset(series.rangeStart, series.rangeEnd)
-        activePoint = null
-        crosshairActive = false
+        val (defaultStart, defaultEnd) = TrendChartMath.defaultViewport(
+            points = points,
+            range = series.range,
+            windowStart = series.rangeStart,
+            windowEndInclusive = series.rangeEnd
+        )
+        viewport.reset(defaultStart, defaultEnd)
         isInteracting = false
     }
 
@@ -139,7 +172,7 @@ fun SessionTimeSeriesDualLineChart(
         )
     }
     // 日期与时间作为一个完整文本块测量，行高、底部留白和横向避让使用同一尺寸。
-    val axisLabelStyle = TextStyle(color = axisColor, fontSize = 12.sp, lineHeight = 16.sp)
+    val axisLabelStyle = TextStyle(color = palette.axis, fontSize = 12.sp, lineHeight = 16.sp)
     val axisLabelLayouts = axisTicks.map { tick ->
         textMeasurer.measure(
             text = listOfNotNull(tick.primary, tick.secondary).joinToString("\n"),
@@ -152,28 +185,38 @@ fun SessionTimeSeriesDualLineChart(
         textMeasurer.measure("00:00\n00-00", axisLabelStyle, softWrap = false).size.height +
             16.dp.toPx()
     }
-    // 读数栏内容：指针/点按选中的点，否则回落到可见范围内最新一点。
-    val readoutPoint = activePoint ?: visiblePoints.lastOrNull() ?: points.last()
-
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // 指针吸附点始终显示在图表上方。
-        ChartReadoutBar(
-            point = readoutPoint,
-            isPinned = activePoint != null,
-            crosshairActive = crosshairActive
+    val referenceLabels = buildReferenceLabels(
+        yAxis = series.yAxis,
+        showSystolic = showSystolic,
+        showDiastolic = showDiastolic
+    ).map { reference ->
+        RenderedReferenceLabel(
+            value = reference.value,
+            layout = textMeasurer.measure(
+                reference.label,
+                TextStyle(color = palette.reference, fontSize = 10.sp),
+                softWrap = false
+            )
         )
+    }
+    val targetSystolicLabel = targetSystolic
+        ?.takeIf { showSystolic && it in series.yAxis.min..series.yAxis.max }
+        ?.let { "目标收缩压 $it" }
+    val targetDiastolicLabel = targetDiastolic
+        ?.takeIf { showDiastolic && it in series.yAxis.min..series.yAxis.max }
+        ?.let { "目标舒张压 $it" }
+    val chartDescription = remember(series, showSystolic, showDiastolic) {
+        buildChartDescription(series, showSystolic, showDiastolic)
+    }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            LegendItem("收缩压", systolicColor)
-            LegendItem("舒张压", diastolicColor)
-        }
-
+    Column(modifier = modifier) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(CHART_HEIGHT)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp))
+                .background(palette.nodeBackground, RoundedCornerShape(18.dp))
                 .onSizeChanged { canvasSize = it }
+                .semantics { contentDescription = chartDescription }
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val currentGeometry = ChartGeometry.create(
@@ -188,16 +231,34 @@ fun SessionTimeSeriesDualLineChart(
                     yAxis = series.yAxis
                 )
                 drawYAxisGrid(
-                    currentGeometry, scaler, series.yAxis, textMeasurer, gridColor, axisColor
+                    currentGeometry, scaler, series.yAxis, textMeasurer, palette
                 )
                 drawReferenceLines(
-                    currentGeometry, scaler, series.yAxis, referenceColor
+                    geometry = currentGeometry,
+                    scaler = scaler,
+                    yAxis = series.yAxis,
+                    showSystolic = showSystolic,
+                    showDiastolic = showDiastolic,
+                    labels = referenceLabels,
+                    palette = palette
                 )
-                targetSystolic?.takeIf { it in series.yAxis.min..series.yAxis.max }?.let {
-                    drawTargetLine(scaler.yOf(it), currentGeometry, "目标收缩压 $it", systolicColor, textMeasurer)
+                targetSystolicLabel?.let { label ->
+                    drawTargetLine(
+                        y = scaler.yOf(targetSystolic),
+                        geometry = currentGeometry,
+                        label = label,
+                        color = palette.systolic.copy(alpha = palette.targetDim),
+                        textMeasurer = textMeasurer
+                    )
                 }
-                targetDiastolic?.takeIf { it in series.yAxis.min..series.yAxis.max }?.let {
-                    drawTargetLine(scaler.yOf(it), currentGeometry, "目标舒张压 $it", diastolicColor, textMeasurer)
+                targetDiastolicLabel?.let { label ->
+                    drawTargetLine(
+                        y = scaler.yOf(targetDiastolic),
+                        geometry = currentGeometry,
+                        label = label,
+                        color = palette.diastolic.copy(alpha = palette.targetDim),
+                        textMeasurer = textMeasurer
+                    )
                 }
             }
 
@@ -208,10 +269,11 @@ fun SessionTimeSeriesDualLineChart(
                         var lastTapAt = 0L
                         var lastTapPosition = Offset(-10_000f, -10_000f)
 
-                        // 按 x 坐标把指针吸附到最近的可见数据点（从完整点集 + 实时
-                        // viewport 计算，避免捕获过期的可见点列表）。
-                        fun snapCrosshairTo(x: Float) {
-                            val currentGeometry = ChartGeometry.create(size, density.density, axisBottomPadding)
+                        // 按 x 坐标吸附到最近的可见数据点：单击图表任意位置都能选中，
+                        // 不再要求必须点中折线或圆点。
+                        fun snapToNearestX(x: Float) {
+                            val currentGeometry =
+                                ChartGeometry.create(size, density.density, axisBottomPadding)
                             val clampedX = x.coerceIn(currentGeometry.left, currentGeometry.right)
                             val time = TrendChartMath.timeAtX(
                                 x = clampedX,
@@ -225,7 +287,7 @@ fun SessionTimeSeriesDualLineChart(
                                 viewport.startMillis,
                                 viewport.endMillis
                             )
-                            TrendChartMath.nearestPoint(visible, time)?.let { activePoint = it }
+                            TrendChartMath.nearestPoint(visible, time)?.let { onPointSelected(it, true) }
                         }
 
                         fun applyTransform(
@@ -233,7 +295,8 @@ fun SessionTimeSeriesDualLineChart(
                             zoom: Float,
                             pan: Offset
                         ) {
-                            val currentGeometry = ChartGeometry.create(size, density.density, axisBottomPadding)
+                            val currentGeometry =
+                                ChartGeometry.create(size, density.density, axisBottomPadding)
                             val centroid = event.calculateCentroid(useCurrent = true)
                             val focusMillis = TrendChartMath.timeAtX(
                                 x = centroid.x,
@@ -282,9 +345,8 @@ fun SessionTimeSeriesDualLineChart(
                                 if (event == null) {
                                     // 长按达时：唤出十字指针（股票 App 式查看）。
                                     mode = ChartGestureMode.CROSSHAIR
-                                    crosshairActive = true
                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    snapCrosshairTo(tapPosition.x)
+                                    snapToNearestX(tapPosition.x)
                                     continue
                                 }
 
@@ -302,8 +364,6 @@ fun SessionTimeSeriesDualLineChart(
                                         ) {
                                             mode = ChartGestureMode.TRANSFORM
                                             isInteracting = true
-                                            activePoint = null
-                                            crosshairActive = false
                                             applyTransform(event, zoom, pan)
                                         }
                                     }
@@ -317,7 +377,7 @@ fun SessionTimeSeriesDualLineChart(
                                     }
 
                                     ChartGestureMode.CROSSHAIR -> {
-                                        snapCrosshairTo(pressed.first().position.x)
+                                        snapToNearestX(pressed.first().position.x)
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
@@ -325,11 +385,8 @@ fun SessionTimeSeriesDualLineChart(
 
                             when (mode) {
                                 ChartGestureMode.TRANSFORM -> isInteracting = false
-                                ChartGestureMode.CROSSHAIR -> {
-                                    // 松手指针消失，读数栏回到最新一点。
-                                    crosshairActive = false
-                                    activePoint = null
-                                }
+                                // 松手后保留最后吸附的数据点，方便逐点读数。
+                                ChartGestureMode.CROSSHAIR -> Unit
                                 ChartGestureMode.PENDING -> {
                                     val now = SystemClock.uptimeMillis()
                                     val isDoubleTap =
@@ -338,26 +395,32 @@ fun SessionTimeSeriesDualLineChart(
                                             (tapPosition - lastTapPosition).getDistance() <=
                                             viewConfiguration.touchSlop * 2f
                                     if (isDoubleTap) {
-                                        viewport.reset(series.rangeStart, series.rangeEnd)
-                                        activePoint = null
+                                        viewport.reset(
+                                            viewport.defaultStartMillis,
+                                            viewport.defaultEndMillis
+                                        )
+                                        onPointSelected(null, false)
                                         lastTapAt = 0L
                                     } else {
-                                        val tapped = selectNearestPoint(
-                                            tap = tapPosition,
-                                            points = TrendChartMath.visiblePoints(
+                                        val currentGeometry = ChartGeometry.create(
+                                            size, density.density, axisBottomPadding
+                                        )
+                                        val tapTime = TrendChartMath.timeAtX(
+                                            x = tapPosition.x,
+                                            left = currentGeometry.left,
+                                            right = currentGeometry.right,
+                                            start = viewport.startMillis,
+                                            end = viewport.endMillis
+                                        )
+                                        val tapped = TrendChartMath.nearestPoint(
+                                            TrendChartMath.visiblePoints(
                                                 points,
                                                 viewport.startMillis,
                                                 viewport.endMillis
                                             ),
-                                            geometry = ChartGeometry.create(size, density.density, axisBottomPadding),
-                                            viewport = viewport,
-                                            yAxis = series.yAxis,
-                                            showSystolic = showSystolic,
-                                            showDiastolic = showDiastolic,
-                                            hitRadiusPx = with(density) { HIT_RADIUS.toPx() }
+                                            tapTime
                                         )
-                                        activePoint = tapped
-                                        tapped?.let(onPointActivated)
+                                        onPointSelected(tapped, tapped != null)
                                         lastTapAt = now
                                         lastTapPosition = tapPosition
                                     }
@@ -378,245 +441,139 @@ fun SessionTimeSeriesDualLineChart(
                     yAxis = series.yAxis
                 )
 
-                activePoint?.let { point ->
-                    if (!isInteracting &&
-                        point.timestamp in viewport.startMillis..viewport.endMillis
-                    ) {
-                        val x = scaler.xOf(point.timestamp)
-                        // 十字指针激活时用更醒目的实线，点按选中时用浅色细线。
-                        drawLine(
-                            color = axisColor.copy(alpha = if (crosshairActive) 0.9f else 0.55f),
-                            start = Offset(x, currentGeometry.top),
-                            end = Offset(x, currentGeometry.bottom),
-                            strokeWidth = if (crosshairActive) 2f else 1.4f
-                        )
-                    }
+                if (!isInteracting && showSystolic) {
+                    drawSeriesLine(renderPoints, scaler, palette.systolic, systolic = true, path = sysPath)
+                }
+                if (!isInteracting && showDiastolic) {
+                    drawSeriesLine(renderPoints, scaler, palette.diastolic, systolic = false, path = diaPath)
                 }
 
-                if (showSystolic) {
-                    drawSeriesLine(renderPoints, scaler, systolicColor, systolic = true, path = sysPath)
+                val selectedVisible = selectedPoint?.takeIf { point ->
+                    point.timestamp in viewport.startMillis..viewport.endMillis
                 }
-                if (showDiastolic) {
-                    drawSeriesLine(renderPoints, scaler, diastolicColor, systolic = false, path = diaPath)
-                }
-
-                val pointSpacing = (currentGeometry.right - currentGeometry.left) /
-                    renderPoints.size.coerceAtLeast(1)
-                if (!isInteracting && pointSpacing >= MIN_NODE_SPACING_PX) {
-                    renderPoints.forEach { point ->
-                        val x = scaler.xOf(point.timestamp)
-                        val isSelected = activePoint?.id == point.id
-                        if (showSystolic) {
-                            drawPointNode(
-                                x = x,
-                                y = scaler.yOf(point.systolic),
-                                color = valueColor(point.systolic, systolicColor),
-                                backgroundColor = nodeBackgroundColor,
-                                selected = isSelected
-                            )
-                        }
-                        if (showDiastolic) {
-                            drawPointNode(
-                                x = x,
-                                y = scaler.yOf(point.diastolic),
-                                color = valueColor(point.diastolic, diastolicColor),
-                                backgroundColor = nodeBackgroundColor,
-                                selected = isSelected
-                            )
-                        }
-                    }
-                } else if (!isInteracting) {
-                    // 密集视图下只描画选中点的两条曲线节点。
-                    activePoint?.let { point ->
-                        if (showSystolic) {
-                            drawPointNode(
-                                x = scaler.xOf(point.timestamp),
-                                y = scaler.yOf(point.systolic),
-                                color = valueColor(point.systolic, systolicColor),
-                                backgroundColor = nodeBackgroundColor,
-                                selected = true
-                            )
-                        }
-                        if (showDiastolic) {
-                            drawPointNode(
-                                x = scaler.xOf(point.timestamp),
-                                y = scaler.yOf(point.diastolic),
-                                color = valueColor(point.diastolic, diastolicColor),
-                                backgroundColor = nodeBackgroundColor,
-                                selected = true
-                            )
-                        }
-                    }
+                selectedVisible?.let { point ->
+                    val x = scaler.xOf(point.timestamp)
+                    // 选中辅助线：细实线 + 顶端刻度，弱于数据折线。
+                    drawLine(
+                        color = palette.selectionRing.copy(alpha = 0.5f),
+                        start = Offset(x, currentGeometry.top),
+                        end = Offset(x, currentGeometry.bottom),
+                        strokeWidth = 1.2f
+                    )
+                    drawLine(
+                        color = palette.selectionRing.copy(alpha = 0.75f),
+                        start = Offset(x, currentGeometry.top),
+                        end = Offset(x, currentGeometry.top + 6f),
+                        strokeWidth = 2f
+                    )
                 }
 
                 if (!isInteracting) {
-                    drawTimeAxisLabels(axisTicks, axisLabelLayouts, scaler, currentGeometry)
+                    val nodeSpacing = (currentGeometry.right - currentGeometry.left) /
+                        renderPoints.size.coerceAtLeast(1)
+                    // 节点少时才画小节点；密集时只突出选中点，避免满屏空心圆。
+                    val showAllNodes = renderPoints.size <= MAX_NODE_POINTS &&
+                        nodeSpacing >= MIN_NODE_SPACING_PX
+                    renderPoints.forEach { point ->
+                        val isPointSelected = selectedPoint?.id == point.id
+                        if (!showAllNodes && !isPointSelected) return@forEach
+                        val x = scaler.xOf(point.timestamp)
+                        if (showSystolic) {
+                            drawPointNode(
+                                x = x,
+                                y = scaler.yOf(point.systolic),
+                                color = valueColor(point.systolic, palette.systolic, palette.outlier),
+                                backgroundColor = palette.nodeBackground,
+                                ringColor = palette.selectionRing,
+                                selected = isPointSelected
+                            )
+                        }
+                        if (showDiastolic) {
+                            drawPointNode(
+                                x = x,
+                                y = scaler.yOf(point.diastolic),
+                                color = valueColor(point.diastolic, palette.diastolic, palette.outlier),
+                                backgroundColor = palette.nodeBackground,
+                                ringColor = palette.selectionRing,
+                                selected = isPointSelected
+                            )
+                        }
+                    }
                 }
-            }
 
+                drawTimeAxisLabels(axisTicks, axisLabelLayouts, scaler, currentGeometry, palette)
+            }
         }
 
         Text(
-            if (series.range == com.example.bloodpressurerecord.domain.model.TrendRange.ALL) {
-                "长按图表滑动查看各点数值；轻触每日节点看当天原始记录，双击复位"
-            } else {
-                "长按图表滑动查看各点数值；双指缩放，双击复位"
-            },
-            modifier = Modifier.fillMaxWidth(),
+            text = buildHint(series),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF82796A)
+            color = palette.hint
         )
     }
 }
 
-/**
- * 图表上方的固定读数栏（股票 App 式）：
- * 显示指针当前吸附点的完整信息，未唤出指针时显示最新一点。
- */
-@Composable
-private fun ChartReadoutBar(
-    point: TrendPoint,
-    isPinned: Boolean,
-    crosshairActive: Boolean
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(
-                if (crosshairActive) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(18.dp)
-            ).padding(horizontal = 14.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                if (point.aggregation == TrendAggregation.DAILY)
-                    "${formatReadoutDate(point.timestamp)} · ${point.recordCount} 次平均"
-                else formatReadoutDateTime(point.timestamp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+private data class ReferenceLabel(val value: Int, val label: String)
+
+/** 参考线数值 + 已测量好的标签文本。 */
+private data class RenderedReferenceLabel(val value: Int, val layout: TextLayoutResult)
+
+/** 只显示与当前可见指标相关的固定参考线。 */
+private fun buildReferenceLabels(
+    yAxis: TrendYAxis,
+    showSystolic: Boolean,
+    showDiastolic: Boolean
+): List<ReferenceLabel> = buildList {
+    if (showSystolic && TrendSeriesCalculator.REFERENCE_SYSTOLIC in yAxis.min..yAxis.max) {
+        add(
+            ReferenceLabel(
+                value = TrendSeriesCalculator.REFERENCE_SYSTOLIC,
+                label = "收缩压参考 ${TrendSeriesCalculator.REFERENCE_SYSTOLIC}"
             )
-            Text(
-                "${point.systolic}/${point.diastolic}",
-                style = MaterialTheme.typography.headlineSmall,
-                fontFamily = NumberFontFamily,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1
+        )
+    }
+    if (showDiastolic && TrendSeriesCalculator.REFERENCE_DIASTOLIC in yAxis.min..yAxis.max) {
+        add(
+            ReferenceLabel(
+                value = TrendSeriesCalculator.REFERENCE_DIASTOLIC,
+                label = "舒张压参考 ${TrendSeriesCalculator.REFERENCE_DIASTOLIC}"
             )
-            point.pulse?.let {
-                Text("脉搏 $it", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            StatusChip(
-                text = point.category.toChineseCategoryLabel(),
-                isAbnormal = !point.category.equals("NORMAL", true),
-                status = bloodPressureVisualStatus(point.category, false)
-            )
-            if (point.containsHighRiskReading) {
-                StatusChip("高风险", true, status = bloodPressureVisualStatus(point.category, true))
-            }
-        }
+        )
     }
 }
 
-private fun formatReadoutDate(millis: Long): String {
-    return Instant.ofEpochMilli(millis)
-        .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("MM-dd"))
+private fun buildHint(series: TrendSeries): String {
+    val daily = series.aggregation == TrendAggregation.DAILY
+    val detail = if (daily) {
+        "每日平均；选中节点后可查看当日原始记录"
+    } else {
+        "每次测量"
+    }
+    return "单击任意位置自动吸附最近数据点，长按滑动连续查看，双指缩放，双击恢复默认视野 · $detail"
+}
+
+private fun buildChartDescription(
+    series: TrendSeries,
+    showSystolic: Boolean,
+    showDiastolic: Boolean
+): String {
+    val metric = when {
+        showSystolic && showDiastolic -> "收缩压与舒张压"
+        showSystolic -> "收缩压"
+        else -> "舒张压"
+    }
+    val granularity = series.aggregation.displayLabel()
+    val first = series.firstMeasuredAt?.let(::formatReadoutDateTime) ?: "--"
+    val last = series.lastMeasuredAt?.let(::formatReadoutDateTime) ?: "--"
+    return "血压趋势折线图，$metric，$granularity，共 ${series.points.size} 个数据点，" +
+        "样本区间 $first 至 $last。可双击恢复默认视野，长按滑动逐点读数。"
 }
 
 private fun formatReadoutDateTime(millis: Long): String {
     return Instant.ofEpochMilli(millis)
         .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
-}
-
-private fun selectNearestPoint(
-    tap: Offset,
-    points: List<TrendPoint>,
-    geometry: ChartGeometry,
-    viewport: TrendTimeViewportState,
-    yAxis: TrendYAxis,
-    showSystolic: Boolean,
-    showDiastolic: Boolean,
-    hitRadiusPx: Float
-): TrendPoint? {
-    val tapTime = TrendChartMath.timeAtX(
-        tap.x,
-        geometry.left,
-        geometry.right,
-        viewport.startMillis,
-        viewport.endMillis
-    )
-    val point = TrendChartMath.nearestPoint(points, tapTime) ?: return null
-    val scaler = ChartScaler(geometry, viewport.startMillis, viewport.endMillis, yAxis)
-    val x = scaler.xOf(point.timestamp)
-    val sysDistance = if (showSystolic) {
-        (tap - Offset(x, scaler.yOf(point.systolic))).getDistance()
-    } else {
-        Float.MAX_VALUE
-    }
-    val diaDistance = if (showDiastolic) {
-        (tap - Offset(x, scaler.yOf(point.diastolic))).getDistance()
-    } else {
-        Float.MAX_VALUE
-    }
-    return if (minOf(sysDistance, diaDistance) <= hitRadiusPx) point else null
-}
-
-private val CHART_HEIGHT = 280.dp
-private val HIT_RADIUS = 32.dp
-// 暖阳设计 3d：收缩压陶土橙、舒张压鼠尾草绿，坐标与网格用暖中性色。
-private val SYS_COLOR = Color(0xFFC67139)
-private val DIA_COLOR = Color(0xFF5594BB)
-private val GRID_COLOR = Color(0xFFEEE7DB)
-private val AXIS_COLOR = Color(0xFF82796A)
-private val REFERENCE_COLOR = Color(0xFFC0B6A5)
-private val OUTLIER_COLOR = Color(0xFFB3261E)
-private const val MIN_DRAW_POINTS = 60
-private const val MAX_DRAW_POINTS = 900
-private const val MIN_NODE_SPACING_PX = 12f
-
-@Composable
-private fun AverageSummary(
-    label: String,
-    value: Int?,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "${value ?: "--"} mmHg",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-private fun LegendItem(text: String, color: Color) {
-    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(modifier = Modifier.size(width = 18.dp, height = 8.dp)) {
-            drawLine(
-                color = color,
-                start = Offset(0f, size.height / 2f),
-                end = Offset(size.width, size.height / 2f),
-                strokeWidth = 1.5.dp.toPx()
-            )
-        }
-        Text(
-            text,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall
-        )
-    }
+        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
 }
 
 @Composable
@@ -627,7 +584,7 @@ private fun TrendEmptyState(title: String, modifier: Modifier = Modifier) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
                 "保持每天固定时间记录，积累记录后即可查看趋势。",
@@ -653,10 +610,10 @@ private data class ChartGeometry(
             return ChartGeometry(
                 width = width,
                 height = height,
-                left = 50f * density,
-                right = (width - 24f * density).coerceAtLeast(51f * density),
-                top = 18f * density,
-                bottom = (height - bottomPadding).coerceAtLeast(19f * density)
+                left = 38f * density,
+                right = (width - 14f * density).coerceAtLeast(39f * density),
+                top = 20f * density,
+                bottom = (height - bottomPadding).coerceAtLeast(21f * density)
             )
         }
     }
@@ -690,15 +647,14 @@ private fun DrawScope.drawYAxisGrid(
     geometry: ChartGeometry,
     scaler: ChartScaler,
     yAxis: TrendYAxis,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer,
-    gridColor: Color,
-    axisColor: Color
+    textMeasurer: TextMeasurer,
+    palette: TrendChartPalette
 ) {
-    var value = ((yAxis.min + yAxis.tickStep - 1) / yAxis.tickStep) * yAxis.tickStep
-    while (value <= yAxis.max) {
+    // 只有 5–7 条主刻度（tickStep 由 TrendSeriesCalculator 的漂亮步长决定）。
+    TrendSeriesCalculator.tickValues(yAxis).forEach { value ->
         val y = scaler.yOf(value)
         drawLine(
-            color = gridColor,
+            color = palette.grid,
             start = Offset(geometry.left, y),
             end = Offset(geometry.right, y),
             strokeWidth = 1.dp.toPx()
@@ -706,17 +662,16 @@ private fun DrawScope.drawYAxisGrid(
 
         val label = textMeasurer.measure(
             value.toString(),
-            TextStyle(color = axisColor, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            TextStyle(color = palette.axis, fontSize = 12.sp, fontWeight = FontWeight.Medium),
             softWrap = false
         )
         drawText(
             textLayoutResult = label,
             topLeft = Offset(
-                (geometry.left - 8.dp.toPx() - label.size.width).coerceAtLeast(0f),
+                (geometry.left - 6.dp.toPx() - label.size.width).coerceAtLeast(0f),
                 y - label.size.height / 2f
             )
         )
-        value += yAxis.tickStep
     }
 }
 
@@ -724,20 +679,54 @@ private fun DrawScope.drawReferenceLines(
     geometry: ChartGeometry,
     scaler: ChartScaler,
     yAxis: TrendYAxis,
-    referenceColor: Color
+    showSystolic: Boolean,
+    showDiastolic: Boolean,
+    labels: List<RenderedReferenceLabel>,
+    palette: TrendChartPalette
 ) {
-    listOf(140, 90)
-        .filter { it in yAxis.min..yAxis.max }
-        .forEach { ref ->
-            val y = scaler.yOf(ref)
-            drawLine(
-                color = referenceColor,
-                start = Offset(geometry.left, y),
-                end = Offset(geometry.right, y),
-                strokeWidth = 1.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
-            )
+    val visibleReferences = buildReferenceLabels(yAxis, showSystolic, showDiastolic)
+        .mapNotNull { reference ->
+            val layout = labels.firstOrNull { it.value == reference.value }?.layout
+                ?: return@mapNotNull null
+            reference.value to layout
         }
+    // 两条固定参考线在极端跨度下可能贴近，标签需要上下错开避免叠字。
+    var previousLabelTop = Float.NEGATIVE_INFINITY
+    visibleReferences.forEach { (value, layout) ->
+        val y = scaler.yOf(value)
+        drawLine(
+            color = palette.reference,
+            start = Offset(geometry.left, y),
+            end = Offset(geometry.right, y),
+            strokeWidth = 1.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 5.dp.toPx()))
+        )
+
+        // 标签固定在右端：既不压住左侧目标线文字，也不打断折线起点。
+        val left = (geometry.right - 8.dp.toPx() - layout.size.width)
+            .coerceAtLeast(geometry.left)
+        val overlapOffset = if (y - layout.size.height / 2f - previousLabelTop <
+            layout.size.height + 2.dp.toPx()
+        ) {
+            layout.size.height + 2.dp.toPx()
+        } else {
+            0f
+        }
+        val top = (y - layout.size.height / 2f + overlapOffset)
+            .coerceIn(geometry.top - 6.dp.toPx(), (geometry.bottom - layout.size.height).coerceAtLeast(0f))
+        previousLabelTop = top
+        // 半透明衬底把标签与折线、节点隔开，保证文字可读。
+        drawRoundRect(
+            color = palette.nodeBackground.copy(alpha = 0.86f),
+            topLeft = Offset(left - 4.dp.toPx(), top - 1.dp.toPx()),
+            size = Size(
+                layout.size.width + 8.dp.toPx(),
+                layout.size.height + 2.dp.toPx()
+            ),
+            cornerRadius = CornerRadius(4.dp.toPx())
+        )
+        drawText(textLayoutResult = layout, topLeft = Offset(left, top))
+    }
 }
 
 private fun DrawScope.drawTargetLine(
@@ -745,20 +734,20 @@ private fun DrawScope.drawTargetLine(
     geometry: ChartGeometry,
     label: String,
     color: Color,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer
+    textMeasurer: TextMeasurer
 ) {
     drawLine(
-        color = color.copy(alpha = 0.42f),
+        color = color,
         start = Offset(geometry.left, y),
         end = Offset(geometry.right, y),
-        strokeWidth = 1.4f,
+        strokeWidth = 1.2f,
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(7f, 5f))
     )
     drawText(
         textMeasurer = textMeasurer,
         text = label,
-        topLeft = Offset(geometry.left + 8f, y - 18f),
-        style = TextStyle(color = color, fontSize = 11.sp)
+        topLeft = Offset(geometry.left + 6f, y - 17f),
+        style = TextStyle(color = color, fontSize = 10.sp)
     )
 }
 
@@ -776,7 +765,8 @@ private fun DrawScope.drawSeriesLine(
             scaler.xOf(point.timestamp),
             scaler.yOf(if (systolic) point.systolic else point.diastolic)
         )
-        if (index == 0 || point.timestamp - points[index - 1].timestamp > 2L * 24L * 60L * 60L * 1000L) {
+        // 大于约 2 天的缺测保持断线，不跨缺口直连。
+        if (index == 0 || point.timestamp - points[index - 1].timestamp > GAP_MILLIS) {
             path.moveTo(offset.x, offset.y)
         } else {
             val previous = points[index - 1]
@@ -789,7 +779,7 @@ private fun DrawScope.drawSeriesLine(
     drawPath(
         path,
         color,
-        style = Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
     )
 }
 
@@ -797,7 +787,8 @@ private fun DrawScope.drawTimeAxisLabels(
     ticks: List<TrendTimeTick>,
     layouts: List<TextLayoutResult>,
     scaler: ChartScaler,
-    geometry: ChartGeometry
+    geometry: ChartGeometry,
+    palette: TrendChartPalette
 ) {
     val centers = ticks.map { scaler.xOf(it.timestamp) }
     val visibleIndices = TrendChartMath.nonOverlappingTickIndices(
@@ -820,6 +811,14 @@ private fun DrawScope.drawTimeAxisLabels(
             topLeft = Offset(labelX, geometry.bottom + 8.dp.toPx())
         )
     }
+    if (visibleIndices.isEmpty()) return
+    // 轴线本身保持极轻，避免和网格抢焦点。
+    drawLine(
+        color = palette.grid,
+        start = Offset(geometry.left, geometry.bottom),
+        end = Offset(geometry.right, geometry.bottom),
+        strokeWidth = 1.dp.toPx()
+    )
 }
 
 private fun DrawScope.drawPointNode(
@@ -827,25 +826,36 @@ private fun DrawScope.drawPointNode(
     y: Float,
     color: Color,
     backgroundColor: Color,
+    ringColor: Color,
     selected: Boolean
 ) {
-    val radius = if (selected) 6.6f else 4.8f
-    drawCircle(color = backgroundColor, radius = radius, center = Offset(x, y))
+    if (!selected) {
+        drawCircle(color = color, radius = 3.2f, center = Offset(x, y))
+        return
+    }
+    // 选中点：外圈光晕 + 实心节点 + 主题色描边，明显区别于普通点。
+    drawCircle(color = ringColor.copy(alpha = 0.18f), radius = 11f, center = Offset(x, y))
+    drawCircle(color = backgroundColor, radius = 6.4f, center = Offset(x, y))
+    drawCircle(color = color, radius = 4.6f, center = Offset(x, y))
     drawCircle(
-        color = color,
-        radius = radius,
+        color = ringColor,
+        radius = 6.4f,
         center = Offset(x, y),
-        style = Stroke(width = if (selected) 2.8f else 2f)
+        style = Stroke(width = 2f)
     )
 }
 
-private fun valueColor(value: Int, normalColor: Color): Color {
+private fun valueColor(value: Int, normalColor: Color, outlierColor: Color): Color {
     return if (value in TrendSeriesCalculator.CHART_SAFE_MIN..TrendSeriesCalculator.CHART_SAFE_MAX) {
         normalColor
     } else {
-        OUTLIER_COLOR
+        outlierColor
     }
 }
 
-private fun String.toChineseCategoryLabel(): String =
-    com.example.bloodpressurerecord.ui.common.CategoryPresentation.label(this)
+private val CHART_HEIGHT = 252.dp
+private const val MIN_DRAW_POINTS = 60
+private const val MAX_DRAW_POINTS = 900
+private const val MIN_NODE_SPACING_PX = 14f
+private const val MAX_NODE_POINTS = 60
+private const val GAP_MILLIS = 2L * 24L * 60L * 60L * 1000L
