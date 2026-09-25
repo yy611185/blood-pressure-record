@@ -8,11 +8,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -36,13 +40,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
 import com.example.bloodpressurerecord.ui.common.MeasurementTags
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
-import com.example.bloodpressurerecord.ui.common.SessionSaveBottomBar
+import com.example.bloodpressurerecord.ui.common.InlineSessionAction
 import com.example.bloodpressurerecord.ui.common.SessionChoiceChip
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
@@ -121,37 +126,18 @@ fun EditSessionScreen(
     val topBarScroll = rememberHideOnScrollState()
     Scaffold(
         modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
+        // 顶部安全区由 topBar 槽承担；底部安全区由滚动内容自己负责。
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
             AppTopBar(title = when (step) {
                 1 -> "修改读数"
                 2 -> "测量情况"
                 else -> "已更新"
             }, onBack = requestBack, hideOnScroll = topBarScroll)
-        },
-        bottomBar = {
-            if (!state.loading) {
-                SessionSaveBottomBar(
-                    canSave = if (step == 3) true else state.canSave,
-                    disabledReason = if (step == 3) "" else state.saveDisabledReason,
-                    isSaving = state.isSaving,
-                    buttonText = when (step) {
-                        1 -> "下一步 · 测量情况"
-                        2 -> "保存修改"
-                        else -> "完成"
-                    },
-                    onSave = {
-                        when (step) {
-                            1 -> step = 2
-                            2 -> viewModel.onSaveClicked()
-                            else -> onSaved()
-                        }
-                    }
-                )
-            }
         }
     ) { padding ->
         if (state.loading) {
-            Text("正在加载记录…", modifier = Modifier.padding(padding).padding(AppSpacing.large))
+            Text("正在加载记录…", modifier = Modifier.padding(padding).padding(AppSpacing.large).statusBarsPadding())
             return@Scaffold
         }
         Column(
@@ -160,7 +146,10 @@ fun EditSessionScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState())
                 .padding(padding)
-                .padding(horizontal = AppDimensions.pageHorizontalPadding),
+                .padding(horizontal = AppDimensions.pageHorizontalPadding)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(bottom = AppDimensions.pageBottomGap),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
             if (step == 1) {
@@ -316,7 +305,24 @@ fun EditSessionScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-            Spacer(Modifier.height(AppSpacing.xLarge))
+            // 与新增页一致：主按钮是页面滚动内容末尾的普通按钮，不再固定悬浮、不随键盘上浮。
+            InlineSessionAction(
+                canSave = if (step == 3) true else state.canSave,
+                disabledReason = if (step == 3) "" else state.saveDisabledReason,
+                isSaving = state.isSaving,
+                buttonText = when (step) {
+                    1 -> "下一步 · 测量情况"
+                    2 -> "保存修改"
+                    else -> "完成"
+                },
+                onSave = {
+                    when (step) {
+                        1 -> step = 2
+                        2 -> viewModel.onSaveClicked()
+                        else -> onSaved()
+                    }
+                }
+            )
         }
     }
 }

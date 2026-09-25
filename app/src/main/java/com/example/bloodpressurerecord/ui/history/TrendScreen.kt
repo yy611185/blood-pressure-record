@@ -58,6 +58,9 @@ import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.ui.common.AppBackButton
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
+import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import java.time.Instant
 import java.time.ZoneId
@@ -83,7 +86,11 @@ fun TrendScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(horizontal = AppDimensions.pageHorizontalPadding)
+            .padding(
+                top = statusBarTopPadding(extra = 16.dp),
+                bottom = dockContentBottomPadding()
+            ),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -132,7 +139,6 @@ fun TrendScreen(
                 onOpenDetails = viewModel::openPointDetails
             )
         }
-        Spacer(Modifier.height(10.dp))
     }
 }
 
@@ -572,7 +578,8 @@ private fun <T> SegmentedControl(
     onSelected: (T) -> Unit,
     accent: Boolean = false
 ) {
-    // 暖阳设计：范围分段用陶土橙实底（accent），指标分段用 surface + 投影。
+    // 暖阳设计：选中态统一用暖色 primaryContainer（不再出现深色块），
+    // 未选中的指标分段保留 surface + 轻投影的悬浮感。
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -588,7 +595,7 @@ private fun <T> SegmentedControl(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = 48.dp)
                     .shadow(
                         if (isSelected && !accent) 2.dp else 0.dp,
                         MaterialTheme.shapes.large,
@@ -596,7 +603,7 @@ private fun <T> SegmentedControl(
                     )
                     .background(
                         when {
-                            isSelected && accent -> MaterialTheme.colorScheme.onSurface
+                            isSelected && accent -> MaterialTheme.colorScheme.primaryContainer
                             isSelected -> MaterialTheme.colorScheme.surface
                             else -> Color.Transparent
                         },
@@ -613,7 +620,7 @@ private fun <T> SegmentedControl(
                     text = label(item),
                     style = MaterialTheme.typography.labelMedium,
                     color = when {
-                        isSelected && accent -> MaterialTheme.colorScheme.surface
+                        isSelected && accent -> MaterialTheme.colorScheme.onPrimaryContainer
                         isSelected -> MaterialTheme.colorScheme.onSurface
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },

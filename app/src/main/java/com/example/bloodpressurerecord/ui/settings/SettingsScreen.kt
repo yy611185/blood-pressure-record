@@ -47,6 +47,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.RoundIconBadge
+import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
+import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.home.Buddy
 
@@ -70,7 +73,11 @@ fun SettingsScreen(
         AppTopBar(title = "我的")
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                .padding(horizontal = AppDimensions.pageHorizontalPadding),
+                .padding(horizontal = AppDimensions.pageHorizontalPadding)
+                .padding(
+                    top = statusBarTopPadding(),
+                    bottom = dockContentBottomPadding()
+                ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             DataCard {
@@ -97,16 +104,13 @@ fun SettingsScreen(
                         TargetTile("目标高压", state.targetSystolicText.ifBlank { "—" }, Modifier.weight(1f))
                         TargetTile("目标低压", state.targetDiastolicText.ifBlank { "—" }, Modifier.weight(1f))
                     }
-                    Text("平均值怎么算", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    Surface(shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            StrategyChoice("全部组平均", !state.discardFirstReading,
-                                { viewModel.setDiscardFirstReading(false) }, Modifier.weight(1f))
-                            StrategyChoice("不计第一组", state.discardFirstReading,
-                                { viewModel.setDiscardFirstReading(true) }, Modifier.weight(1f))
-                        }
-                    }
+                    Text("平均值怎么算", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp))
+                    SegmentedPillGroup(
+                        options = listOf("全部组平均", "不计第一组"),
+                        selectedIndex = if (state.discardFirstReading) 1 else 0,
+                        onSelect = { index -> viewModel.setDiscardFirstReading(index == 1) }
+                    )
                     Text("只影响之后的新记录；高风险判断始终检查每组读数。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -170,20 +174,6 @@ private fun TargetTile(label: String, value: String, modifier: Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(if (value == "—") value else "< $value",
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-private fun StrategyChoice(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    Surface(modifier = modifier.heightIn(min = 48.dp)
-        .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant) {
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.Center) {
-            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
-                color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface)
         }
     }
 }

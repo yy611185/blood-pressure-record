@@ -41,7 +41,9 @@ import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppDangerButton
 import java.time.LocalDateTime
@@ -352,6 +354,7 @@ fun SettingsDataManagementScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .padding(top = statusBarTopPadding())
             .nestedScroll(topBarScroll.nestedScrollConnection)
     ) {
         AppTopBar(title = "数据管理", onBack = onBack, hideOnScroll = topBarScroll)
@@ -360,7 +363,8 @@ fun SettingsDataManagementScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp)
+                .padding(top = 16.dp, bottom = pageContentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             DataCard {

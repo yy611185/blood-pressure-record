@@ -60,7 +60,10 @@ class DashboardViewModelTest {
         advanceUntilIdle()
         assertEquals(1, vm.uiState.value.todayCount)
         assertEquals(day2, vm.uiState.value.today)
-        assertEquals(day2, vm.uiState.value.week.last().date)
+        // 自然周随之滚动：7/26 是周日，本周固定为 7/26（周日）→ 8/1（周六）。
+        assertEquals(LocalDate.of(2026, 7, 26), vm.uiState.value.week.first().date)
+        assertEquals(LocalDate.of(2026, 8, 1), vm.uiState.value.week.last().date)
+        assertTrue(vm.uiState.value.week.any { it.date == day2 })
         assertEquals(null, vm.uiState.value.todayMorning)
         assertEquals(null, vm.uiState.value.todayEvening)
     }
@@ -87,7 +90,11 @@ class DashboardViewModelTest {
         assertEquals("morning-last", state.todayMorning?.id)
         assertEquals("evening-last", state.todayEvening?.id)
         assertEquals(4, state.todayCount)
+        // 「这一周」是固定自然周（周日→周六）：2026-07-25 是周六，本周日为 7/19，
+        // 因此昨天（周五 7/24）落在索引 5，今天（周六 7/25）落在索引 6。
         assertEquals(7, state.week.size)
+        assertEquals(LocalDate.of(2026, 7, 19), state.week.first().date)
+        assertEquals(today, state.week.last().date)
         assertEquals(yesterday, state.week[5].date)
         assertEquals(110, state.week[5].averageSystolic)
         assertEquals(70, state.week[5].averageDiastolic)
@@ -97,6 +104,26 @@ class DashboardViewModelTest {
         assertTrue(state.week[6].recorded)
         assertEquals(null, state.week[4].averageSystolic)
         assertFalse(state.week[4].recorded)
+    }
+
+    @Test
+    fun `week always starts on sunday and keeps a fixed natural week`() = runTest {
+        // 2026-07-22 是周三，本周日应为 7/19，周六为 7/25。
+        val today = LocalDate.of(2026, 7, 22)
+        val repo = FakeRepository(countsByRangeStart = emptyMap())
+        val vm = DashboardViewModel(repo, zoneId = zone, todayTicks = flowOf(today))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val week = vm.uiState.value.week
+        assertEquals(7, week.size)
+        assertEquals(
+            listOf(19, 20, 21, 22, 23, 24, 25),
+            week.map { it.date.dayOfMonth }
+        )
+        // 未来日期没有记录，也不应影响今天标记。
+        assertEquals(today, week[3].date)
+        assertFalse(week[6].recorded)
     }
 
     @Test
