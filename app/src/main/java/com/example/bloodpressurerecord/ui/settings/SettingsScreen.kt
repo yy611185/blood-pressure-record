@@ -69,13 +69,17 @@ fun SettingsScreen(
         "light" -> false
         else -> systemDark
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(
+        Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(top = statusBarTopPadding())
+    ) {
         AppTopBar(title = "我的")
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = AppDimensions.pageHorizontalPadding)
                 .padding(
-                    top = statusBarTopPadding(),
+                    top = 16.dp,
                     bottom = dockContentBottomPadding()
                 ),
             verticalArrangement = Arrangement.spacedBy(12.dp)

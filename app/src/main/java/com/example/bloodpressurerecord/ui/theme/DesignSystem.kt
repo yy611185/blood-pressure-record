@@ -53,6 +53,14 @@ object AppDimensions {
     val dockContentGap = 12.dp
 
     /**
+     * 有悬浮 Dock 的顶级页面，内容底部至少要留出的避让高度。
+     *
+     * 兜底下限：即使导航栏安全区在个别设备/系统版本上被报成 0，
+     * 内容也仍然滚得到 Dock 胶囊上方，不会被悬浮导航遮住。
+     */
+    val dockMinContentClearance = 128.dp
+
+    /**
      * 血压输入框高度（紧凑三栏布局）。
      *
      * 必须留得下「三位数字 + 光标」：数字字号上限 38sp 时，单行实际行高约 46–50dp，

@@ -1,7 +1,7 @@
 # 发布清单（Publishing Guide）
 
 > 面向**维护者**（作者本人）的发布操作手册。从构建到上架，每个步骤按顺序执行。
-> 最后更新：2026-09 · 适用版本：1.8.x
+> 最后更新：2026-09 · 适用版本：2.0.x
 
 ---
 
@@ -76,8 +76,8 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 | 项 | 当前值 | 规则 |
 |---|---|---|
-| `versionCode` | 31 | 每次发布**必须递增**（整数，只增不减） |
-| `versionName` | 1.8.4 | 语义化版本，随功能/修复调整 |
+| `versionCode` | 33 | 每次发布**必须递增**（整数，只增不减） |
+| `versionName` | 2.0.1 | 语义化版本，随功能/修复调整 |
 | `applicationId` | `com.yang.bloodpressure` | **首次正式分发后永不再改**——改动会被 Android 视为全新应用，旧用户无法覆盖升级 |
 
 修改位置：`app/build.gradle.kts` → `defaultConfig`。
@@ -132,7 +132,7 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 - [ ] 用 §1.3 的 `assembleRelease` 产物（**不是** debug 包，也**不是** Play 用的 AAB）
 - [ ] 首次分发时向对方说明：这是自签名应用，安装需允许"未知来源"，后续更新**必须用同一把密钥签名**的 APK 才能覆盖安装
-- [ ] 分发文件命名建议：`blood-pressure-v1.8.1.apk`（含版本号，避免混淆）
+- [ ] 分发文件命名建议：`blood-pressure-record-v2.0.1-release.apk`（含版本号，避免混淆）
 - [ ] 分发渠道：网盘 / 微信传输（**注意**：导出的健康数据 Excel 是明文，APK 本身不含用户数据，可放心传）
 - [ ] 升级分发：直接发新版本 APK，用户覆盖安装即可（签名一致时数据保留）
 

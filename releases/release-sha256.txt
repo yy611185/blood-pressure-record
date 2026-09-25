@@ -1,3 +1,4 @@
 c1071218380aeaf69500c8996e8e326aa2933606d201edf9e37ea63ad60f7758  blood-pressure-record-v1.8.4-release.apk
 e43f403316aec225c3c9734da600a961bfeea78cd5015376df83e23abfd1d24f  blood-pressure-record-v1.8.4-release.aab
 2E3968E032B9BD761045C9BC4DE8A45128BDC9BCEFF86F8C3893230F40E2B453  blood-pressure-record-v1.8.5-debug-trend-refactor.apk
+53ee34fafb872008cf8b3200e9776a0d687e4d6320ded83bdb6dccefdddf1406  blood-pressure-record-v2.0.1-release.apk

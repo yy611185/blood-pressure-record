@@ -59,7 +59,7 @@ data class TrendSeries(
     val yAxis: TrendYAxis,
     val rangeStart: Long,
     val rangeEnd: Long,
-    /** 本范围的聚合方式：7 天为原始记录，30 天与全部为每日平均。 */
+    /** 本范围的聚合方式：7 天与 30 天为原始记录，全部为每日平均。 */
     val aggregation: TrendAggregation = TrendAggregation.RAW,
     /** 范围起点（自然周期边界），与真实样本区间区分开。 */
     val windowStart: Long = rangeStart,

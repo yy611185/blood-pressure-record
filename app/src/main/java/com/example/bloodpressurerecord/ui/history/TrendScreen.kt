@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,6 +69,7 @@ import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +81,12 @@ fun TrendScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // 选中读数提升到页面层：范围切换时重置，不受图表重组影响。
     var selectedPoint by remember(uiState.range) { mutableStateOf<TrendPoint?>(null) }
+    // 「恢复」按钮与图表双击复位共用的控制器：缩放、平移、视窗、选中一次归零。
+    val chartController = remember(uiState.range) { TrendChartController() }
+    // 上一条 / 下一条在**当前图表真正显示的数据点**之间移动：
+    // 7 天 / 30 天是每次原始测量，「全部」是每日平均。
+    // 不能按日期 ±1 天推算——有些日期根本没有记录。
+    val displayPoints = uiState.series.points
 
     uiState.dayDetails?.let { details ->
         TrendDayDetailsSheet(
@@ -94,8 +102,12 @@ fun TrendScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = AppDimensions.pageHorizontalPadding)
             .padding(
-                top = statusBarTopPadding(extra = 16.dp),
-                bottom = dockContentBottomPadding()
+                // 标题必须落在状态栏下方：顶部安全区取自 WindowInsets（刘海/挖孔屏
+                // 已包含在 statusBars 内），不写任何机型专用的固定高度。
+                top = statusBarTopPadding(extra = 12.dp),
+                // 底部一次给足：导航栏安全区 + 悬浮 Dock 胶囊 + 胶囊下边距 + 收尾间距。
+                // 页面内容因此总能完整滚到 Dock 上方，且不会多出一大块空白。
+                bottom = maxOf(dockContentBottomPadding(), AppDimensions.dockMinContentClearance)
             ),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -135,8 +147,10 @@ fun TrendScreen(
             series = series,
             metric = uiState.metric,
             selectedPoint = selectedPoint,
+            displayPoints = displayPoints,
             targetSystolic = uiState.targetSystolic,
             targetDiastolic = uiState.targetDiastolic,
+            chartController = chartController,
             onMetricChange = viewModel::setMetric,
             onPointSelected = { point -> selectedPoint = point },
             onViewDayRecords = viewModel::openPointDetails
@@ -449,8 +463,10 @@ private fun TrendCard(
     series: TrendSeries,
     metric: TrendMetricType,
     selectedPoint: TrendPoint?,
+    displayPoints: List<TrendPoint>,
     targetSystolic: Int?,
     targetDiastolic: Int?,
+    chartController: TrendChartController,
     onMetricChange: (TrendMetricType) -> Unit,
     onPointSelected: (TrendPoint?) -> Unit,
     onViewDayRecords: (TrendPoint) -> Unit
@@ -466,6 +482,15 @@ private fun TrendCard(
                 text = "${series.range.title} · ${series.aggregation.displayLabel()}",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
+            )
+            // 顶部数据栏：长按数据检查 / 点击节点时显示当前选中记录，
+            // 并承载「上一条 / 下一条 / 明细 / 恢复」四个操作。
+            TrendSelectionReadout(
+                points = displayPoints,
+                selectedPoint = selectedPoint,
+                onPointSelected = onPointSelected,
+                onViewDayRecords = onViewDayRecords,
+                onResetChart = chartController::reset
             )
             // 指标切换移动到图表正上方；「双曲线」改名为「双指标」。
             SegmentedControl(
@@ -484,45 +509,44 @@ private fun TrendCard(
             SessionTimeSeriesDualLineChart(
                 series = series,
                 selectedPoint = selectedPoint,
-                onPointSelected = { point, _ -> onPointSelected(point) },
+                onPointSelected = onPointSelected,
+                controller = chartController,
                 targetSystolic = targetSystolic,
                 targetDiastolic = targetDiastolic,
                 showSystolic = metric != TrendMetricType.DIASTOLIC,
                 showDiastolic = metric != TrendMetricType.SYSTOLIC,
                 emptyTitle = "${series.range.title} 暂无数据"
             )
-            // 逐点浏览整合在选中读数区域（原来是独立的大卡片）。
-            TrendSelectedReadout(
-                series = series,
-                selectedPoint = selectedPoint,
-                onPointSelected = onPointSelected,
-                onViewDayRecords = onViewDayRecords
-            )
         }
     }
 }
 
 /**
- * 选中读数区：显示完整日期时间、收缩压、舒张压、脉搏和状态，
- * 并集成「上一条 / 下一条」逐点浏览能力，对 TalkBack 同样可读可操作。
+ * 顶部数据栏：显示当前选中的记录（长按数据检查 / 点击节点 / 上一条 / 下一条）。
+ *
+ * 未选中时退回「最近一次」——7 天 / 30 天是当前范围最近一次测量，
+ * 「全部」是最近一个有记录日期的每日平均（[points] 的最后一个点）。
+ * 操作区固定四枚按钮：
+ * - 上一条 / 下一条：在 [points] 上移动，不按日期 ±1 天推算；
+ * - 明细：打开**当前显示点**所属日期的原始测量明细（真实数据库记录）；
+ * - 恢复：图表回到该范围首次打开时的默认状态（与双击复位同一套重置逻辑）。
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrendSelectedReadout(
-    series: TrendSeries,
+private fun TrendSelectionReadout(
+    points: List<TrendPoint>,
     selectedPoint: TrendPoint?,
     onPointSelected: (TrendPoint?) -> Unit,
-    onViewDayRecords: (TrendPoint) -> Unit
+    onViewDayRecords: (TrendPoint) -> Unit,
+    onResetChart: () -> Unit
 ) {
-    val points = series.points
     if (points.isEmpty()) return
-    val displayed = selectedPoint ?: points.last()
+    val displayed = selectedPoint?.takeIf { point -> points.any { it.id == point.id } }
+        ?: points.last()
     val isSelected = selectedPoint != null
     // 极端情况下选中点可能已经不在新序列里，索引兜底为最后一点，避免越界。
     val index = points.indexOfFirst { it.id == displayed.id }.takeIf { it >= 0 } ?: points.lastIndex
     val canGoPrevious = index > 0
     val canGoNext = index in 0 until points.lastIndex
-    val canViewDayRecords = displayed.aggregation == TrendAggregation.DAILY
     val background = if (isSelected) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
@@ -531,6 +555,8 @@ private fun TrendSelectedReadout(
     val readoutDescription = remember(displayed.id, isSelected, index, points.size) {
         buildReadoutDescription(displayed, isSelected, index, points.size)
     }
+    // 数据较长时顶部栏保持单行，避免长按逐点切换导致图表上下跳动。
+    val supportingText = remember(displayed) { buildSelectionSupportingText(displayed) }
 
     Column(
         modifier = Modifier
@@ -551,7 +577,8 @@ private fun TrendSelectedReadout(
                 Text(
                     text = buildReadoutTitle(displayed, isSelected),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
                 Text(
                     "${displayed.systolic}/${displayed.diastolic} mmHg",
@@ -577,35 +604,78 @@ private fun TrendSelectedReadout(
             }
         }
         Text(
-            "脉搏 ${displayed.pulse?.toString() ?: "未记录"}" +
-                if (displayed.aggregation == TrendAggregation.DAILY) {
-                    " · 当日 ${displayed.recordCount} 次"
-                } else {
-                    ""
-                },
+            text = supportingText,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
         )
-        FlowRow(
+        // 四枚按钮同处一行、等宽平分：普通手机宽度（约 360dp）下每枚仍有
+        // 约 65dp，配合 13sp 文案与 4dp 内边距不会拥挤、截断或换行。
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(
+            ReadoutAction(
+                text = "上一条",
                 onClick = { onPointSelected(points[index - 1]) },
-                enabled = canGoPrevious
-            ) { Text("上一条") }
-            TextButton(
+                enabled = canGoPrevious,
+                modifier = Modifier.weight(1f)
+            )
+            ReadoutAction(
+                text = "下一条",
                 onClick = { onPointSelected(points[index + 1]) },
-                enabled = canGoNext
-            ) { Text("下一条") }
-            if (canViewDayRecords) {
-                TextButton(onClick = { onViewDayRecords(displayed) }) { Text("查看当日记录") }
-            }
-            if (isSelected) {
-                TextButton(onClick = { onPointSelected(null) }) { Text("取消选择") }
-            }
+                enabled = canGoNext,
+                modifier = Modifier.weight(1f)
+            )
+            ReadoutAction(
+                text = "明细",
+                onClick = { onViewDayRecords(displayed) },
+                modifier = Modifier.weight(1f)
+            )
+            ReadoutAction(
+                text = "恢复",
+                onClick = onResetChart,
+                modifier = Modifier.weight(1f)
+            )
         }
+    }
+}
+
+/**
+ * 操作区按钮：等宽、单行、居中，最小高度 44dp。
+ *
+ * 不用 Material 默认的 64dp 最小宽度 + 12dp 内边距——四枚并排时会直接放不下，
+ * 在窄屏上被压成「换行 / 截断」。这里显式收紧内边距，同时保留足够触摸高度。
+ */
+@Composable
+private fun ReadoutAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 44.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            fontSize = 13.sp,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+private fun buildSelectionSupportingText(point: TrendPoint): String {
+    val pulse = "脉搏 ${point.pulse?.toString() ?: "未记录"}"
+    return when (point.aggregation) {
+        TrendAggregation.DAILY -> "$pulse · 当日 ${point.recordCount} 次平均"
+        TrendAggregation.RAW -> "$pulse · 单次测量"
     }
 }
 
@@ -727,8 +797,7 @@ private fun TrendDayDetailsSheet(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "当日 ${details.point.recordCount} 次，平均 " +
-                    "${details.point.systolic}/${details.point.diastolic} mmHg",
+                buildDayDetailsSubtitle(details),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -762,9 +831,24 @@ private fun TrendDayDetailsSheet(
     }
 }
 
+/**
+ * 当日明细的副标题：加载完成后用真实记录数与该日平均，
+ * 避免「7/30 天单次测量节点」显示成「当日 1 次」而掩盖同一天的其他记录。
+ */
+private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
+    if (details.loading || details.error != null) {
+        return "当日 ${details.point.recordCount} 次，平均 " +
+            "${details.point.systolic}/${details.point.diastolic} mmHg"
+    }
+    val records = details.records
+    if (records.isEmpty()) return "当天没有原始记录"
+    val systolic = records.map { it.systolic }.average().roundToInt()
+    val diastolic = records.map { it.diastolic }.average().roundToInt()
+    return "当日 ${records.size} 次，平均 $systolic/$diastolic mmHg"
+}
+
 @Composable
-private fun TrendDayRecordRow(record: TrendRecord) {
-    Row(
+private fun TrendDayRecordRow(record: TrendRecord) {    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 12.dp),
