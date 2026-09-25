@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设计审查报告 · 血压记录 UI 重构</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg: oklch(0.975 0.01 80); --card: #fff; --ink: oklch(0.25 0.015 55); --ink2: oklch(0.48 0.015 60); --ink3: oklch(0.66 0.012 65); --line: oklch(0.9 0.012 75); --soft: oklch(0.945 0.013 78); --accent: oklch(0.66 0.15 32); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'Noto Sans SC', sans-serif; line-height: 1.65; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 56px 28px 80px; }
+  .num { font-family: 'Bricolage Grotesque', 'Noto Sans SC', sans-serif; font-variant-numeric: tabular-nums; }
+  h1 { font-size: 2.3rem; font-weight: 900; margin: 6px 0 8px; letter-spacing: -.01em; }
+  .eyebrow { color: var(--ink3); font-weight: 700; font-size: .85rem; letter-spacing: .04em; }
+  .lede { color: var(--ink2); max-width: 720px; text-wrap: pretty; }
+  .sum { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0 8px; }
+  .sum div { background: var(--card); border-radius: 20px; padding: 16px 18px; box-shadow: 0 1px 0 var(--line); }
+  .sum b { display: block; font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  .sum span { font-size: .82rem; color: var(--ink2); font-weight: 600; }
+  h2 { font-size: 1.3rem; font-weight: 900; margin: 44px 0 14px; display: flex; align-items: center; gap: 10px; }
+  .pri { font-family: 'Bricolage Grotesque'; font-size: .8rem; font-weight: 800; padding: 3px 10px; border-radius: 8px; color: #fff; }
+  .p0 { background: oklch(0.55 0.2 27); } .p1 { background: oklch(0.65 0.16 50); } .p2 { background: oklch(0.6 0.08 250); }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--card); border-radius: 18px; overflow: hidden; box-shadow: 0 1px 0 var(--line); font-size: .9rem; }
+  th { text-align: left; font-size: .76rem; color: var(--ink3); font-weight: 700; background: var(--soft); padding: 10px 14px; }
+  td { padding: 12px 14px; border-top: 1px solid var(--line); vertical-align: top; text-wrap: pretty; }
+  td:first-child { width: 34px; color: var(--ink3); font-family: 'Bricolage Grotesque'; font-weight: 700; }
+  td.where { width: 120px; color: var(--ink2); font-size: .82rem; font-weight: 600; }
+  code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: .8em; background: var(--soft); padding: 1px 6px; border-radius: 6px; }
+  .src { display: block; margin-top: 4px; font-size: .78rem; color: var(--ink3); }
+  .fix { color: oklch(0.45 0.12 155); font-weight: 600; }
+  .note { background: var(--card); border-radius: 18px; padding: 16px 20px; box-shadow: 0 1px 0 var(--line); color: var(--ink2); font-size: .9rem; }
+  .note b { color: var(--ink); }
+  a { color: oklch(0.5 0.14 32); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">血压记录 · UI 重构稿 v0.1 × 仓库 yy611185/blood-pressure-record @ v1.8.4</div>
+  <h1>设计审查报告</h1>
+  <p class="lede">逐文件对照了重构原型与仓库中的领域规则（<code>BloodPressureRules</code>、<code>MeasurementInputRules</code>、<code>AverageCalculator</code>、<code>MeasurementTags</code>、<code>MeasurementTimestampValidator</code>、<code>CategoryPresentation</code>）和 README 列出的核心功能。下列问题<b>均已在 <a href="血压记录 重构.html">血压记录 重构.html</a> 中修复</b>，原稿保留在 <code>v1-原稿/</code>。</p>
+
+  <div class="sum">
+    <div><b class="num" style="color:oklch(0.55 0.2 27)">7</b><span>P0 · 医疗/数据正确性</span></div>
+    <div><b class="num" style="color:oklch(0.65 0.16 50)">9</b><span>P1 · 功能缺失或与仓库不一致</span></div>
+    <div><b class="num" style="color:oklch(0.6 0.08 250)">10</b><span>P2 · 可用性 / 虚假数据 / 无障碍</span></div>
+    <div><b class="num">26</b><span>全部已修复</span></div>
+  </div>
+
+  <h2><span class="pri p0">P0</span>会产生错误结论或错误数据</h2>
+  <table>
+    <tr><th>#</th><th>位置</th><th>问题</th><th>修复</th></tr>
+    <tr><td>1</td><td class="where">分级 gradeOf</td><td>先判「偏低」再判「正常高值」，<b>125/55 被判为偏低</b>，与仓库相反。<span class="src">BloodPressureRules：「边界组合（如 125/55）按升高一侧归类为正常高值」</span></td><td class="fix">调换顺序，与仓库完全一致。Tweaks → 演示场景「边界」可验证。</td></tr>
+    <tr><td>2</td><td class="where">全局</td><td><b>完全没有「高风险提醒」</b>。仓库中这是独立于分级的规则：任一原始组或平均值 ≥180 / ≥120 即触发。平均 179/101（2 级）但单组 186 时，原稿毫无提示。<span class="src">BloodPressureRules.containsHighRiskReading</span></td><td class="fix">新增高风险标签 + 首页/录入/完成页/历史/日历的警示与就医建议；伴胸痛、视物模糊时追加「尽快就医」。</td></tr>
+    <tr><td>3</td><td class="where">录入</td><td>填 1 组即可「下一步」保存；仓库要求<b>至少 2 组</b>。<span class="src">MeasurementInputRules.MIN_READING_COUNT = 2</span></td><td class="fix">不足 2 组不能继续，提示「再测一组就可以啦」。上限 10 组（UI_MAX_READING_COUNT），可删除多余组。</td></tr>
+    <tr><td>4</td><td class="where">录入校验</td><td>范围 50–260 / 30–180 与仓库不同；<b>不校验低压 &lt; 高压</b>、不校验脉搏；无效组被静默忽略，没有任何错误提示。<span class="src">SYSTOLIC 40–300 · DIASTOLIC 20–200 · PULSE 20–250 · DIASTOLIC_NOT_LOWER_THAN_SYSTOLIC</span></td><td class="fix">规则对齐，逐组显示具体错误；组标签用绿/橙点标示有效/有误；禁止前导 0。</td></tr>
+    <tr><td>5</td><td class="where">保存</td><td>未填脉搏时写入<b>虚构的 72</b>（<code>p: rec.p || 72</code>），污染数据。</td><td class="fix">脉搏保持为空，界面显示「—」。</td></tr>
+    <tr><td>6</td><td class="where">录入 · 情况</td><td>症状选择<b>没有被保存</b>（onSave 未传 sym）；「没有，挺好的」与仓库「无症状」不一致，备份往返会变成未知标签。<span class="src">MeasurementTags.symptoms</span></td><td class="fix">症状随记录保存并在历史/详情中显示；标签名与仓库一致。</td></tr>
+    <tr><td>7</td><td class="where">保存</td><td>缺少「偏离常见范围」二次确认（如高压 280、脉搏 230），容易把输错的数字直接存入。<span class="src">SessionFormLogic.buildAbnormalMessage</span></td><td class="fix">保存前弹出确认，列出可疑读数。</td></tr>
+  </table>
+
+  <h2><span class="pri p1">P1</span>功能缺失或与仓库不一致</h2>
+  <table>
+    <tr><th>#</th><th>位置</th><th>问题</th><th>修复</th></tr>
+    <tr><td>8</td><td class="where">平均策略</td><td>「我的」里显示「平均策略：全部组」，但<b>既不能改也不生效</b>；仓库支持「不计第一组」。</td><td class="fix">「我的」可切换；录入实时按策略计算，历史详情标注被弃用的组。高风险判断仍看全部原始读数。</td></tr>
+    <tr><td>9</td><td class="where">录入 · 时间</td><td>日期时间是写死的文本，<b>无法补录</b>；也没有未来时间拦截。<span class="src">MeasurementTimestampValidator：晚于当前 2 分钟以上拒绝</span></td><td class="fix">改为可编辑的日期/时间；未来时间禁用保存并提示。</td></tr>
+    <tr><td>10</td><td class="where">录入 · 场景</td><td>场景缺「凌晨」「其他」，默认固定为「上午」，不随时间预选。<span class="src">MeasurementTags.defaultSceneFor</span></td><td class="fix">6 个场景，按测量时间自动预选，手动改过后不再覆盖。</td></tr>
+    <tr><td>11</td><td class="where">历史</td><td>记录不可点击：<b>没有详情、编辑、删除、撤销</b>——README 列为核心功能。原始各组读数也无处查看。</td><td class="fix">点记录 → 底部详情（原始各组表格）→ 编辑（复用录入流程）/ 删除（确认 + 5 秒撤销）。</td></tr>
+    <tr><td>12</td><td class="where">历史 · 日历</td><td>月份写死为 8–9 月，<b>7 月的样例数据无法查看</b>；年份写死 2026。</td><td class="fix">可翻范围由最早记录到当前月决定。</td></tr>
+    <tr><td>13</td><td class="where">趋势</td><td>标注「真实时间轴」，但 x 轴按点序号等距，缺测的日子被压缩；并用曲线把空档连起来。</td><td class="fix">按日期定位；间隔 &gt;2 天断线。</td></tr>
+    <tr><td>14</td><td class="where">趋势</td><td>y 轴固定 50–170，180 以上的读数<b>画出图外</b>；筛选区间无数据时 avg 为 NaN、<code>hi.s</code> 报错崩溃。</td><td class="fix">y 轴按数据自适应；空区间显示空状态。</td></tr>
+    <tr><td>15</td><td class="where">趋势</td><td>90–140 绿色带同时作用于两条曲线：舒张压 95（1 级）落在「绿区」里，语义误导。</td><td class="fix">改为高压目标线 / 低压目标线，随曲线切换显示。</td></tr>
+    <tr><td>16</td><td class="where">达标率</td><td>达标 = 正常 + 正常高值，但「我的」写的目标是 &lt;135/85，两处口径不一致；「比上个周期更稳了」是写死的。</td><td class="fix">统一按用户目标计算（历史日历「达标天数」同口径）；与上一个同长度周期真实对比。</td></tr>
+  </table>
+
+  <h2><span class="pri p2">P2</span>可用性、虚假数据、无障碍</h2>
+  <table>
+    <tr><th>#</th><th>位置</th><th>问题</th><th>修复</th></tr>
+    <tr><td>17</td><td class="where">录入</td><td>空输入框用<b>上次读数做灰色占位</b>，长辈易误以为已经填好。</td><td class="fix">占位改为「—」，上次读数单独标注「上次 128/80」。</td></tr>
+    <tr><td>18</td><td class="where">录入</td><td>关闭按钮直接丢弃已填读数，无确认；关闭后强制跳首页。</td><td class="fix">有输入时确认放弃；仅保存成功后回首页。</td></tr>
+    <tr><td>19</td><td class="where">静坐</td><td>文案说「静坐」，计时 60 秒（指南为 5 分钟）；<code>0:{sec}</code> 格式超过 59 秒会显示错乱。</td><td class="fix">5:00 倒计时，m:ss 格式；可直接跳过。</td></tr>
+    <tr><td>20</td><td class="where">首页</td><td>「今天 hh:mm」「2 组平均」「连续 12 天」写死；完成页「连续 13 天」写死；「我的」「已记录 59 天」写死；小压台词写死药名。</td><td class="fix">全部由数据计算（昨天/前天/日期、实际组数、连续天数、下一顿药）。</td></tr>
+    <tr><td>21</td><td class="where">首页</td><td>无数据时 <code>latest.s</code> 报错，<b>新用户首屏白屏</b>。</td><td class="fix">空状态 + 「记第一次血压」按钮。Tweaks → 演示场景「空数据」可验证。</td></tr>
+    <tr><td>22</td><td class="where">首页 · 服药</td><td>取消打卡没有反馈，误触无从察觉。</td><td class="fix">打卡与取消都有提示；按钮带 aria-pressed。</td></tr>
+    <tr><td>23</td><td class="where">首页 · 本周</td><td>柱高 <code>(s-95)*1.4</code> 无上限，高读数会顶出卡片；柱上数字含义未说明。</td><td class="fix">钳制高度；注明「当天收缩压平均值」。</td></tr>
+    <tr><td>24</td><td class="where">我的</td><td>开关所在行是 <code>&lt;button&gt;</code> 但点击无效，<b>只有 52px 的小开关能点</b>；无 role="switch"。多行带箭头却不可点。</td><td class="fix">整行可点、role="switch" + aria-checked；未实现的行给出提示。</td></tr>
+    <tr><td>25</td><td class="where">历史 · 日历</td><td>图例缺 3 级和偏低；日格仅靠颜色区分，读屏无信息。</td><td class="fix">图例补齐 + 高风险「!」标记；每格 aria-label 读出次数、平均值、分级。</td></tr>
+    <tr><td>26</td><td class="where">我的 · 导出</td><td>直接导出明文 Excel，无隐私提示（README 明确要求提醒明文风险）。</td><td class="fix">导出前确认，说明明文风险并引导加密备份。</td></tr>
+  </table>
+
+  <h2>顺带发现：仓库本身</h2>
+  <div class="note">
+    <b>芯片文案：</b>原稿把 1–3 级简写为「1级」，仓库标签是「1级高血压」；已改为完整标签，避免与「1 级风险」等概念混淆。<br>
+    <b>README：</b>前半写 SDK 35 / Gradle 8.7，后半写 API 36 / Gradle 8.11.1，章节重复（仓库 <code>docs/review-2026-09-20.md</code> 也已指出）。<br>
+    <b>已按反馈调整：</b>首页铃铛（跳到「我的」，功能重复）已删除；新增独立的「提醒中心」（我的 → 提醒中心），集中管理测量提醒、重复日期、未测补提醒、每种药的服药提醒、系统日历同步、备份提醒。保存目前是占位，不调度系统闹钟。<br>
+    <b>二轮布局修复：</b>完成页 <code>.done</code> 与打卡按钮 <code>.stamp.done</code> 类名冲突；「已打卡」「次测量」、达标率「%」、目标「&lt; 135」被折行。
+  </div>
+</div>
+</body>
+</html>
