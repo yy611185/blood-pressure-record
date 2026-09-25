@@ -12,22 +12,17 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -55,12 +50,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -70,10 +63,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
+import com.example.bloodpressurerecord.ui.common.InlineSessionAction
 import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
 import com.example.bloodpressurerecord.ui.common.MeasurementTags
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
-import com.example.bloodpressurerecord.ui.common.SessionSaveBottomBar
 import com.example.bloodpressurerecord.ui.common.SessionChoiceChip
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
@@ -86,7 +79,6 @@ import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
-import kotlinx.coroutines.delay
 
 /** 存储值保持“无症状”不变，仅展示时使用口语化文案。 */
 private fun symptomLabel(symptom: String): String =
@@ -102,8 +94,8 @@ fun AddMeasurementScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showExitDialog by remember { mutableStateOf(false) }
     var selectedGroup by rememberSaveable { mutableStateOf(0) }
-    var step by rememberSaveable { mutableIntStateOf(if (state.isDirty) 1 else 0) }
-    var restSeconds by rememberSaveable { mutableIntStateOf(300) }
+    // 录入主线为三步：读数 → 情况 → 完成（不再有静坐引导页）。
+    var step by rememberSaveable { mutableIntStateOf(0) }
     var savedSystolic by rememberSaveable { mutableStateOf<Int?>(null) }
     var savedDiastolic by rememberSaveable { mutableStateOf<Int?>(null) }
     var savedCategory by rememberSaveable { mutableStateOf("") }
@@ -113,20 +105,13 @@ fun AddMeasurementScreen(
     var savedDiscardedFirst by rememberSaveable { mutableStateOf(false) }
     val requestBack = {
         when {
-            step == 3 -> onSaved()
-            step == 2 -> step = 1
+            step == 2 -> onSaved()
+            step == 1 -> step = 0
             state.isDirty -> showExitDialog = true
             else -> onBack()
         }
     }
     BackHandler(onBack = requestBack)
-
-    LaunchedEffect(step) {
-        while (step == 0 && restSeconds > 0) {
-            delay(1000)
-            restSeconds--
-        }
-    }
 
     if (showExitDialog) {
         UnsavedChangesDialog(
@@ -172,29 +157,31 @@ fun AddMeasurementScreen(
     }
 
     LaunchedEffect(state.saved) {
-        if (state.saved) step = 3
+        if (state.saved) step = 2
     }
 
     val topBarScroll = rememberHideOnScrollState()
     Scaffold(
         modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.background,
+        // 顶部安全区交给 topBar 槽里的 AppTopBar，底部安全区交给滚动内容自己，
+        // 避免 Scaffold.innerPadding 与页面 padding 重复叠加。
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
             AppTopBar(
                 title = when (step) {
-                    0 -> "先静坐一会儿"
-                    1 -> "记一次血压"
-                    2 -> "测的时候怎么样？"
+                    0 -> "记一次血压"
+                    1 -> "测的时候怎么样？"
                     else -> "记好啦"
                 },
                 onBack = requestBack,
                 hideOnScroll = topBarScroll,
                 actions = {
                     Row(
-                        modifier = Modifier.semantics { contentDescription = "第 ${step + 1} 步，共 4 步" },
+                        modifier = Modifier.semantics { contentDescription = "第 ${step + 1} 步，共 3 步" },
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        repeat(4) { index ->
+                        repeat(3) { index ->
                             val color = when {
                                 index == step -> MaterialTheme.colorScheme.primary
                                 index < step -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
@@ -209,44 +196,6 @@ fun AddMeasurementScreen(
                     }
                 }
             )
-        },
-        bottomBar = {
-            SessionSaveBottomBar(
-                canSave = when (step) {
-                    0, 3 -> true
-                    1 -> state.canContinueReadings
-                    else -> state.canSave
-                },
-                disabledReason = when (step) {
-                    1 -> state.readingsDisabledReason
-                    2 -> state.saveDisabledReason
-                    else -> ""
-                },
-                isSaving = state.isSaving,
-                buttonText = when (step) {
-                    0 -> if (restSeconds == 0) "准备好了，开始记录" else "我已经静坐过了，直接记录"
-                    1 -> "下一步 · 补充情况"
-                    2 -> "保存这次记录"
-                    else -> "完成"
-                },
-                onSave = {
-                    when (step) {
-                        0 -> step = 1
-                        1 -> step = 2
-                        2 -> {
-                            savedSystolic = state.avgSystolic
-                            savedDiastolic = state.avgDiastolic
-                            savedCategory = state.categoryLabel
-                            savedRisk = state.containsHighRiskReading
-                            savedPulse = state.avgPulse
-                            savedGroupCount = state.averagedGroupCount
-                            savedDiscardedFirst = state.discardedFirstReading
-                            viewModel.onSaveClicked()
-                        }
-                        else -> onSaved()
-                    }
-                }
-            )
         }
     ) { padding ->
         Column(
@@ -257,60 +206,49 @@ fun AddMeasurementScreen(
                 .padding(padding)
                 .padding(horizontal = AppDimensions.pageHorizontalPadding)
                 .navigationBarsPadding()
-                .padding(bottom = AppSpacing.xLarge),
+                .imePadding()
+                .padding(bottom = AppDimensions.pageBottomGap),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
-            if (step == 0) {
-                val context = LocalContext.current
-                val motionEnabled = remember(context) {
-                    runCatching {
-                        android.provider.Settings.Global.getFloat(
-                            context.contentResolver,
-                            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
-                            1f
-                        ) > 0f
-                    }.getOrDefault(true)
-                }
-                val breathScale = if (motionEnabled) {
-                    val transition = rememberInfiniteTransition(label = "呼吸引导")
-                    val scale by transition.animateFloat(
-                        initialValue = 0.72f,
-                        targetValue = 1f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(4000, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "呼吸圈缩放"
-                    )
-                    scale
-                } else 1f
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    Box(Modifier.size(230.dp), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(230.dp).graphicsLayer {
-                            scaleX = breathScale; scaleY = breathScale
-                        }.background(MaterialTheme.colorScheme.primaryContainer, CircleShape))
-                        Box(Modifier.size(170.dp).graphicsLayer {
-                            scaleX = breathScale; scaleY = breathScale
-                        }.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f), CircleShape))
-                        Box(Modifier.size(110.dp).graphicsLayer {
-                            scaleX = breathScale; scaleY = breathScale
-                        }.background(MaterialTheme.colorScheme.primary, CircleShape))
-                        Text("跟着呼吸", style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.ExtraBold)
+            // 读数页的「下一步 · 补充情况」与情况页的「保存这次记录」都作为
+            // 页面滚动内容末尾的普通主按钮，不再拥有独立白色 Dock、不随键盘上浮。
+            val action: @Composable () -> Unit = {
+                InlineSessionAction(
+                    canSave = when (step) {
+                        0 -> state.canContinueReadings
+                        1 -> state.canSave
+                        else -> true
+                    },
+                    disabledReason = when (step) {
+                        0 -> state.readingsDisabledReason
+                        1 -> state.saveDisabledReason
+                        else -> ""
+                    },
+                    isSaving = state.isSaving,
+                    buttonText = when (step) {
+                        0 -> "下一步 · 补充情况"
+                        1 -> "保存这次记录"
+                        else -> "完成"
+                    },
+                    onSave = {
+                        when (step) {
+                            0 -> step = 1
+                            1 -> {
+                                savedSystolic = state.avgSystolic
+                                savedDiastolic = state.avgDiastolic
+                                savedCategory = state.categoryLabel
+                                savedRisk = state.containsHighRiskReading
+                                savedPulse = state.avgPulse
+                                savedGroupCount = state.averagedGroupCount
+                                savedDiscardedFirst = state.discardedFirstReading
+                                viewModel.onSaveClicked()
+                            }
+                            else -> onSaved()
+                        }
                     }
-                    Text("${restSeconds / 60}:${(restSeconds % 60).toString().padStart(2, '0')}",
-                        style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-                    Text("测量前静坐 5 分钟，坐直、双脚平放、手臂与心脏同高。圈变大吸气，变小呼气。",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center)
-                }
+                )
             }
-            if (step == 1) {
+            if (step == 0) {
             Text("连续测量，更接近真实血压", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             val readings = listOf(state.reading1, state.reading2) + state.extraReadings
@@ -388,9 +326,10 @@ fun AddMeasurementScreen(
                         color = MaterialTheme.colorScheme.onErrorContainer)
                 }
             }
+            action()
             }
 
-            if (step == 2) {
+            if (step == 1) {
             Text("本次平均 ${state.avgSystolic ?: "—"}/${state.avgDiastolic ?: "—"} mmHg",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary)
@@ -493,8 +432,9 @@ fun AddMeasurementScreen(
                     shape = RoundedCornerShape(20.dp),
                     minLines = 3
                 )
+                action()
             }
-            if (step == 3) {
+            if (step == 2) {
                 Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
                     modifier = Modifier.fillMaxWidth().padding(top = 36.dp)) {
                     Column(Modifier.padding(30.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -542,6 +482,7 @@ fun AddMeasurementScreen(
                         )
                     }
                 }
+                action()
             }
             if (state.formMessage.isNotBlank() && !state.isSaving && !state.saved) {
                 Text(

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,8 +52,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
+import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
@@ -243,47 +245,86 @@ fun MeasurementReadingCard(
                     }
                 }
             }
+            // 三项等权紧凑布局：普通手机宽度一行三栏；窄屏或大字体自动退化为两行。
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val fontScale = LocalDensity.current.fontScale
-                val stacked = maxWidth.value / fontScale < 275f
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberField(
+                val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+                val stacked = maxWidth.value / fontScale < MinRowWidthForThreeFields
+                val numberSize = (MaxNumberFieldFontSize / fontScale)
+                    .coerceIn(MinNumberFieldFontSize, MaxNumberFieldFontSize).sp
+                val systolicField: @Composable (Modifier) -> Unit = { fieldModifier ->
+                    CompactNumberField(
                         value = reading.systolic,
                         onValueChange = onSystolicChange,
-                        label = "收缩压 · 高压",
+                        label = "高压",
+                        unit = "mmHg",
                         accessibleLabel = "第 ${index + 1} 组收缩压（高压）",
                         imeAction = ImeAction.Next,
-                        modifier = Modifier.fillMaxWidth(),
-                        prominent = true
+                        numberSize = numberSize,
+                        modifier = fieldModifier
                     )
-                    val lowerFields: @Composable (Modifier) -> Unit = { fieldModifier ->
-                        NumberField(
-                            value = reading.diastolic,
-                            onValueChange = onDiastolicChange,
-                            label = "舒张压 · 低压",
-                            accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
-                            imeAction = ImeAction.Next,
-                            isError = relationError,
-                            modifier = fieldModifier
-                        )
-                        NumberField(
-                            value = reading.pulse,
-                            onValueChange = onPulseChange,
-                            label = "脉搏 · 选填",
-                            accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
-                            imeAction = ImeAction.Done,
-                            modifier = fieldModifier
-                        )
-                    }
-                    if (stacked) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            lowerFields(Modifier.fillMaxWidth())
+                }
+                val diastolicField: @Composable (Modifier) -> Unit = { fieldModifier ->
+                    CompactNumberField(
+                        value = reading.diastolic,
+                        onValueChange = onDiastolicChange,
+                        label = "低压",
+                        unit = "mmHg",
+                        accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
+                        imeAction = ImeAction.Next,
+                        isError = relationError,
+                        numberSize = numberSize,
+                        modifier = fieldModifier
+                    )
+                }
+                val pulseField: @Composable (Modifier) -> Unit = { fieldModifier ->
+                    CompactNumberField(
+                        value = reading.pulse,
+                        onValueChange = onPulseChange,
+                        label = "脉搏",
+                        unit = "次/分",
+                        accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
+                        imeAction = ImeAction.Done,
+                        numberSize = numberSize,
+                        modifier = fieldModifier
+                    )
+                }
+                if (stacked) {
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                            systolicField(Modifier.weight(1f))
+                            diastolicField(Modifier.weight(1f))
                         }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            lowerFields(Modifier.weight(1f))
-                        }
+                        pulseField(Modifier.fillMaxWidth())
                     }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                        systolicField(Modifier.weight(1f))
+                        diastolicField(Modifier.weight(1f))
+                        pulseField(Modifier.weight(1f))
+                    }
+                }
+            }
+            // 本组结果保持在输入区附近，压缩视觉后依然一眼可读。
+            // 只有数值有效（低压 < 高压）时才给出分级，避免出现乐观的错误提示。
+            if (systolic != null && diastolic != null && !relationError) {
+                val category = CategoryCalculator.calculate(systolic, diastolic)
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
+                ) {
+                    Text(
+                        "本组：$systolic / $diastolic mmHg",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    StatusChip(
+                        text = CategoryPresentation.label(category.name),
+                        isAbnormal = category != BloodPressureCategory.NORMAL
+                    )
                 }
             }
             if (relationError) {
@@ -300,18 +341,39 @@ fun MeasurementReadingCard(
     }
 }
 
+/**
+ * 紧凑数值输入栏：标签在上、数字居中、单位在下。
+ *
+ * 数字字号按 fontScale 反向折算（sp 会再乘一次 fontScale），
+ * 因此大字模式下不会溢出或截断，同时保留 ≥48dp 的触摸区域、
+ * IME Next/Done、数字与长度限制以及无障碍标签。
+ */
 @Composable
-private fun NumberField(
+private fun CompactNumberField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
+    unit: String,
     accessibleLabel: String,
     imeAction: ImeAction,
+    numberSize: TextUnit,
     modifier: Modifier = Modifier,
-    isError: Boolean = false,
-    prominent: Boolean = false
+    isError: Boolean = false
 ) {
-    OutlinedTextField(
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+            fontWeight = FontWeight.SemiBold,
+            color = colors.onSurfaceVariant,
+            maxLines = 1
+        )
+        OutlinedTextField(
             value = value,
             onValueChange = { next ->
                 if (next.all(Char::isDigit) && next.length <= 3) onValueChange(next)
@@ -322,83 +384,147 @@ private fun NumberField(
             ),
             isError = isError,
             singleLine = true,
-            shape = RoundedCornerShape(24.dp),
+            shape = MaterialTheme.shapes.large,
             textStyle = TextStyle(
-                fontSize = if (prominent) 70.sp else 44.sp,
-                lineHeight = if (prominent) 76.sp else 48.sp,
+                fontSize = numberSize,
+                lineHeight = numberSize,
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Start,
-                color = MaterialTheme.colorScheme.onSurface
+                textAlign = TextAlign.Center,
+                color = colors.onSurface
             ),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedBorderColor = colors.primary,
                 unfocusedBorderColor = Color.Transparent,
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                focusedContainerColor = colors.surface,
+                unfocusedContainerColor = colors.surface,
+                errorContainerColor = colors.surface
             ),
-            modifier = modifier
-                .heightIn(min = if (prominent) 132.dp else 106.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(AppDimensions.numberFieldHeight)
                 .semantics { contentDescription = accessibleLabel },
-            label = { Text(label, style = MaterialTheme.typography.labelMedium) },
             placeholder = {
-                Text("—", style = TextStyle(
-                    fontSize = if (prominent) 70.sp else 44.sp,
-                    lineHeight = if (prominent) 76.sp else 48.sp,
+                Text(
+                    "—",
+                    fontSize = numberSize,
+                    lineHeight = numberSize,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                ))
+                    textAlign = TextAlign.Center,
+                    color = colors.onSurfaceVariant.copy(alpha = 0.45f)
+                )
             }
         )
+        Text(
+            unit,
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+            color = colors.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
 }
 
+/** 单栏数字字号上限（普通机型）。 */
+private const val MaxNumberFieldFontSize = 48f
+/** 大字体/窄屏下允许的最小字号。 */
+private const val MinNumberFieldFontSize = 32f
+/** 一行放下三栏所需的最小可用宽度（dp，已按 fontScale 折算）。 */
+private const val MinRowWidthForThreeFields = 300f
+
+/**
+ * 表单里的可多选/单选标签。
+ *
+ * 选中态使用暖色 `primaryContainer` / `onPrimaryContainer`（不再出现突兀的深色块），
+ * 未选中态是白色 surface + 暖色描边，整体保持暖阳设计语言。
+ */
 @Composable
 fun SessionChoiceChip(text: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold) },
+        label = {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+            )
+        },
         shape = RoundedCornerShape(50),
         colors = FilterChipDefaults.filterChipColors(
             containerColor = MaterialTheme.colorScheme.surface,
             labelColor = MaterialTheme.colorScheme.onSurface,
-            selectedContainerColor = MaterialTheme.colorScheme.onSurface,
-            selectedLabelColor = MaterialTheme.colorScheme.surface
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
         ),
-        border = if (selected) null else FilterChipDefaults.filterChipBorder(
-            enabled = true, selected = false, borderColor = MaterialTheme.colorScheme.outlineVariant
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = MaterialTheme.colorScheme.outlineVariant,
+            selectedBorderColor = MaterialTheme.colorScheme.primary
         ),
         modifier = Modifier.heightIn(min = 48.dp)
     )
 }
 
+/**
+ * 表单主操作按钮的“页面内”形态：普通滚动内容的一部分。
+ *
+ * 刻意**不带**白色 Dock 底色、不固定悬浮、不加 `navigationBarsPadding()` /
+ * `imePadding()`：键盘弹出时按钮随内容滚动，不会上浮覆盖正在输入的字段。
+ * 底部系统安全区由宿主页面的滚动内容统一负责。
+ */
+@Composable
+fun InlineSessionAction(
+    canSave: Boolean,
+    disabledReason: String,
+    isSaving: Boolean,
+    buttonText: String,
+    onSave: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+    ) {
+        if (!canSave && disabledReason.isNotBlank()) {
+            Text(
+                disabledReason,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        AppPrimaryButton(
+            text = if (isSaving) "正在保存…" else buttonText,
+            onClick = onSave,
+            enabled = canSave && !isSaving,
+            modifier = Modifier.fillMaxWidth().height(AppDimensions.saveButtonHeight)
+        )
+    }
+}
+
+/**
+ * 分步表单的固定底栏形态（编辑测量页仍在用）。
+ *
+ * 只负责底部安全区与背景，**不再使用 `imePadding()`**：底栏一旦随键盘长高，
+ * 会被 Scaffold 计入 `innerPadding.bottom` 并把整个表单顶上去。
+ */
 @Composable
 fun SessionSaveBottomBar(
     canSave: Boolean,
     disabledReason: String,
     isSaving: Boolean,
     buttonText: String,
-    onSave: () -> Unit,
-    /** 嵌入滚动页面时使用完整圆角；默认仍作为固定底栏，仅保留顶部圆角。 */
-    embedded: Boolean = false
+    onSave: () -> Unit
 ) {
-    val containerShape = if (embedded) {
-        MaterialTheme.shapes.large
-    } else {
-        RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surface,
-                containerShape
+                RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             )
             .navigationBarsPadding()
-            .imePadding()
             .padding(
-                horizontal = if (embedded) AppSpacing.medium else AppDimensions.bottomActionPadding,
+                horizontal = AppSpacing.medium,
                 vertical = AppSpacing.medium
             ),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)

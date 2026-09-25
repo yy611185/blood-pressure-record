@@ -74,7 +74,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
+import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
@@ -173,6 +176,7 @@ fun HistoryScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .padding(top = statusBarTopPadding())
             .nestedScroll(topBarScroll.nestedScrollConnection)
     ) {
         AppTopBar(title = stringResource(R.string.history_title), hideOnScroll = topBarScroll)
@@ -182,7 +186,7 @@ fun HistoryScreen(
             contentPadding = PaddingValues(
                 start = AppDimensions.pageHorizontalPadding,
                 end = AppDimensions.pageHorizontalPadding,
-                bottom = AppSpacing.xLarge
+                bottom = dockContentBottomPadding()
             ),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
@@ -377,48 +381,14 @@ private fun <T> SelectionRow(
     selected: T,
     onSelected: (T) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-                MaterialTheme.shapes.large
-            )
-            .padding(5.dp),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
-    ) {
-        options.forEach { (option, label) ->
-            val isSelected = option == selected
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 44.dp)
-                    .clip(MaterialTheme.shapes.large)
-                    .background(
-                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                        else Color.Transparent
-                    )
-                    .semantics {
-                        role = Role.RadioButton
-                        this.selected = isSelected
-                        contentDescription = if (isSelected) "$label，已选择" else label
-                    }
-                    .clickable { onSelected(option) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                )
-            }
-        }
-    }
+    val selectedIndex = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
+    // 与「我的 → 平均值怎么算」共用同一个分段胶囊组件，视觉与无障碍语义保持一致。
+    SegmentedPillGroup(
+        options = options.map { it.second },
+        selectedIndex = selectedIndex,
+        onSelect = { index -> options.getOrNull(index)?.let { onSelected(it.first) } },
+        horizontalPadding = AppSpacing.small
+    )
 }
 
 @Composable
@@ -670,8 +640,9 @@ internal fun CalendarDay(
             )
         }
         if (selected) {
+            // 选中态用暖色主色，避免日历里出现近黑色描边。
             circleModifier = circleModifier.border(
-                BorderStroke(2.dp, MaterialTheme.colorScheme.onSurface),
+                BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
                 RoundedCornerShape(13.dp)
             )
         }

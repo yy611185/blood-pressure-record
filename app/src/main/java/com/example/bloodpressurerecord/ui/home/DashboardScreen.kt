@@ -54,7 +54,6 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +63,9 @@ import com.example.bloodpressurerecord.data.repository.SessionSummary
 import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import java.time.Instant
 import java.time.LocalDate
@@ -99,11 +101,16 @@ fun DashboardScreen(
             }
         }
     }
+    // 底部留白只保留“避免被悬浮 Dock 遮挡”所需的一份，且不含任何固定 magic number。
+    val bottomInset = dockContentBottomPadding()
     Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
-            .padding(top = 12.dp, bottom = 116.dp)
+            .verticalScroll(rememberScrollState()).padding(horizontal = AppDimensions.pageHorizontalPadding)
+            .padding(
+                top = statusBarTopPadding(extra = 12.dp),
+                bottom = bottomInset
+            )
     ) {
         GreetingHeader(state)
         Spacer(Modifier.height(18.dp))
@@ -131,14 +138,11 @@ fun DashboardScreen(
         SectionHeader("这一周", if (state.showTrendChart) "看趋势" else null,
             if (state.showTrendChart) onOpenTrend else null)
         WeekCard(state)
-        Text(
-            "分级仅供参考，不替代医疗诊断",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp), textAlign = TextAlign.Center
-        )
     }
-    SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+    SnackbarHost(
+        snackbarHostState,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomInset)
+    )
     }
 }
 
@@ -401,39 +405,64 @@ private fun WeekCard(state: DashboardUiState) {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(colors.surface).padding(8.dp)) {
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(colors.primaryContainer)
-            .padding(horizontal = 12.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            Icon(Icons.Outlined.LocalFireDepartment, null, Modifier.size(27.dp), tint = colors.primary)
-            Column {
-                Text("${state.streakDays} 天", style = MaterialTheme.typography.titleLarge.copy(fontFamily = NumberFontFamily, fontSize = 27.sp), color = colors.onPrimaryContainer)
-                Text("连续记录", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = colors.onPrimaryContainer)
+            .padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(WeekSpacing)) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(WeekSpacing)
+            ) {
+                Icon(Icons.Outlined.LocalFireDepartment, null, Modifier.size(25.dp), tint = colors.primary)
+                Column {
+                    Text("${state.streakDays} 天", style = MaterialTheme.typography.titleLarge.copy(fontFamily = NumberFontFamily, fontSize = 25.sp), color = colors.onPrimaryContainer)
+                    Text("连续记录", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = colors.onPrimaryContainer)
+                }
             }
-            Spacer(Modifier.weight(1f))
+            // 固定自然周：日、一、二、三、四、五、六（今天显示真实星期，不替换为“今”）。
             state.week.forEach { day ->
-                Box(Modifier.size(22.dp).clip(RoundedCornerShape(8.dp))
-                    .background(if (day.recorded) colors.primary else colors.primary.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-                    Text(if (day.date == state.today) "今" else weekday(day.date),
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp), fontWeight = FontWeight.ExtraBold,
-                        color = if (day.recorded) colors.onPrimary else colors.onPrimaryContainer)
+                val today = day.date == state.today
+                val future = day.date.isAfter(state.today)
+                val container = when {
+                    today -> colors.primary.copy(alpha = 0.22f)
+                    day.recorded -> colors.primary
+                    future -> colors.surfaceContainerHighest
+                    else -> colors.primary.copy(alpha = 0.18f)
+                }
+                val content = when {
+                    today -> colors.onPrimaryContainer
+                    day.recorded -> colors.onPrimary
+                    future -> colors.onSurfaceVariant.copy(alpha = 0.55f)
+                    else -> colors.onPrimaryContainer
+                }
+                Box(
+                    Modifier.size(22.dp).clip(RoundedCornerShape(8.dp)).background(container)
+                        .then(if (today) Modifier.border(1.dp, colors.primary, RoundedCornerShape(8.dp)) else Modifier),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        weekdayLabel(day.date),
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
+                        fontWeight = FontWeight.ExtraBold,
+                        color = content
+                    )
                 }
             }
         }
         if (state.showTrendChart) {
         Row(Modifier.fillMaxWidth().height(138.dp).padding(horizontal = 6.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+            horizontalArrangement = Arrangement.spacedBy(WeekSpacing), verticalAlignment = Alignment.Bottom) {
             state.week.forEach { day ->
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(day.averageSystolic?.toString() ?: "", style = MaterialTheme.typography.labelMedium.copy(fontFamily = NumberFontFamily, fontSize = 11.sp), color = colors.onSurfaceVariant)
-                    val height = if (day.averageSystolic == null) 8.dp else max(14f, min(84f, (day.averageSystolic - 95f) * 1.4f)).dp
-                    val category = if (day.averageSystolic != null && day.averageDiastolic != null)
-                        CategoryCalculator.calculate(day.averageSystolic, day.averageDiastolic).name else ""
-                    Box(Modifier.widthIn(max = 30.dp).fillMaxWidth().height(height).clip(RoundedCornerShape(10.dp))
-                        .background(if (day.averageSystolic == null) colors.surfaceContainerHighest else gradeLook(category).mid))
-                    Text(if (day.date == state.today) "今" else weekday(day.date),
+                    Box(Modifier.widthIn(max = 26.dp).fillMaxWidth().height(weekBarHeight(day)).clip(RoundedCornerShape(10.dp))
+                        .background(if (day.averageSystolic == null) colors.surfaceContainerHighest else gradeLook(day.categoryName()).mid))
+                    val today = day.date == state.today
+                    Text(weekdayLabel(day.date),
                         style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                        fontWeight = if (day.date == state.today) FontWeight.ExtraBold else FontWeight.SemiBold,
-                        color = if (day.date == state.today) colors.onSurface else colors.onSurfaceVariant)
+                        fontWeight = if (today) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        color = if (today) colors.onSurface else colors.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Clip)
                 }
             }
         }
@@ -446,4 +475,22 @@ private fun WeekCard(state: DashboardUiState) {
     }
 }
 
-private fun weekday(date: LocalDate): String = listOf("一", "二", "三", "四", "五", "六", "日")[date.dayOfWeek.value - 1]
+/** 自然周固定 7 格，格间距与柱状图保持一致。 */
+private val WeekSpacing = 2.dp
+
+/** 柱高只由收缩压平均值决定，圆点行与柱状图共用同一份自然周数据。 */
+private fun weekBarHeight(day: DashboardWeekDay): androidx.compose.ui.unit.Dp =
+    if (day.averageSystolic == null) 8.dp
+    else max(14f, min(84f, (day.averageSystolic - 95f) * 1.4f)).dp
+
+private fun DashboardWeekDay.categoryName(): String =
+    if (averageSystolic != null && averageDiastolic != null) {
+        CategoryCalculator.calculate(averageSystolic, averageDiastolic).name
+    } else {
+        ""
+    }
+
+/** 自然周固定顺序：周日起。今天也显示真实星期。 */
+private val WeekDayLabels = listOf("日", "一", "二", "三", "四", "五", "六")
+
+private fun weekdayLabel(date: LocalDate): String = WeekDayLabels[date.dayOfWeek.value - 1]

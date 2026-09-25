@@ -61,7 +61,9 @@ import com.example.bloodpressurerecord.reminder.ReminderType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.WheelTimePickerDialog
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import java.time.LocalTime
 
 @Composable
@@ -580,6 +582,7 @@ private fun SettingsSubPageShell(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .padding(top = statusBarTopPadding())
             .nestedScroll(topBarScroll.nestedScrollConnection)
     ) {
         AppTopBar(title = title, onBack = onBack, hideOnScroll = topBarScroll)
@@ -587,7 +590,8 @@ private fun SettingsSubPageShell(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp)
+                .padding(top = 16.dp, bottom = pageContentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             content = content
         )

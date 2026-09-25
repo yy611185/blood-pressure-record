@@ -12,8 +12,10 @@ import com.example.bloodpressurerecord.data.repository.SessionRecord
 import com.example.bloodpressurerecord.data.repository.SessionSummary
 import com.example.bloodpressurerecord.data.repository.SettingsBundle
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
+import com.example.bloodpressurerecord.domain.time.naturalWeekDates
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toLocalDate
+import com.example.bloodpressurerecord.domain.time.weekStartSunday
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.Instant
@@ -44,6 +46,7 @@ data class DashboardUiState(
     val latestSession: SessionRecord? = null,
     val todayMorning: SessionSummary? = null,
     val todayEvening: SessionSummary? = null,
+    /** 自然周（周日→周六，固定 7 天）的每日均值与打卡状态。 */
     val week: List<DashboardWeekDay> = emptyList(),
     val userName: String? = null,
     val showTrendChart: Boolean = true,
@@ -53,8 +56,6 @@ data class DashboardUiState(
     val todayAverageDiastolic: Int? = null,
     /** 从今天（今天没记录则从昨天）往前连续有记录的天数。 */
     val streakDays: Int = 0,
-    /** 最近 7 天（旧→新，最后一个是今天）每天是否有记录。 */
-    val weekRecorded: List<Boolean> = List(7) { false },
     /** 今日服药打卡行（按时间升序）。 */
     val medicationSlots: List<MedicationSlot> = emptyList(),
     /** 正在写入的时间点；UI 应暂时禁用对应复选框，避免快速点击产生竞态。 */
@@ -103,7 +104,9 @@ class DashboardViewModel(
             val todayRange = today.toEpochMillisRange(zoneId)
             val streakStart = today.minusDays(STREAK_WINDOW_DAYS)
                 .atStartOfDay(zoneId).toInstant().toEpochMilli()
-            val weekStart = today.minusDays(6).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            // 「这一周」固定为自然周（周日→周六），查询范围与展示的 7 天完全一致。
+            val weekStartDate = weekStartSunday(today)
+            val weekStart = weekStartDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
             val latestWithDetail: Flow<Pair<LatestSessionSummary?, SessionRecord?>> =
                 repository.observeLatestSessionSummary()
                 .flatMapLatest { latest ->
@@ -147,8 +150,7 @@ class DashboardViewModel(
                     latestSession = latestSession,
                     todayMorning = todaySessions.lastOrNull { localHour(it.measuredAt) < 12 },
                     todayEvening = todaySessions.lastOrNull { localHour(it.measuredAt) >= 12 },
-                    week = (6 downTo 0).map { daysAgo ->
-                        val date = today.minusDays(daysAgo.toLong())
+                    week = naturalWeekDates(today).map { date ->
                         val sessions = weekByDate[date].orEmpty()
                         DashboardWeekDay(
                             date = date,
@@ -166,9 +168,6 @@ class DashboardViewModel(
                     todayAverageSystolic = todayStatistics.averageSystolic?.roundToInt(),
                     todayAverageDiastolic = todayStatistics.averageDiastolic?.roundToInt(),
                     streakDays = streakDays(today, recordedDates),
-                    weekRecorded = (6 downTo 0).map { daysAgo ->
-                        today.minusDays(daysAgo.toLong()) in recordedDates
-                    },
                     medicationSlots = medicationSlots,
                     loading = false
                 )

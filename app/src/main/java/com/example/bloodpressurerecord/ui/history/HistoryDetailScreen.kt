@@ -15,6 +15,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import com.example.bloodpressurerecord.ui.common.*
@@ -48,7 +51,7 @@ fun HistoryDetailScreen(
 
     if (session == null) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            Column {
+            Column(modifier = Modifier.padding(top = statusBarTopPadding())) {
                 AppTopBar(title = "记录详情", onBack = onBack)
                 Text(if (uiState.deleted) "记录已删除" else "未找到记录", modifier = Modifier.padding(16.dp))
             }
@@ -86,6 +89,7 @@ fun HistoryDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(top = statusBarTopPadding())
                 .nestedScroll(topBarScroll.nestedScrollConnection)
         ) {
             AppTopBar(title = "记录详情", onBack = onBack, hideOnScroll = topBarScroll)
@@ -93,7 +97,8 @@ fun HistoryDetailScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
+                    .padding(horizontal = AppDimensions.pageHorizontalPadding)
+                    .padding(top = 16.dp, bottom = pageContentBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
             DataCard {
@@ -168,8 +173,7 @@ fun HistoryDetailScreen(
                 AppDangerButton("删除", viewModel::requestDelete, Modifier.weight(1f))
                 AppSecondaryButton("编辑", { onEdit(sessionId) }, Modifier.weight(1f))
             }
-            }
-        }
+            }        }
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)

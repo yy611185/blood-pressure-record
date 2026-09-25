@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.ui.common
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,11 +29,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
@@ -236,12 +242,63 @@ fun AppTopBar(
     }
 }
 
+/**
+ * 暖阳配色的分段胶囊选择器。
+ *
+ * 选中态使用 `primaryContainer` / `onPrimaryContainer`（不再出现近黑块），
+ * 每段文字用 `Box(contentAlignment = Center)` 严格水平+垂直居中，
+ * 触摸区不小于 48dp；`semantics` 使用 RadioButton 角色，保持无障碍语义。
+ */
+@Composable
+fun SegmentedPillGroup(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Dp = 16.dp
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(colors.surfaceVariant)
+            .padding(SegmentedPillGap),
+        horizontalArrangement = Arrangement.spacedBy(SegmentedPillGap)
+    ) {
+        options.forEachIndexed { index, option ->
+            val selected = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = AppDimensions.minimumTouchTarget)
+                    .clip(MaterialTheme.shapes.large)
+                    .background(if (selected) colors.primaryContainer else Color.Transparent)
+                    .selectable(selected = selected, role = Role.RadioButton) { onSelect(index) }
+                    .padding(horizontal = horizontalPadding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = option,
+                    fontSize = 16.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/** 分段胶囊的内外边距（外框与内部选中块共用，保证选中态与外框同心）。 */
+private val SegmentedPillGap = 4.dp
+
 /** 暖阳设计的 46dp 圆形图标底座，用于设置列表等。 */
 @Composable
 fun RoundIconBadge(
     icon: ImageVector,
-    containerColor: androidx.compose.ui.graphics.Color,
-    contentColor: androidx.compose.ui.graphics.Color,
+    containerColor: Color,
+    contentColor: Color,
     modifier: Modifier = Modifier
 ) {
     Box(

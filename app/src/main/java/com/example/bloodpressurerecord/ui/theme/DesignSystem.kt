@@ -32,7 +32,28 @@ object AppDimensions {
     val calendarDayMinHeight = 48.dp
     /** 日历日期圆形直径。 */
     val calendarDaySize = 38.dp
-    val bottomActionPadding = 16.dp
+
+    // —— 底部悬浮 Dock 几何 ——
+    // Dock 与页面底部避让间距都由这几个常量推导，页面侧不要再写固定 dp。
+
+    /** 悬浮胶囊 Dock 的高度。 */
+    val dockCapsuleHeight = 64.dp
+    /** 胶囊底边距导航栏安全区的距离。 */
+    val dockBottomMargin = 10.dp
+    /** Dock 中央「记一次血压」按钮所占的槽宽（比按钮本身宽，保证居中留白）。 */
+    val dockCenterSlot = 72.dp
+    /** Dock 中央按钮直径。 */
+    val dockCenterButtonSize = 52.dp
+    /** Dock 距屏幕左右边缘的边距。 */
+    val dockHorizontalMargin = 16.dp
+
+    /** 页面内容滚动到底后的视觉收尾间距。 */
+    val pageBottomGap = 16.dp
+    /** 有悬浮 Dock 的页面，内容与 Dock 胶囊顶边之间额外保留的间距。 */
+    val dockContentGap = 12.dp
+
+    /** 血压输入框高度（紧凑三栏布局）。 */
+    val numberFieldHeight = 64.dp
 }
 
 enum class BloodPressureVisualStatus {
