@@ -8,7 +8,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +20,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -31,10 +36,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -114,6 +124,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 WarmBottomNavBar(
                     tabs = tabs,
                     currentRoute = current,
+                    onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
                     onSelect = { destination ->
                         navController.navigate(destination.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -183,6 +194,15 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
                     onOpenMedicationSettings = {
                         navController.navigate(AppDestination.SettingsReminder.route)
+                    },
+                    onOpenTrend = {
+                        if (showTrendChart) {
+                            navController.navigate(AppDestination.Trend.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
                     },
                     onViewTodayRecords = {
                         navController.navigate(AppDestination.History.route) {
@@ -266,7 +286,9 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 )
             }
             composable(AppDestination.Settings.route) {
+                val vm: SettingsViewModel = viewModel(factory = factory)
                 SettingsScreen(
+                    viewModel = vm,
                     onOpenProfile = { navController.navigate(AppDestination.SettingsProfile.route) },
                     onOpenReminder = { navController.navigate(AppDestination.SettingsReminder.route) },
                     onOpenDisplay = { navController.navigate(AppDestination.SettingsDisplay.route) },
@@ -307,67 +329,88 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     }
 }
 
-/** 暖阳设计的浮动药丸底部导航条。 */
+/** 根目录原稿五槽 Dock：页面标签围绕中央抬起的记血压按钮。 */
 @Composable
 private fun WarmBottomNavBar(
     tabs: List<AppDestination>,
     currentRoute: String?,
+    onAddMeasurement: () -> Unit,
     onSelect: (AppDestination) -> Unit
 ) {
-    // 百分比胶囊：无论条高多少，左右端头都是精确半圆，避免固定半径被
-    // 部分 ROM 的阴影/轮廓渲染退化成方角。
-    val dockShape = RoundedCornerShape(percent = 50)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .shadow(2.dp, dockShape, clip = false)
-            .background(MaterialTheme.colorScheme.surface, dockShape)
-            .padding(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    val dockShape = RoundedCornerShape(30.dp)
+    val leftTabs = tabs.take(2)
+    val rightTabs: List<AppDestination?> = if (tabs.size == 3) {
+        listOf(null, tabs.last())
+    } else {
+        tabs.drop(2)
+    }
+    Box(
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+             .padding(start = 14.dp, end = 14.dp, top = 28.dp, bottom = 12.dp),
+        contentAlignment = Alignment.Center
     ) {
-        tabs.forEach { destination ->
-            val selected = currentRoute == destination.route
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .clip(dockShape)
-                    .background(
-                        if (selected) MaterialTheme.colorScheme.primaryContainer
-                        else Color.Transparent
-                    )
-                    .selectable(
-                        selected = selected,
-                        role = Role.Tab,
-                        onClick = { onSelect(destination) }
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    destination.icon,
-                    contentDescription = destination.label,
-                    tint = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    destination.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            modifier = Modifier.widthIn(max = 430.dp).fillMaxWidth()
+                .shadow(8.dp, dockShape, clip = false)
+                .background(MaterialTheme.colorScheme.surface, dockShape)
+                .height(72.dp).padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
+                leftTabs.forEach { destination ->
+                    DockTab(destination, currentRoute == destination.route, Modifier.weight(1f)) {
+                        onSelect(destination)
                     }
-                )
+                }
+            }
+            Box(Modifier.width(84.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.offset(y = (-14).dp).size(64.dp)
+                        .shadow(10.dp, RoundedCornerShape(24.dp), clip = false)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .semantics { contentDescription = "记一次血压" }
+                        .clickable(onClick = onAddMeasurement),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Add, null, Modifier.size(30.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
+                rightTabs.forEach { destination ->
+                    if (destination == null) {
+                        Spacer(Modifier.weight(1f))
+                    } else {
+                        DockTab(destination, currentRoute == destination.route, Modifier.weight(1f)) {
+                            onSelect(destination)
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun DockTab(
+    destination: AppDestination,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit
+) {
+    val color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        modifier.height(58.dp).clip(RoundedCornerShape(22.dp))
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(destination.icon, null, Modifier.size(24.dp), tint = color)
+        Spacer(Modifier.height(2.dp))
+        Text(destination.label, style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            color = color, maxLines = 1)
+        Spacer(Modifier.height(3.dp))
+        Box(Modifier.size(5.dp).background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(50)))
     }
 }

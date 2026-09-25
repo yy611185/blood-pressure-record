@@ -2,46 +2,46 @@ package com.example.bloodpressurerecord.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// 「暖阳打卡」温暖化设计 token，来源 design_handoff_warm_ui/organic.css。
+// UIredesign/bp.css 的 sRGB 映射。保留既有符号，供原生子页和小部件共用。
 
 // 背景与文字
-val WarmBackground = Color(0xFFF5EAD8)      // 奶油底
-val WarmSurface = Color(0xFFEBDDC5)         // 沙色卡片
-val WarmSurfaceSoft = Color(0xFFF9F4ED)     // 输入框/次级表面（neutral-100）
-val WarmText = Color(0xFF201E1D)
-val WarmTextMuted = Color(0xFF82796A)       // neutral-600
-val WarmTextFaint = Color(0xFFA19786)       // neutral-500
+val WarmBackground = Color(0xFFFAF6EF)
+val WarmSurface = Color(0xFFFFFDFA)
+val WarmSurfaceSoft = Color(0xFFF2ECE3)
+val WarmText = Color(0xFF27201B)
+val WarmTextMuted = Color(0xFF746C65)
+val WarmTextFaint = Color(0xFF746C65)       // 辅助正文使用可读对比度
 val WarmTextDisabled = Color(0xFFC0B6A5)    // neutral-400
-val WarmTextBody = Color(0xFF645C50)        // neutral-700
-val WarmDivider = Color(0x29201E1D)         // 16% 墨色分隔线
-val WarmNeutral200 = Color(0xFFEEE7DB)
-val WarmNeutral300 = Color(0xFFDCD3C4)
-val WarmNeutral900 = Color(0xFF2E2B25)
+val WarmTextBody = Color(0xFF645C55)
+val WarmDivider = Color(0xFFE3DDD5)
+val WarmNeutral200 = Color(0xFFE9E2D7)
+val WarmNeutral300 = Color(0xFFE3DDD5)
+val WarmNeutral900 = Color(0xFF26201C)
 
-// 主 accent：陶土橙
+// 主 accent：原稿 hue 32 珊瑚橙
 val Terracotta100 = Color(0xFFFFF2EB)
-val Terracotta200 = Color(0xFFFFE1D0)
+val Terracotta200 = Color(0xFFFFDED5)
 val Terracotta300 = Color(0xFFFFC6A5)
-val Terracotta400 = Color(0xFFF6A06B)
-val Terracotta500 = Color(0xFFC67139)       // primary base
-val Terracotta600 = Color(0xFFB2622D)       // 按压态
-val Terracotta700 = Color(0xFF8C491A)       // 浅底上的橙色文字
-val Terracotta800 = Color(0xFF643312)
-val Terracotta900 = Color(0xFF402310)
-val TerracottaDashed = Color(0xFFD67F48)    // 虚线描边（accent-500 in css ramp）
-val OnTerracotta = Color(0xFFFFF7EF)
+val Terracotta400 = Color(0xFFFFA997)
+val Terracotta500 = Color(0xFFDF6A55)
+val Terracotta600 = Color(0xFFC4513E)
+val Terracotta700 = Color(0xFF963828)
+val Terracotta800 = Color(0xFF532B24)
+val Terracotta900 = Color(0xFF40201B)
+val TerracottaDashed = Color(0xFFDF6A55)
+val OnTerracotta = Color.White
 
 // 副 accent：鼠尾草绿（正常/健康语义）
 val Sage100 = Color(0xFFF0FAE1)
-val Sage200 = Color(0xFFE1EECC)
+val Sage200 = Color(0xFFCCF3D8)
 val Sage300 = Color(0xFFCCDBB2)
 val Sage400 = Color(0xFFAEBF92)
-val Sage500 = Color(0xFF8FA073)
-val Sage600 = Color(0xFF728157)
-val Sage700 = Color(0xFF56633F)
-val Sage800 = Color(0xFF3D472B)
+val Sage500 = Color(0xFF45996C)
+val Sage600 = Color(0xFF357D58)
+val Sage700 = Color(0xFF006436)
+val Sage800 = Color(0xFF1B412A)
 val Sage900 = Color(0xFF272E1B)
-val SageLine = Color(0xFF7A8A5E)            // 折线舒张压
+val SageLine = Color(0xFF45996C)            // 折线舒张压
 
 // 错误（暖化的柔和红，设计稿未定义，取与暖色系协调的值）
 val WarmError = Color(0xFFB3261E)

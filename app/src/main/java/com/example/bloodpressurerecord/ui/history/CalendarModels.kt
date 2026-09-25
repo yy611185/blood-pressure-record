@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.ui.history
 
+import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -40,7 +41,10 @@ data class CalendarDaySummary(
     val recordCount: Int,
     val containsHighRisk: Boolean,
     /** 当天至少一条记录带有自定义备注（日历红点标记）。 */
-    val hasNote: Boolean = false
+    val hasNote: Boolean = false,
+    val averageSystolic: Int? = null,
+    val averageDiastolic: Int? = null,
+    val category: BloodPressureCategory? = null
 )
 
 data class CalendarMonthCell(

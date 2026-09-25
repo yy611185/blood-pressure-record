@@ -360,7 +360,7 @@ fun SettingsDataManagementScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             DataCard {
@@ -396,14 +396,13 @@ fun SettingsDataManagementScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             if (uiState.isDataActionRunning) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
+            Text("导出与备份", style = MaterialTheme.typography.titleMedium)
             AppPrimaryButton(
                 text = if (uiState.isDataActionRunning) "正在处理..." else "导出为 Excel (.xlsx)",
                 icon = Icons.Outlined.SaveAlt,
@@ -416,6 +415,14 @@ fun SettingsDataManagementScreen(
             )
 
             AppSecondaryButton(
+                text = "加密备份 (.bpx)",
+                onClick = {
+                    if (!uiState.isDataActionRunning) viewModel.requestEncryptedBackupExport()
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            AppSecondaryButton(
                 text = if (uiState.isDataActionRunning) "正在处理..." else "从 Excel 备份导入",
                 onClick = {
                     if (!uiState.isDataActionRunning) viewModel.requestBackupImport()
@@ -423,6 +430,7 @@ fun SettingsDataManagementScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            Text("设备数据", style = MaterialTheme.typography.titleMedium)
             AppDangerButton(
                 text = "清空所有本地数据",
                 onClick = {

@@ -486,7 +486,12 @@ class BackupImportService(
             values["discard_first_reading"]?.toBooleanStrictOrNull()
                 ?.let { it != current.discardFirstReading },
             (values["show_trend_chart"] ?: values["display_show_target_line"])
-                ?.toBooleanStrictOrNull()?.let { it != current.showTrendChart }
+                ?.toBooleanStrictOrNull()?.let { it != current.showTrendChart },
+            values["appearance_mode"]
+                ?.takeIf { it in setOf("system", "light", "dark") }
+                ?.let { it != current.appearanceMode },
+            values["show_buddy"]?.toBooleanStrictOrNull()
+                ?.let { it != current.showBuddy }
         ).any { it == true }
     }
 

@@ -1,6 +1,5 @@
 package com.example.bloodpressurerecord
 
-import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +9,8 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalDensity
@@ -23,7 +24,6 @@ import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableImmersiveSystemBars()
         requestHighestRefreshRate()
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(
@@ -32,8 +32,14 @@ class MainActivity : ComponentActivity() {
             val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
             val currentDensity = LocalDensity.current
             val appFontScale = if (settingsUiState.isLargeTextEnabled) 1.15f else 1f
+            val darkTheme = when (settingsUiState.appearanceMode) {
+                "dark" -> true
+                "light" -> false
+                else -> isSystemInDarkTheme()
+            }
+            SideEffect { enableImmersiveSystemBars(darkTheme) }
 
-            BloodPressureRecordTheme {
+            BloodPressureRecordTheme(darkTheme = darkTheme) {
                 CompositionLocalProvider(
                     LocalAppFontScale provides appFontScale,
                     LocalDensity provides Density(
@@ -54,10 +60,7 @@ class MainActivity : ComponentActivity() {
      * 黑/白对比底，正是截图中底部突兀色块的来源。这里按当前主题显式选择
      * 图标明暗，并关闭系统对比层。
      */
-    private fun enableImmersiveSystemBars() {
-        val isDarkTheme =
-            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-                Configuration.UI_MODE_NIGHT_YES
+    private fun enableImmersiveSystemBars(isDarkTheme: Boolean) {
         val transparent = Color.TRANSPARENT
         val style = if (isDarkTheme) {
             SystemBarStyle.dark(transparent)

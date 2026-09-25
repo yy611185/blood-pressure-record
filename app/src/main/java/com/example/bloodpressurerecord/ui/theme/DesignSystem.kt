@@ -20,13 +20,13 @@ object AppSpacing {
 }
 
 object AppDimensions {
-    /** 页面水平边距（暖阳设计：18dp）。 */
-    val pageHorizontalPadding = 18.dp
-    /** 卡片内边距（暖阳设计：20dp）。 */
-    val cardPadding = 20.dp
+    /** UIredesign 页面水平边距。 */
+    val pageHorizontalPadding = 20.dp
+    /** 原稿通用卡片内边距。 */
+    val cardPadding = 18.dp
     val minimumTouchTarget = 48.dp
     /** 主按钮高度（暖阳设计：60dp，全药丸）。 */
-    val primaryButtonHeight = 60.dp
+    val primaryButtonHeight = 56.dp
     /** 表单保存按钮高度。 */
     val saveButtonHeight = 58.dp
     val calendarDayMinHeight = 48.dp
@@ -98,4 +98,45 @@ fun bloodPressureVisualStatus(
     category.equals("HIGH_NORMAL", ignoreCase = true) ||
         category.equals("ELEVATED", ignoreCase = true) -> BloodPressureVisualStatus.ELEVATED
     else -> BloodPressureVisualStatus.HIGH
+}
+
+data class BloodPressureChipColors(
+    val container: Color,
+    val content: Color,
+    val dot: Color
+)
+
+/** 与根目录原稿 GradeChip 一致的六级色；高风险由独立阈值优先覆盖。 */
+fun bloodPressureChipColors(
+    text: String,
+    status: BloodPressureVisualStatus?,
+    colors: ColorScheme
+): BloodPressureChipColors {
+    if (status == BloodPressureVisualStatus.HIGH_RISK || text.contains("高风险")) {
+        return BloodPressureChipColors(colors.errorContainer, colors.onErrorContainer, colors.error)
+    }
+    val dark = colors.background.red < 0.5f
+    val palette = when {
+        text.contains("偏低") || status == BloodPressureVisualStatus.LOW ->
+            Triple(0xFFE9E9FA, 0xFF55509B, 0xFF8E8BC8)
+        text.contains("正常高值") || status == BloodPressureVisualStatus.ELEVATED ->
+            Triple(0xFFEEF3D7, 0xFF61742E, 0xFFA5BF65)
+        text.contains("3级") || text.contains("三级") ->
+            Triple(0xFFFADDD9, 0xFFA03F39, 0xFFE58178)
+        text.contains("2级") || text.contains("二级") ->
+            Triple(0xFFFBE5D7, 0xFF9F5335, 0xFFEAA27E)
+        text.contains("1级") || text.contains("一级") ->
+            Triple(0xFFF7F0CF, 0xFF806625, 0xFFD9B55E)
+        text.contains("正常") || status == BloodPressureVisualStatus.NORMAL ->
+            Triple(0xFFDFF4E9, 0xFF287958, 0xFF69C49D)
+        status == BloodPressureVisualStatus.HIGH ->
+            Triple(0xFFFBE5D7, 0xFF9F5335, 0xFFEAA27E)
+        else -> Triple(0xFFDFF4E9, 0xFF287958, 0xFF69C49D)
+    }
+    val ink = Color(palette.second)
+    return BloodPressureChipColors(
+        container = if (dark) ink.copy(alpha = 0.24f) else Color(palette.first),
+        content = if (dark) Color(palette.third) else ink,
+        dot = Color(palette.third)
+    )
 }

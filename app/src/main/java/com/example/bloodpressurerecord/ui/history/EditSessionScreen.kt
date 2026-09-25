@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.ui.history
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,8 +30,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.common.AppTopBar
@@ -39,10 +43,12 @@ import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
 import com.example.bloodpressurerecord.ui.common.MeasurementTags
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
 import com.example.bloodpressurerecord.ui.common.SessionSaveBottomBar
+import com.example.bloodpressurerecord.ui.common.SessionChoiceChip
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -54,13 +60,20 @@ fun EditSessionScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showExitDialog by remember { mutableStateOf(false) }
+    var selectedGroup by rememberSaveable { mutableStateOf(0) }
+    var step by rememberSaveable { mutableIntStateOf(1) }
     val requestBack = {
-        if (state.isDirty) showExitDialog = true else onBack()
+        when {
+            step == 3 -> onSaved()
+            step == 2 -> step = 1
+            state.isDirty -> showExitDialog = true
+            else -> onBack()
+        }
     }
     BackHandler(onBack = requestBack)
 
     LaunchedEffect(state.saved) {
-        if (state.saved) onSaved()
+        if (state.saved) step = 3
     }
     if (showExitDialog) {
         UnsavedChangesDialog(
@@ -109,16 +122,30 @@ fun EditSessionScreen(
     Scaffold(
         modifier = Modifier.nestedScroll(topBarScroll.nestedScrollConnection),
         topBar = {
-            AppTopBar(title = "编辑测量", onBack = requestBack, hideOnScroll = topBarScroll)
+            AppTopBar(title = when (step) {
+                1 -> "修改读数"
+                2 -> "测量情况"
+                else -> "已更新"
+            }, onBack = requestBack, hideOnScroll = topBarScroll)
         },
         bottomBar = {
             if (!state.loading) {
                 SessionSaveBottomBar(
-                    canSave = state.canSave,
-                    disabledReason = state.saveDisabledReason,
+                    canSave = if (step == 3) true else state.canSave,
+                    disabledReason = if (step == 3) "" else state.saveDisabledReason,
                     isSaving = state.isSaving,
-                    buttonText = "保存修改",
-                    onSave = viewModel::onSaveClicked
+                    buttonText = when (step) {
+                        1 -> "下一步 · 测量情况"
+                        2 -> "保存修改"
+                        else -> "完成"
+                    },
+                    onSave = {
+                        when (step) {
+                            1 -> step = 2
+                            2 -> viewModel.onSaveClicked()
+                            else -> onSaved()
+                        }
+                    }
                 )
             }
         }
@@ -136,67 +163,60 @@ fun EditSessionScreen(
                 .padding(horizontal = AppDimensions.pageHorizontalPadding),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
-            Text("测量日期和时间", style = MaterialTheme.typography.titleMedium)
-            MeasurementDateTimePicker(
-                measuredAtText = state.measuredAtText,
-                onMeasuredAtChange = viewModel::updateMeasuredAtText
-            )
-
-            Text("测量场景", style = MaterialTheme.typography.titleMedium)
-            // 旧记录的历史场景标签不在标准时段列表时追加显示，保证选中态可见。
-            val sceneOptions = remember(state.scene) {
-                if (state.scene in MeasurementTags.scenes) {
-                    MeasurementTags.scenes
-                } else {
-                    MeasurementTags.scenes + state.scene
-                }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
+            if (step == 1) {
+            Text("测量数据", style = MaterialTheme.typography.titleMedium)
+            val readings = listOf(state.reading1, state.reading2) + state.extraReadings
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
             ) {
-                sceneOptions.forEach { scene ->
-                    FilterChip(
-                        selected = state.scene == scene,
-                        onClick = { viewModel.updateScene(scene) },
-                        label = { Text(scene) }
+                readings.forEachIndexed { index, reading ->
+                    val complete = reading.systolic.isNotBlank() && reading.diastolic.isNotBlank()
+                    SessionChoiceChip(
+                        text = "第 ${index + 1} 组${if (complete) " ✓" else ""}",
+                        selected = index == selectedGroup.coerceIn(0, readings.lastIndex),
+                        onClick = { selectedGroup = index }
                     )
                 }
             }
-
-            val readings = listOf(state.reading1, state.reading2) + state.extraReadings
-            readings.forEachIndexed { index, reading ->
-                MeasurementReadingCard(
-                    index = index,
-                    reading = reading,
-                    removable = index >= 2,
-                    onSystolicChange = {
-                        when (index) {
-                            0 -> viewModel.updateReading1Systolic(it)
-                            1 -> viewModel.updateReading2Systolic(it)
-                            else -> viewModel.updateExtraReadingSystolic(index - 2, it)
-                        }
-                    },
-                    onDiastolicChange = {
-                        when (index) {
-                            0 -> viewModel.updateReading1Diastolic(it)
-                            1 -> viewModel.updateReading2Diastolic(it)
-                            else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
-                        }
-                    },
-                    onPulseChange = {
-                        when (index) {
-                            0 -> viewModel.updateReading1Pulse(it)
-                            1 -> viewModel.updateReading2Pulse(it)
-                            else -> viewModel.updateExtraReadingPulse(index - 2, it)
-                        }
-                    },
-                    onRemove = { viewModel.removeExtraReading(index - 2) }
-                )
-            }
+            val index = selectedGroup.coerceIn(0, readings.lastIndex)
+            val reading = readings[index]
+            MeasurementReadingCard(
+                index = index,
+                reading = reading,
+                removable = index >= 2,
+                onSystolicChange = {
+                    when (index) {
+                        0 -> viewModel.updateReading1Systolic(it)
+                        1 -> viewModel.updateReading2Systolic(it)
+                        else -> viewModel.updateExtraReadingSystolic(index - 2, it)
+                    }
+                },
+                onDiastolicChange = {
+                    when (index) {
+                        0 -> viewModel.updateReading1Diastolic(it)
+                        1 -> viewModel.updateReading2Diastolic(it)
+                        else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
+                    }
+                },
+                onPulseChange = {
+                    when (index) {
+                        0 -> viewModel.updateReading1Pulse(it)
+                        1 -> viewModel.updateReading2Pulse(it)
+                        else -> viewModel.updateExtraReadingPulse(index - 2, it)
+                    }
+                },
+                onRemove = {
+                    viewModel.removeExtraReading(index - 2)
+                    selectedGroup = (index - 1).coerceAtLeast(0)
+                }
+            )
             TextButton(
-                onClick = viewModel::addNextReadingGroup,
-                enabled = readings.size < 10,
+                onClick = {
+                    viewModel.addNextReadingGroup()
+                    selectedGroup = readings.size
+                },
+                enabled = readings.size < MeasurementInputRules.MAX_READING_COUNT,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
@@ -215,6 +235,36 @@ fun EditSessionScreen(
                     StatusChip(state.categoryLabel, isAbnormal = state.categoryLabel != "正常")
                 }
             }
+            }
+
+            if (step == 2) {
+            Text("本次平均 ${state.avgSystolic ?: "—"}/${state.avgDiastolic ?: "—"} mmHg",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary)
+            Text("测量日期和时间", style = MaterialTheme.typography.titleMedium)
+            MeasurementDateTimePicker(
+                measuredAtText = state.measuredAtText,
+                onMeasuredAtChange = viewModel::updateMeasuredAtText
+            )
+
+            Text("测量场景", style = MaterialTheme.typography.titleMedium)
+            // 历史场景标签保留在选项中，确保旧记录可继续编辑。
+            val sceneOptions = remember(state.scene) {
+                if (state.scene in MeasurementTags.scenes) MeasurementTags.scenes
+                else MeasurementTags.scenes + state.scene
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
+            ) {
+                sceneOptions.forEach { scene ->
+                    SessionChoiceChip(
+                        text = scene,
+                        selected = state.scene == scene,
+                        onClick = { viewModel.updateScene(scene) }
+                    )
+                }
+            }
 
             Text("伴随症状", style = MaterialTheme.typography.titleMedium)
             FlowRow(
@@ -222,11 +272,9 @@ fun EditSessionScreen(
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
             ) {
                 MeasurementTags.symptoms.forEach { symptom ->
-                    FilterChip(
-                        selected = symptom in state.selectedSymptoms,
-                        onClick = { viewModel.toggleSymptom(symptom) },
-                        label = { Text(symptom) }
-                    )
+                    SessionChoiceChip(symptom, symptom in state.selectedSymptoms) {
+                        viewModel.toggleSymptom(symptom)
+                    }
                 }
             }
 
@@ -236,11 +284,9 @@ fun EditSessionScreen(
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
             ) {
                 MeasurementTags.factors.forEach { factor ->
-                    FilterChip(
-                        selected = factor in state.selectedFactors,
-                        onClick = { viewModel.toggleFactor(factor) },
-                        label = { Text(factor) }
-                    )
+                    SessionChoiceChip(factor, factor in state.selectedFactors) {
+                        viewModel.toggleFactor(factor)
+                    }
                 }
             }
             OutlinedTextField(
@@ -250,6 +296,19 @@ fun EditSessionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3
             )
+            }
+            if (step == 3) {
+                DataCard {
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
+                        Text("记录已更新", style = MaterialTheme.typography.titleLarge)
+                        Text("${state.avgSystolic ?: "—"} / ${state.avgDiastolic ?: "—"}",
+                            style = MaterialTheme.typography.displayMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                        StatusChip(state.categoryLabel, isAbnormal = state.categoryLabel != "正常")
+                    }
+                }
+            }
             if (state.message.isNotBlank() && state.message !in listOf("正在保存…", "编辑已保存。")) {
                 Text(
                     state.message,

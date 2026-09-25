@@ -92,6 +92,8 @@ class TrendViewModelTest {
         override suspend fun setLargeTextEnabled(enabled: Boolean) = Unit
         override suspend fun setHighRiskAlertEnabled(enabled: Boolean) = Unit
         override suspend fun setShowTrendChart(enabled: Boolean) = Unit
+        override suspend fun setAppearanceMode(mode: String) = Unit
+        override suspend fun setShowBuddy(enabled: Boolean) = Unit
         override suspend fun setDiscardFirstReading(enabled: Boolean) = Unit
         override suspend fun setMorningReminderEnabled(enabled: Boolean) = Unit
         override suspend fun setMorningReminderTime(value: String) = Unit

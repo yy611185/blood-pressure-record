@@ -23,6 +23,8 @@ data class SettingsUiState(
     val isLargeTextEnabled: Boolean = true,
     val highRiskAlertEnabled: Boolean = true,
     val showTrendChart: Boolean = true,
+    val appearanceMode: String = "system",
+    val showBuddy: Boolean = true,
     val discardFirstReading: Boolean = false,
     val morningReminderEnabled: Boolean = false,
     val morningReminderTime: String = "07:30",
@@ -85,6 +87,8 @@ class SettingsViewModel(
                         isLargeTextEnabled = bundle.appSettings.largeTextEnabled,
                         highRiskAlertEnabled = bundle.appSettings.highRiskAlertEnabled,
                         showTrendChart = bundle.appSettings.showTrendChart,
+                        appearanceMode = bundle.appSettings.appearanceMode,
+                        showBuddy = bundle.appSettings.showBuddy,
                         discardFirstReading = bundle.appSettings.discardFirstReading,
                         morningReminderEnabled = bundle.appSettings.morningReminderEnabled,
                         morningReminderTime = bundle.appSettings.morningReminderTime,
@@ -115,6 +119,14 @@ class SettingsViewModel(
 
     fun setShowTrendChart(enabled: Boolean) {
         viewModelScope.launch { repository.setShowTrendChart(enabled) }
+    }
+
+    fun setAppearanceMode(mode: String) {
+        viewModelScope.launch { repository.setAppearanceMode(mode) }
+    }
+
+    fun setShowBuddy(enabled: Boolean) {
+        viewModelScope.launch { repository.setShowBuddy(enabled) }
     }
 
     fun setDiscardFirstReading(enabled: Boolean) {

@@ -57,6 +57,9 @@ import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
+import com.example.bloodpressurerecord.ui.common.StatusChip
+import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -88,7 +91,7 @@ fun SessionTimeSeriesDualLineChart(
     val density = LocalDensity.current
     val nodeBackgroundColor = MaterialTheme.colorScheme.surface
     val systolicColor = MaterialTheme.colorScheme.primary
-    val diastolicColor = MaterialTheme.colorScheme.secondary
+    val diastolicColor = MaterialTheme.colorScheme.onTertiaryContainer
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
     val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
     val referenceColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f)
@@ -153,52 +156,17 @@ fun SessionTimeSeriesDualLineChart(
     val readoutPoint = activePoint ?: visiblePoints.lastOrNull() ?: points.last()
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            if (maxWidth < 360.dp) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AverageSummary("$averageLabel 收缩压", series.averageSystolic)
-                    AverageSummary("$averageLabel 舒张压", series.averageDiastolic)
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    AverageSummary(
-                        "$averageLabel 收缩压",
-                        series.averageSystolic,
-                        Modifier.weight(1f)
-                    )
-                    AverageSummary(
-                        "$averageLabel 舒张压",
-                        series.averageDiastolic,
-                        Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            LegendItem("收缩压", systolicColor)
-            LegendItem("舒张压", diastolicColor)
-        }
-        Text(
-            text = "数据处理方式：" +
-                if (series.range == com.example.bloodpressurerecord.domain.model.TrendRange.ALL) {
-                    "每日平均"
-                } else {
-                    "每次测量"
-                },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // 读数栏固定在图表上方：指针滑到哪个点就显示哪个点。
+        // 指针吸附点始终显示在图表上方。
         ChartReadoutBar(
             point = readoutPoint,
             isPinned = activePoint != null,
             crosshairActive = crosshairActive
         )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            LegendItem("收缩压", systolicColor)
+            LegendItem("舒张压", diastolicColor)
+        }
 
         Box(
             modifier = Modifier
@@ -512,83 +480,44 @@ private fun ChartReadoutBar(
     crosshairActive: Boolean
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
             .background(
-                if (crosshairActive) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                RoundedCornerShape(14.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .horizontalScroll(rememberScrollState()),
+                if (crosshairActive) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(18.dp)
+            ).padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            when {
-                point.aggregation == TrendAggregation.DAILY ->
-                    "${formatReadoutDate(point.timestamp)} · ${point.recordCount}次平均"
-                else -> formatReadoutDateTime(point.timestamp)
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
-        )
-        Row(verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                "${point.systolic}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = valueColor(point.systolic, SYS_COLOR)
-            )
-            Text(
-                " / ",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "${point.diastolic}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = valueColor(point.diastolic, DIA_COLOR)
-            )
-            Text(
-                " mmHg",
+                if (point.aggregation == TrendAggregation.DAILY)
+                    "${formatReadoutDate(point.timestamp)} · ${point.recordCount} 次平均"
+                else formatReadoutDateTime(point.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-        Text(
-            "脉搏 ${point.pulse?.toString() ?: "--"}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
-        )
-        Text(
-            if (point.containsHighRiskReading) {
-                "⚠ ${point.category.toChineseCategoryLabel()}"
-            } else {
-                point.category.toChineseCategoryLabel()
-            },
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = if (point.containsHighRiskReading) {
-                OUTLIER_COLOR
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-            maxLines = 1
-        )
-        if (!isPinned) {
             Text(
-                "最新",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                "${point.systolic}/${point.diastolic}",
+                style = MaterialTheme.typography.headlineSmall,
+                fontFamily = NumberFontFamily,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1
             )
+            point.pulse?.let {
+                Text("脉搏 $it", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            StatusChip(
+                text = point.category.toChineseCategoryLabel(),
+                isAbnormal = !point.category.equals("NORMAL", true),
+                status = bloodPressureVisualStatus(point.category, false)
+            )
+            if (point.containsHighRiskReading) {
+                StatusChip("高风险", true, status = bloodPressureVisualStatus(point.category, true))
+            }
         }
     }
 }
@@ -642,7 +571,7 @@ private val CHART_HEIGHT = 280.dp
 private val HIT_RADIUS = 32.dp
 // 暖阳设计 3d：收缩压陶土橙、舒张压鼠尾草绿，坐标与网格用暖中性色。
 private val SYS_COLOR = Color(0xFFC67139)
-private val DIA_COLOR = Color(0xFF7A8A5E)
+private val DIA_COLOR = Color(0xFF5594BB)
 private val GRID_COLOR = Color(0xFFEEE7DB)
 private val AXIS_COLOR = Color(0xFF82796A)
 private val REFERENCE_COLOR = Color(0xFFC0B6A5)
@@ -774,6 +703,7 @@ private fun DrawScope.drawYAxisGrid(
             end = Offset(geometry.right, y),
             strokeWidth = 1.dp.toPx()
         )
+
         val label = textMeasurer.measure(
             value.toString(),
             TextStyle(color = axisColor, fontSize = 13.sp, fontWeight = FontWeight.Medium),
@@ -846,16 +776,20 @@ private fun DrawScope.drawSeriesLine(
             scaler.xOf(point.timestamp),
             scaler.yOf(if (systolic) point.systolic else point.diastolic)
         )
-        if (index == 0) {
+        if (index == 0 || point.timestamp - points[index - 1].timestamp > 2L * 24L * 60L * 60L * 1000L) {
             path.moveTo(offset.x, offset.y)
         } else {
-            path.lineTo(offset.x, offset.y)
+            val previous = points[index - 1]
+            val previousX = scaler.xOf(previous.timestamp)
+            val previousY = scaler.yOf(if (systolic) previous.systolic else previous.diastolic)
+            val controlX = (previousX + offset.x) / 2f
+            path.cubicTo(controlX, previousY, controlX, offset.y, offset.x, offset.y)
         }
     }
     drawPath(
         path,
         color,
-        style = Stroke(width = 1.5.dp.toPx())
+        style = Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
     )
 }
 

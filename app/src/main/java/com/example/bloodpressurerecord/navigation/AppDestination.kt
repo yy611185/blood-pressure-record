@@ -3,8 +3,9 @@ package com.example.bloodpressurerecord.navigation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -13,10 +14,10 @@ sealed class AppDestination(
     val label: String,
     val icon: ImageVector
 ) {
-    data object Measure : AppDestination("measure", "测量", Icons.Outlined.Home)
-    data object History : AppDestination("history", "历史", Icons.Outlined.History)
+    data object Measure : AppDestination("measure", "首页", Icons.Outlined.Home)
+    data object History : AppDestination("history", "历史", Icons.Outlined.CalendarMonth)
     data object Trend : AppDestination("trend", "趋势", Icons.AutoMirrored.Outlined.ShowChart)
-    data object Settings : AppDestination("settings", "设置", Icons.Outlined.Settings)
+    data object Settings : AppDestination("settings", "我的", Icons.Outlined.PersonOutline)
 
     data object AddMeasurement : AppDestination("record/add", "新增", Icons.Outlined.Add)
 
@@ -28,11 +29,11 @@ sealed class AppDestination(
     data object SettingsInfoAppGuide : AppDestination("settings/info/app-guide", "应用说明", Icons.Outlined.Settings)
     data object SettingsInfoReleaseNotes : AppDestination("settings/info/release-notes", "更新说明", Icons.Outlined.Settings)
 
-    data object HistoryDetail : AppDestination("history/detail/{sessionId}", "详情", Icons.Outlined.History) {
+    data object HistoryDetail : AppDestination("history/detail/{sessionId}", "详情", Icons.Outlined.CalendarMonth) {
         fun route(sessionId: String): String = "history/detail/$sessionId"
     }
 
-    data object HistoryEdit : AppDestination("history/edit/{sessionId}", "编辑", Icons.Outlined.History) {
+    data object HistoryEdit : AppDestination("history/edit/{sessionId}", "编辑", Icons.Outlined.CalendarMonth) {
         fun route(sessionId: String): String = "history/edit/$sessionId"
     }
 }

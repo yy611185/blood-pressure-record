@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SessionSummary
+import com.example.bloodpressurerecord.data.repository.SettingsRepository
+import com.example.bloodpressurerecord.data.repository.UserProfile
+import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
 import com.example.bloodpressurerecord.domain.time.EpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toLocalDate
@@ -38,6 +41,8 @@ data class HistoryUiState(
     val monthState: CalendarLoadingState = CalendarLoadingState.LOADING,
     val dayState: CalendarLoadingState = CalendarLoadingState.CONTENT,
     val daySummaries: Map<LocalDate, CalendarDaySummary> = emptyMap(),
+    val targetSystolic: Int? = null,
+    val targetDiastolic: Int? = null,
     val selectedDayRecords: List<HistorySessionItemUi> = emptyList(),
     val selectedDayAverageSystolic: Int? = null,
     val selectedDayAverageDiastolic: Int? = null,
@@ -81,8 +86,11 @@ class HistoryViewModel(
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     private val todayProvider: () -> LocalDate = { LocalDate.now(zoneId) },
-    todayTicks: Flow<LocalDate> = flow { emit(todayProvider()) }
+    todayTicks: Flow<LocalDate> = flow { emit(todayProvider()) },
+    settingsRepository: SettingsRepository? = null
 ) : ViewModel() {
+    private val userProfile = settingsRepository?.observeSettings()?.map { it.userProfile }
+        ?: flowOf(UserProfile())
     private val viewMode = MutableStateFlow(
         savedStateHandle.get<String>(KEY_VIEW_MODE)
             ?.let { runCatching { HistoryViewMode.valueOf(it) }.getOrNull() }
@@ -98,7 +106,11 @@ class HistoryViewModel(
             ?: YearMonth.from(todayProvider())
     )
     private val selectedDate = MutableStateFlow(
-        savedStateHandle.get<String>(KEY_SELECTED_DATE)?.let(LocalDate::parse)
+        if (savedStateHandle.contains(KEY_SELECTED_DATE)) {
+            savedStateHandle.get<String>(KEY_SELECTED_DATE)?.let(LocalDate::parse)
+        } else {
+            todayProvider()
+        }
     )
     private val monthRefresh = MutableStateFlow(0)
     private val dayRefresh = MutableStateFlow(0)
@@ -110,15 +122,28 @@ class HistoryViewModel(
         monthRefresh
     ) { month, _ -> month }.flatMapLatest { month ->
         val range = month.toEpochMillisRange(zoneId)
-        repository.observeCalendarSessionSummaries(range.startInclusive, range.endExclusive)
-            .map { rows ->
+        combine(
+            repository.observeCalendarSessionSummaries(range.startInclusive, range.endExclusive),
+            repository.observeSessionSummariesInRange(range.startInclusive, range.endExclusive)
+        ) { rows, sessions ->
+                val sessionsByDay = sessions.groupBy { it.measuredAt.toLocalDate(zoneId) }
                 val summaries = rows.groupBy { it.measuredAt.toLocalDate(zoneId) }
                     .mapValues { (date, values) ->
+                        val daySessions = sessionsByDay[date].orEmpty()
+                        val avgSystolic = daySessions.takeIf { it.isNotEmpty() }
+                            ?.map { it.avgSystolic }?.average()?.roundToInt()
+                        val avgDiastolic = daySessions.takeIf { it.isNotEmpty() }
+                            ?.map { it.avgDiastolic }?.average()?.roundToInt()
                         CalendarDaySummary(
                             date = date,
                             recordCount = values.size,
                             containsHighRisk = values.any { it.containsHighRiskReading },
-                            hasNote = values.any { !it.noteSummary.isNullOrBlank() }
+                            hasNote = values.any { !it.noteSummary.isNullOrBlank() },
+                            averageSystolic = avgSystolic,
+                            averageDiastolic = avgDiastolic,
+                            category = if (avgSystolic != null && avgDiastolic != null) {
+                                BloodPressureRules.category(avgSystolic, avgDiastolic)
+                            } else null
                         )
                     }
                 MonthResult(month = month, summaries = summaries)
@@ -141,7 +166,7 @@ class HistoryViewModel(
                     DayResult(
                         date = date,
                         records = records.sortedWith(
-                            compareBy<SessionSummary> { it.measuredAt }.thenBy { it.id }
+                            compareByDescending<SessionSummary> { it.measuredAt }.thenBy { it.id }
                         )
                     )
                 }
@@ -200,8 +225,9 @@ class HistoryViewModel(
         viewMode,
         recentPeriod,
         calendarStateParts,
-        recentResult
-    ) { mode, period, calendar, recentData ->
+        recentResult,
+        userProfile
+    ) { mode, period, calendar, recentData, profile ->
         val month = calendar.month
         val selected = calendar.selected
         val monthData = calendar.monthData
@@ -230,6 +256,8 @@ class HistoryViewModel(
                 CalendarLoadingState.ERROR
             },
             daySummaries = if (monthMatches) monthData.summaries else emptyMap(),
+            targetSystolic = profile.targetSystolic,
+            targetDiastolic = profile.targetDiastolic,
             selectedDayRecords = records,
             selectedDayAverageSystolic = dayData.records.takeIf { dayMatches && it.isNotEmpty() }
                 ?.map { it.avgSystolic }?.average()?.roundToInt(),
@@ -256,14 +284,15 @@ class HistoryViewModel(
         if (state.monthState != CalendarLoadingState.CONTENT) return@onEach
         pendingRequestedDate?.let { requested ->
             pendingRequestedDate = null
-            if (requested in state.daySummaries) {
+            if (!requested.isAfter(todayProvider()) && YearMonth.from(requested) == state.displayedMonth) {
                 setSelectedDate(requested)
             } else {
                 setSelectedDate(null)
             }
             return@onEach
         }
-        if (state.selectedDate != null && state.selectedDate !in state.daySummaries) {
+        if (state.selectedDate != null &&
+            (YearMonth.from(state.selectedDate) != state.displayedMonth || state.selectedDate.isAfter(todayProvider()))) {
             setSelectedDate(null)
         }
     }.stateIn(
@@ -315,7 +344,7 @@ class HistoryViewModel(
     fun selectDate(date: LocalDate?) {
         if (date != null) {
             if (YearMonth.from(date) != displayedMonth.value) return
-            if (!uiState.value.daySummaries.containsKey(date)) return
+            if (date.isAfter(todayProvider())) return
         }
         setSelectedDate(date)
     }

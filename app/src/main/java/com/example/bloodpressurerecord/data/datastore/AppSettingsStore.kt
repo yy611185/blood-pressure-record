@@ -9,6 +9,9 @@ data class AppSettings(
     val largeTextEnabled: Boolean = true,
     val highRiskAlertEnabled: Boolean = true,
     val showTrendChart: Boolean = true,
+    /** system / light / dark，默认跟随系统。 */
+    val appearanceMode: String = "system",
+    val showBuddy: Boolean = true,
     val morningReminderEnabled: Boolean = false,
     val morningReminderTime: String = "07:30",
     val eveningReminderEnabled: Boolean = false,
@@ -30,6 +33,9 @@ class AppSettingsStore(
             largeTextEnabled = prefs[PreferenceKeys.LARGE_TEXT] ?: true,
             highRiskAlertEnabled = prefs[PreferenceKeys.ENABLE_HIGH_RISK_ALERT] ?: true,
             showTrendChart = prefs[PreferenceKeys.SHOW_TREND_CHART] ?: true,
+            appearanceMode = prefs[PreferenceKeys.APPEARANCE_MODE]
+                ?.takeIf { it in setOf("system", "light", "dark") } ?: "system",
+            showBuddy = prefs[PreferenceKeys.SHOW_BUDDY] ?: true,
             morningReminderEnabled = prefs[PreferenceKeys.MORNING_REMINDER_ENABLED] ?: false,
             morningReminderTime = prefs[PreferenceKeys.MORNING_REMINDER_TIME] ?: "07:30",
             eveningReminderEnabled = prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] ?: false,
@@ -58,6 +64,15 @@ class AppSettingsStore(
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.SHOW_TREND_CHART] = enabled
         }
+    }
+
+    suspend fun setAppearanceMode(mode: String) {
+        require(mode in setOf("system", "light", "dark"))
+        context.appDataStore.edit { it[PreferenceKeys.APPEARANCE_MODE] = mode }
+    }
+
+    suspend fun setShowBuddy(enabled: Boolean) {
+        context.appDataStore.edit { it[PreferenceKeys.SHOW_BUDDY] = enabled }
     }
 
     suspend fun setMorningReminderEnabled(enabled: Boolean) {
@@ -160,6 +175,12 @@ class AppSettingsStore(
                     ?.toBooleanStrictOrNull()?.let {
                         prefs[PreferenceKeys.SHOW_TREND_CHART] = it
                     }
+                values["appearance_mode"]
+                    ?.takeIf { it in setOf("system", "light", "dark") }
+                    ?.let { prefs[PreferenceKeys.APPEARANCE_MODE] = it }
+                values["show_buddy"]?.toBooleanStrictOrNull()?.let {
+                    prefs[PreferenceKeys.SHOW_BUDDY] = it
+                }
             }
             if (restoreReminderSettings) {
                 values["morning_reminder_time"]?.takeIf(::isValidTime)?.let {

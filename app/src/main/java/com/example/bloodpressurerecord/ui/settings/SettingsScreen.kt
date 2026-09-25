@@ -1,165 +1,246 @@
 package com.example.bloodpressurerecord.ui.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
-import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.RoundIconBadge
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
-import com.example.bloodpressurerecord.ui.theme.Sage200
-import com.example.bloodpressurerecord.ui.theme.Sage800
-import com.example.bloodpressurerecord.ui.theme.Terracotta200
-import com.example.bloodpressurerecord.ui.theme.Terracotta800
-import com.example.bloodpressurerecord.ui.theme.WarmTextFaint
+import com.example.bloodpressurerecord.ui.home.Buddy
 
 @Composable
 fun SettingsScreen(
+    viewModel: SettingsViewModel,
     onOpenProfile: () -> Unit,
     onOpenReminder: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenDataManagement: () -> Unit,
     onOpenInfo: () -> Unit
 ) {
-    val topBarScroll = rememberHideOnScrollState()
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .nestedScroll(topBarScroll.nestedScrollConnection)
-    ) {
-        AppTopBar(title = "设置", hideOnScroll = topBarScroll)
-
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val systemDark = isSystemInDarkTheme()
+    val darkEnabled = when (state.appearanceMode) {
+        "dark" -> true
+        "light" -> false
+        else -> systemDark
+    }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        AppTopBar(title = "我的")
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(AppDimensions.pageHorizontalPadding),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = AppDimensions.pageHorizontalPadding),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SettingListItem(
-                title = "用户资料",
-                subtitle = "目标血压、年龄、性别等基础信息",
-                icon = Icons.Outlined.Person,
-                warm = true,
-                onClick = onOpenProfile
-            )
-            SettingListItem(
-                title = "测量与用药提醒",
-                subtitle = "测量提醒、药品管理、服药时间和日历同步",
-                icon = Icons.Outlined.Notifications,
-                warm = false,
-                onClick = onOpenReminder
-            )
-            SettingListItem(
-                title = "显示设置",
-                subtitle = "趋势图、高风险提醒和大字显示",
-                icon = Icons.Outlined.Visibility,
-                warm = true,
-                onClick = onOpenDisplay
-            )
-            SettingListItem(
-                title = "数据管理",
-                subtitle = "导出 Excel、本地备份和清空数据",
-                icon = Icons.Outlined.Folder,
-                warm = false,
-                onClick = onOpenDataManagement
-            )
-            SettingListItem(
-                title = "关于与帮助",
-                subtitle = "查看应用功能、使用边界和版本变化",
-                icon = Icons.Outlined.Info,
-                warm = true,
-                onClick = onOpenInfo
-            )
-
-            Text(
-                "数据只保存在这台手机上，不会上传。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp)
-            )
+            DataCard {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(Modifier.fillMaxWidth().clickable(onClick = onOpenProfile).heightIn(min = 56.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Buddy(category = "正常", modifier = Modifier.size(54.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(state.name.ifBlank { "我的资料" }, style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold)
+                            val details = listOfNotNull(
+                                state.ageText.takeIf { it.isNotBlank() }?.let { "$it 岁" },
+                                state.gender.takeIf { it.isNotBlank() }
+                            ).joinToString(" · ")
+                            Text(details.ifBlank { "设置年龄、性别和目标值" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = "编辑资料",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TargetTile("目标高压", state.targetSystolicText.ifBlank { "—" }, Modifier.weight(1f))
+                        TargetTile("目标低压", state.targetDiastolicText.ifBlank { "—" }, Modifier.weight(1f))
+                    }
+                    Text("平均值怎么算", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Surface(shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Row(Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            StrategyChoice("全部组平均", !state.discardFirstReading,
+                                { viewModel.setDiscardFirstReading(false) }, Modifier.weight(1f))
+                            StrategyChoice("不计第一组", state.discardFirstReading,
+                                { viewModel.setDiscardFirstReading(true) }, Modifier.weight(1f))
+                        }
+                    }
+                    Text("只影响之后的新记录；高风险判断始终检查每组读数。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            SettingsSectionTitle("提醒")
+            SettingsGroup {
+                SettingRow("提醒中心", "早晚测量、服药和日历同步", Icons.Outlined.Notifications, onOpenReminder)
+            }
+            SettingsSectionTitle("显示")
+            SettingsGroup {
+                SettingSwitchRow("大字模式", "字号放大，按钮更好按", Icons.Outlined.Visibility,
+                    state.isLargeTextEnabled, viewModel::setLargeTextEnabled)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingSwitchRow("深色模式", if (state.appearanceMode == "system") "跟随系统" else "手动设置",
+                    Icons.Outlined.DarkMode, darkEnabled) {
+                    viewModel.setAppearanceMode(if (it) "dark" else "light")
+                }
+                if (state.appearanceMode != "system") {
+                    TextButton(onClick = { viewModel.setAppearanceMode("system") },
+                        modifier = Modifier.fillMaxWidth()) { Text("恢复跟随系统") }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingSwitchRow("显示小压", "首页小伙伴会跟着血压变表情", Icons.Outlined.FavoriteBorder,
+                    state.showBuddy, viewModel::setShowBuddy)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingRow("显示设置", "趋势图和高风险提醒", Icons.Outlined.Visibility, onOpenDisplay)
+            }
+            SettingsSectionTitle("数据")
+            SettingsGroup {
+                SettingRow("导出、加密备份与导入", "数据保存在本机", Icons.Outlined.Folder,
+                    onOpenDataManagement)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingRow("关于与更新说明", "应用功能和版本变化", Icons.Outlined.Info, onOpenInfo)
+            }
+            Surface(shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Outlined.Shield, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Column {
+                        Text("数据只在这台手机上。", fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text("不注册、不上传。卸载或换机前请先导出备份。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-fun SettingListItem(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    warm: Boolean = true
-) {
-    DataCard(onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 橙绿交替的 46dp 圆形图标底座
-            RoundIconBadge(
-                icon = icon,
-                containerColor = if (warm) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.secondaryContainer
-                },
-                contentColor = if (warm) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                }
-            )
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
+private fun TargetTile(label: String, value: String, modifier: Modifier) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.padding(12.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (value == "—") value else "< $value",
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+@Composable
+private fun StrategyChoice(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
+    Surface(modifier = modifier.heightIn(min = 48.dp)
+        .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant) {
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center) {
+            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun SettingsSectionTitle(title: String) {
+    Text(title, modifier = Modifier.padding(start = 2.dp, top = 12.dp),
+        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun SettingsGroup(content: @Composable () -> Unit) {
+    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()) { Column { content() } }
+}
+
+@Composable
+private fun SettingRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick)
+        .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        RoundIconBadge(icon, MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Default.ChevronRight, contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    title: String, subtitle: String, icon: ImageVector, checked: Boolean, onChecked: (Boolean) -> Unit
+) {
+    Row(Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = onChecked)
+        .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        RoundIconBadge(icon, MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+fun SettingListItem(
+    title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit, warm: Boolean = true
+) {
+    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()) { SettingRow(title, subtitle, icon, onClick) }
 }

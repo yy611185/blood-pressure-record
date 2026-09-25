@@ -246,6 +246,8 @@ class BackupExportService(
             BackupUserProfileItem("high_risk_alert_enabled", settings.highRiskAlertEnabled.toString()),
             BackupUserProfileItem("discard_first_reading", settings.discardFirstReading.toString()),
             BackupUserProfileItem("show_trend_chart", settings.showTrendChart.toString()),
+            BackupUserProfileItem("appearance_mode", settings.appearanceMode),
+            BackupUserProfileItem("show_buddy", settings.showBuddy.toString()),
             BackupUserProfileItem("morning_reminder_enabled", settings.morningReminderEnabled.toString()),
             BackupUserProfileItem("morning_reminder_time", settings.morningReminderTime),
             BackupUserProfileItem("evening_reminder_enabled", settings.eveningReminderEnabled.toString()),
