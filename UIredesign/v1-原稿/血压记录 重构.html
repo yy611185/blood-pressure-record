@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>血压记录 · UI 重构</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Noto+Sans+SC:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="bp.css" />
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks_panel.jsx"></script>
+<script type="text/babel" src="bp-common.jsx"></script>
+<script type="text/babel" src="bp-home.jsx"></script>
+<script type="text/babel" src="bp-record.jsx"></script>
+<script type="text/babel" src="bp-history.jsx"></script>
+<script type="text/babel" src="bp-trend.jsx"></script>
+<script type="text/babel" src="bp-me.jsx"></script>
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentHue": 32,
+  "dark": false,
+  "bigText": false,
+  "buddy": true,
+  "skipRest": false
+}/*EDITMODE-END*/;
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [tab, setTab] = useState(() => localStorage.getItem('bp_tab') || 'home');
+  const [flow, setFlow] = useState(false);
+  const [data, setData] = useState(makeData);
+  const [meds, setMeds] = useState(MEDS_INIT);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => { localStorage.setItem('bp_tab', tab); }, [tab]);
+  useEffect(() => { document.documentElement.style.fontSize = t.bigText ? '18.5px' : '16px'; }, [t.bigText]);
+  useEffect(() => {
+    const fit = () => setScale(Math.min(1, (window.innerHeight - 40) / 898, (window.innerWidth - 30) / 426));
+    fit(); window.addEventListener('resize', fit); return () => window.removeEventListener('resize', fit);
+  }, []);
+
+  const toast = (m) => { setToastMsg(null); requestAnimationFrame(() => setToastMsg({ m, k: Date.now() })); };
+  const onSave = (rec) => {
+    const tt = new Date(TODAY);
+    setData((d) => [...d, { id: 'n' + Date.now(), t: tt, p: rec.p || 72, ...rec, p: rec.p || 72 }]);
+  };
+  const last = data[data.length - 1];
+
+  const tabs = [['home', '首页', 'home'], ['history', '历史', 'cal'], null, ['trend', '趋势', 'trend'], ['me', '我的', 'me']];
+
+  return (
+    <>
+      <div className={'phone' + (t.dark ? ' dark' : '')} style={{ '--ah': t.accentHue, transform: `scale(${scale})` }}>
+        <StatusBar dark={t.dark} />
+        {tab === 'home' && <HomeScreen key="h" data={data} meds={meds} setMeds={setMeds} onRecord={() => setFlow(true)} go={setTab} buddyOn={t.buddy} toast={toast} />}
+        {tab === 'history' && <HistoryScreen key="hi" data={data} />}
+        {tab === 'trend' && <TrendScreen key="t" data={data} />}
+        {tab === 'me' && <MeScreen key="m" dark={t.dark} setDark={(v) => setTweak('dark', v)} big={t.bigText} setBig={(v) => setTweak('bigText', v)} buddyOn={t.buddy} setBuddyOn={(v) => setTweak('buddy', v)} toast={toast} />}
+
+        <nav className="tabbar">
+          {tabs.map((x, i) => x ? (
+            <button key={x[0]} className={'tab' + (tab === x[0] ? ' on' : '')} onClick={() => setTab(x[0])}>
+              <Icon n={x[2]} sw={tab === x[0] ? 2.4 : 2} />{x[1]}
+            </button>
+          ) : (
+            <button key="fab" className="fab" onClick={() => setFlow(true)} aria-label="记一次血压"><Icon n="plus" sw={3} /></button>
+          ))}
+        </nav>
+
+        {flow && <RecordFlow onClose={() => { setFlow(false); setTab('home'); }} onSave={onSave} buddyOn={t.buddy} skipRest={t.skipRest} last={last} />}
+        {toastMsg && <div key={toastMsg.k} className="toast">{toastMsg.m}</div>}
+        <div className="home-ind" />
+      </div>
+
+      <TweaksPanel>
+        <TweakSection label="品牌色">
+          <TweakColor label="主色" value={`oklch(0.66 0.15 ${t.accentHue})`}
+            options={['oklch(0.66 0.15 32)', 'oklch(0.66 0.15 5)', 'oklch(0.66 0.15 160)', 'oklch(0.66 0.15 260)']}
+            onChange={(v) => setTweak('accentHue', +v.match(/ (\d+)\)$/)[1])} />
+        </TweakSection>
+        <TweakSection label="显示">
+          <TweakToggle label="深色模式" value={t.dark} onChange={(v) => setTweak('dark', v)} />
+          <TweakToggle label="大字模式（长辈）" value={t.bigText} onChange={(v) => setTweak('bigText', v)} />
+          <TweakToggle label="显示吉祥物「小压」" value={t.buddy} onChange={(v) => setTweak('buddy', v)} />
+        </TweakSection>
+        <TweakSection label="录入流程">
+          <TweakToggle label="跳过静坐引导" value={t.skipRest} onChange={(v) => setTweak('skipRest', v)} />
+          <TweakButton label="打开录入流程" onClick={() => setFlow(true)} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
