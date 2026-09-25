@@ -62,7 +62,10 @@ class TrendViewModelTest {
         )
         advanceUntilIdle()
 
-        assertEquals(listOf("later"), vm.uiState.value.series.points.map { it.id })
+        // 30 天默认按每日平均聚合，所以单条记录对应当天一个每日节点。
+        assertEquals(listOf("day:2026-07-25"), vm.uiState.value.series.points.map { it.id })
+        assertEquals(1, vm.uiState.value.series.rawRecordCount)
+        assertEquals(1, vm.uiState.value.series.points.single().recordCount)
     }
 
     private class FakeTrendRepository : TrendRepository {

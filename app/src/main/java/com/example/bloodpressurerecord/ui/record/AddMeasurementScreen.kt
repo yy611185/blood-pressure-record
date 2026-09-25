@@ -71,6 +71,7 @@ import com.example.bloodpressurerecord.ui.common.SessionChoiceChip
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
+import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.home.Buddy
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
@@ -168,34 +169,39 @@ fun AddMeasurementScreen(
         // 避免 Scaffold.innerPadding 与页面 padding 重复叠加。
         contentWindowInsets = WindowInsets(0.dp),
         topBar = {
-            AppTopBar(
-                title = when (step) {
-                    0 -> "记一次血压"
-                    1 -> "测的时候怎么样？"
-                    else -> "记好啦"
-                },
-                onBack = requestBack,
-                hideOnScroll = topBarScroll,
-                actions = {
-                    Row(
-                        modifier = Modifier.semantics { contentDescription = "第 ${step + 1} 步，共 3 步" },
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        repeat(3) { index ->
-                            val color = when {
-                                index == step -> MaterialTheme.colorScheme.primary
-                                index < step -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                                else -> MaterialTheme.colorScheme.surfaceContainerHighest
+            // 本页 Scaffold 把 contentWindowInsets 归零，AppTopBar 自身不含状态栏安全区，
+            // 因此必须在外层补上：整块顶栏（含滚动隐藏的外层留白）都待在系统状态栏之下。
+            // 只在记录页外层加，不动全局 AppTopBar，避免其他已自行处理安全区的页面重复 inset。
+            Box(modifier = Modifier.padding(top = statusBarTopPadding())) {
+                AppTopBar(
+                    title = when (step) {
+                        0 -> "记一次血压"
+                        1 -> "测的时候怎么样？"
+                        else -> "记好啦"
+                    },
+                    onBack = requestBack,
+                    hideOnScroll = topBarScroll,
+                    actions = {
+                        Row(
+                            modifier = Modifier.semantics { contentDescription = "第 ${step + 1} 步，共 3 步" },
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            repeat(3) { index ->
+                                val color = when {
+                                    index == step -> MaterialTheme.colorScheme.primary
+                                    index < step -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                }
+                                androidx.compose.foundation.layout.Box(
+                                    Modifier.width(if (index == step) 30.dp else 18.dp)
+                                        .height(6.dp)
+                                        .background(color, RoundedCornerShape(3.dp))
+                                )
                             }
-                            androidx.compose.foundation.layout.Box(
-                                Modifier.width(if (index == step) 30.dp else 18.dp)
-                                    .height(6.dp)
-                                    .background(color, RoundedCornerShape(3.dp))
-                            )
                         }
                     }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(

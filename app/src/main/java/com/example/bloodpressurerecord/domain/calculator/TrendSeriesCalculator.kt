@@ -9,6 +9,7 @@ import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -17,7 +18,20 @@ object TrendSeriesCalculator {
     const val CHART_SAFE_MIN = 40
     /** 输入规则允许的最高收缩压；261–300 必须仍可在趋势图中看见。 */
     const val CHART_SAFE_MAX = 300
+    private const val CHART_AXIS_MIN = 20
     private const val CHART_AXIS_MAX = 320
+
+    /** 舒张压的安全边界：输入规则允许 20–200。 */
+    private const val DIASTOLIC_SAFE_MIN = 20
+    private const val DIASTOLIC_SAFE_MAX = 200
+
+    /** 固定参考线（收缩压 140 / 舒张压 90）。 */
+    const val REFERENCE_SYSTOLIC = 140
+    const val REFERENCE_DIASTOLIC = 90
+
+    /** Y 轴目标主刻度间隔数（含上下边界，即约 5–6 条主网格）。 */
+    private const val TARGET_TICK_INTERVALS = 5
+    private val TICK_STEPS = intArrayOf(5, 10, 20, 25, 50, 100)
 
     fun rangeStart(range: TrendRange, nowMillis: Long, zoneId: ZoneId): Long {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zoneId).toLocalDate()
@@ -26,6 +40,16 @@ object TrendSeriesCalculator {
             TrendRange.DAYS_30 -> today.minusDays(29).atStartOfDay(zoneId).toInstant().toEpochMilli()
             TrendRange.ALL -> 0L
         }
+    }
+
+    /**
+     * 数据粒度：7 天保留每次测量，30 天与全部记录都按自然日聚合成每日平均。
+     * 每日平均节点仍保留当天的半开区间，点击后可回查当天全部原始记录。
+     */
+    fun aggregationFor(range: TrendRange): TrendAggregation = when (range) {
+        TrendRange.DAYS_7 -> TrendAggregation.RAW
+        TrendRange.DAYS_30,
+        TrendRange.ALL -> TrendAggregation.DAILY
     }
 
     fun build(
@@ -42,10 +66,10 @@ object TrendSeriesCalculator {
             .filter { it.measuredAt in requestedStart..nowMillis }
             .sortedBy { it.measuredAt }
             .toList()
-        val points = when (range) {
-            TrendRange.ALL -> sorted.toDailyPoints(zoneId)
-            TrendRange.DAYS_7,
-            TrendRange.DAYS_30 -> sorted.map { it.toRawPoint() }
+        val aggregation = aggregationFor(range)
+        val points = when (aggregation) {
+            TrendAggregation.RAW -> sorted.map { it.toRawPoint() }
+            TrendAggregation.DAILY -> sorted.toDailyPoints(zoneId)
         }
         val seriesStart = when {
             range != TrendRange.ALL -> requestedStart
@@ -74,10 +98,18 @@ object TrendSeriesCalculator {
                 ?.roundToInt(),
             yAxis = calculateYAxis(points, targetSystolic, targetDiastolic),
             rangeStart = seriesStart,
-            rangeEnd = seriesEnd
+            rangeEnd = seriesEnd,
+            aggregation = aggregation,
+            windowStart = requestedStart,
+            firstMeasuredAt = sorted.firstOrNull()?.measuredAt,
+            lastMeasuredAt = sorted.lastOrNull()?.measuredAt
         )
     }
 
+    /**
+     * Y 轴：先把参考线与目标线纳入视野，再把上下界吸附到「漂亮刻度」网格，
+     * 使网格线数量稳定在 5–7 条（旧的按 10 递增会画出十余条密集网格）。
+     */
     fun calculateYAxis(
         points: List<TrendPoint>,
         targetSystolic: Int?,
@@ -87,43 +119,33 @@ object TrendSeriesCalculator {
             points.forEach { point ->
                 // 仅把超出输入规则的历史脏值限制到合法边界；合法的 261–300
                 // 不再被旧的 260 上限吞掉。
-                add(point.systolic.coerceIn(40, CHART_SAFE_MAX))
-                add(point.diastolic.coerceIn(20, 200))
+                add(point.systolic.coerceIn(CHART_SAFE_MIN, CHART_SAFE_MAX))
+                add(point.diastolic.coerceIn(DIASTOLIC_SAFE_MIN, DIASTOLIC_SAFE_MAX))
             }
             // 参考阈值也参与默认视野，避免常见血压区间看不到 90 / 140 的参考线。
-            add(90)
-            add(140)
-            targetSystolic?.takeIf { it in 40..CHART_SAFE_MAX }?.let(::add)
-            targetDiastolic?.takeIf { it in 20..200 }?.let(::add)
+            add(REFERENCE_DIASTOLIC)
+            add(REFERENCE_SYSTOLIC)
+            targetSystolic?.takeIf { it in CHART_SAFE_MIN..CHART_SAFE_MAX }?.let(::add)
+            targetDiastolic?.takeIf { it in DIASTOLIC_SAFE_MIN..DIASTOLIC_SAFE_MAX }?.let(::add)
         }
         val rawMin = values.minOrNull() ?: 80
         val rawMax = values.maxOrNull() ?: 160
 
-        // 先根据数据跨度选择刻度，再把上下界吸附到同一刻度网格。
-        // 旧实现先按 10 取整、后决定 20/40 步长，会得到 50–150 + 20 这种
-        // “边界不落在刻度上”的组合，最终只画出 60–140，视觉上像数据被裁掉。
-        val paddedSpan = (rawMax - rawMin + 20).coerceAtLeast(20)
-        val tickStep = when {
-            paddedSpan <= 120 -> 10
-            paddedSpan <= 220 -> 20
-            else -> 40
-        }
-
+        val tickStep = chooseTickStep(rawMin, rawMax)
         var min = (floor((rawMin - 10) / tickStep.toDouble()) * tickStep)
             .toInt()
-            .coerceAtLeast(20)
+            .coerceAtLeast(CHART_AXIS_MIN)
         var max = (ceil((rawMax + 10) / tickStep.toDouble()) * tickStep)
             .toInt()
             .coerceAtMost(CHART_AXIS_MAX)
-
-        // 尽量让上下界落在同一刻度网格；极端安全边界由绘制层额外补画首尾刻度。
+        // 上下界吸附到同一刻度网格；极端安全边界由绘制层额外补画首尾刻度。
         val remainder = (max - min) % tickStep
         if (remainder != 0) {
             val expandedMax = max + (tickStep - remainder)
             if (expandedMax <= CHART_AXIS_MAX) {
                 max = expandedMax
             } else {
-                min = (min - remainder).coerceAtLeast(20)
+                min = (min - remainder).coerceAtLeast(CHART_AXIS_MIN)
             }
         }
         if (max <= min) {
@@ -131,6 +153,28 @@ object TrendSeriesCalculator {
         }
 
         return TrendYAxis(min = min, max = max, tickStep = tickStep)
+    }
+
+    private fun chooseTickStep(rawMin: Int, rawMax: Int): Int {
+        val span = (rawMax - rawMin + 20).coerceAtLeast(10)
+        // 以「约 5 个间隔」为目标；用相对偏差挑最接近的漂亮步长，
+        // 避免固定网格导致 50、60 … 150 这类十余条密集网格。
+        return TICK_STEPS.minByOrNull { step ->
+            abs(span.toDouble() / step - TARGET_TICK_INTERVALS)
+        } ?: TICK_STEPS.last()
+    }
+
+    /** 网格线的具体数值（含上下界），与 [TrendYAxis.tickStep] 保持一致。 */
+    fun tickValues(yAxis: TrendYAxis): List<Int> {
+        val step = yAxis.tickStep.coerceAtLeast(1)
+        val first = ceil(yAxis.min / step.toDouble()).toInt() * step
+        val values = ArrayList<Int>(TARGET_TICK_INTERVALS + 2)
+        var value = first
+        while (value <= yAxis.max) {
+            values += value
+            value += step
+        }
+        return values
     }
 
     private fun TrendRecord.toRawPoint(): TrendPoint {

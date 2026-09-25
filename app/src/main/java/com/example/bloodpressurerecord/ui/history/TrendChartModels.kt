@@ -30,12 +30,23 @@ class TrendTimeViewportState {
     var endMillis by mutableLongStateOf(1L)
         private set
 
+    /** 默认视野（自动聚焦真实样本区间），双击时回到这里。 */
+    var defaultStartMillis by mutableLongStateOf(0L)
+        private set
+
+    var defaultEndMillis by mutableLongStateOf(1L)
+        private set
+
     val spanMillis: Long
         get() = (endMillis - startMillis).coerceAtLeast(1L)
 
-    fun reset(seriesStart: Long, seriesEnd: Long) {
-        startMillis = seriesStart
-        endMillis = seriesEnd.coerceAtLeast(seriesStart + 1L)
+    /** 设定默认视野并立即跳转过去（范围切换 / 跨零点 / 双击复位）。 */
+    fun reset(defaultStart: Long, defaultEnd: Long) {
+        val safeEnd = defaultEnd.coerceAtLeast(defaultStart + 1L)
+        defaultStartMillis = defaultStart
+        defaultEndMillis = safeEnd
+        startMillis = defaultStart
+        endMillis = safeEnd
     }
 
     fun zoomBy(
@@ -47,7 +58,7 @@ class TrendTimeViewportState {
     ) {
         val fullSpan = (seriesEnd - seriesStart).coerceAtLeast(1L)
         if (fullSpan <= minSpanMillis) {
-            reset(seriesStart, seriesEnd)
+            setWindow(defaultStartMillis, defaultEndMillis, seriesStart, seriesEnd)
             return
         }
         val oldSpan = spanMillis
@@ -79,13 +90,66 @@ class TrendTimeViewportState {
 }
 
 object TrendChartMath {
-    private const val HOUR_MILLIS = 60L * 60L * 1_000L
+    private const val MINUTE_MILLIS = 60L * 1_000L
+    private const val HOUR_MILLIS = 60L * MINUTE_MILLIS
     private const val DAY_MILLIS = 24L * HOUR_MILLIS
 
     fun minViewportSpan(range: TrendRange): Long = when (range) {
         TrendRange.DAYS_7 -> HOUR_MILLIS
         TrendRange.DAYS_30 -> 6L * HOUR_MILLIS
         TrendRange.ALL -> 7L * DAY_MILLIS
+    }
+
+    /** 双击 / 初次进入时的最小可辨识窗口，避免单点或极短样本被拉到一条竖线。 */
+    fun minDefaultViewportSpan(range: TrendRange): Long = when (range) {
+        TrendRange.DAYS_7 -> 2L * HOUR_MILLIS
+        TrendRange.DAYS_30 -> 3L * DAY_MILLIS
+        TrendRange.ALL -> 14L * DAY_MILLIS
+    }
+
+    /**
+     * 默认视野：聚焦真实有数据的区间并留少量左右 padding。
+     *
+     * 之前默认铺满整个周期窗口，最近 7 天只有 3 天有记录时数据全挤在左侧、
+     * 右侧大片空白；这里在**不改变真实时间比例**的前提下只裁剪视野，
+     * 缺测断档、双指缩放和平移逻辑都不受影响。
+     */
+    fun defaultViewport(
+        points: List<TrendPoint>,
+        range: TrendRange,
+        windowStart: Long,
+        windowEndInclusive: Long
+    ): Pair<Long, Long> {
+        val safeWindowStart = windowStart.coerceAtMost(windowEndInclusive)
+        val safeWindowEnd = windowEndInclusive.coerceAtLeast(safeWindowStart + 1L)
+        if (points.isEmpty()) return safeWindowStart to safeWindowEnd
+
+        val firstMillis = points.minOf { it.timestamp }
+        val lastMillis = points.maxOf { it.timestamp }
+        val minSpan = minDefaultViewportSpan(range)
+
+        if (lastMillis - firstMillis >= minSpan) {
+            val padding = viewportPadding(firstMillis, lastMillis, minSpan)
+            val start = (firstMillis - padding).coerceIn(safeWindowStart, safeWindowEnd - minSpan)
+            val end = (lastMillis + padding).coerceAtLeast(start + minSpan)
+            return start to end.coerceIn(start + minSpan, safeWindowEnd)
+        }
+
+        val center = firstMillis / 2L + lastMillis / 2L + (firstMillis % 2L + lastMillis % 2L) / 2L
+        val halfSpan = minSpan / 2L
+        var start = (center - halfSpan).coerceIn(safeWindowStart, safeWindowEnd - minSpan)
+        var end = (start + minSpan).coerceAtLeast(start + 1L)
+        if (end > safeWindowEnd) {
+            end = safeWindowEnd
+            start = (end - minSpan).coerceAtLeast(safeWindowStart)
+        }
+        return start to end
+    }
+
+    private fun viewportPadding(firstMillis: Long, lastMillis: Long, minSpan: Long): Long {
+        val dataSpan = (lastMillis - firstMillis).coerceAtLeast(0L)
+        val proportional = (dataSpan / 12L).coerceAtLeast(MINUTE_MILLIS * 30L)
+        return proportional.coerceIn(MINUTE_MILLIS * 20L, minSpan)
     }
 
     fun visiblePoints(
@@ -229,7 +293,10 @@ object TrendChartMath {
         maxTicks: Int
     ): List<TrendTimeTick> {
         val totalHours = ChronoUnit.HOURS.between(start, end).coerceAtLeast(1)
-        val step = max(1L, ceil(totalHours / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong())
+        val step = niceStep(
+            required = ceil(totalHours / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong(),
+            candidates = longArrayOf(1, 2, 3, 4, 6, 12, 24)
+        )
         val startTick = TrendTimeTick(
             timestamp = start.toInstant().toEpochMilli(),
             primary = start.format(DateTimeFormatter.ofPattern("HH:mm")),
@@ -262,10 +329,13 @@ object TrendChartMath {
         maxTicks: Int
     ): List<TrendTimeTick> {
         val totalDays = ChronoUnit.DAYS.between(start.toLocalDate(), end.toLocalDate()).coerceAtLeast(1)
-        val step = if (totalDays <= 7L) {
+        val step = if (totalDays <= maxTicks - 1L) {
             1L
         } else {
-            max(1L, ceil(totalDays / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong())
+            niceStep(
+                required = ceil(totalDays / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong(),
+                candidates = longArrayOf(1, 2, 3, 7, 14, 30, 60, 90)
+            )
         }
         val formatter = DateTimeFormatter.ofPattern("MM-dd")
         val startTick = TrendTimeTick(
@@ -299,7 +369,14 @@ object TrendChartMath {
         val firstMonth = start.withDayOfMonth(1).toLocalDate()
         val lastMonth = end.withDayOfMonth(1).toLocalDate()
         val months = ChronoUnit.MONTHS.between(firstMonth, lastMonth).coerceAtLeast(1)
-        val step = max(1L, ceil(months / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong())
+        val step = if (months <= maxTicks - 1L) {
+            1L
+        } else {
+            niceStep(
+                required = ceil(months / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong(),
+                candidates = longArrayOf(1, 2, 3, 6, 12, 24)
+            )
+        }
         val formatter = if (start.year == end.year) {
             DateTimeFormatter.ofPattern("MM月")
         } else {
@@ -334,7 +411,10 @@ object TrendChartMath {
         maxTicks: Int
     ): List<TrendTimeTick> {
         val years = (end.year - start.year).coerceAtLeast(1)
-        val step = max(1, ceil(years / (maxTicks - 1).coerceAtLeast(1).toDouble()).toInt())
+        val step = niceStep(
+            required = ceil(years / (maxTicks - 1).coerceAtLeast(1).toDouble()).toLong(),
+            candidates = longArrayOf(1, 2, 5, 10, 20, 50)
+        ).toInt().coerceAtLeast(1)
         val startTick = TrendTimeTick(
             timestamp = start.toInstant().toEpochMilli(),
             primary = start.year.toString()
@@ -357,6 +437,12 @@ object TrendChartMath {
             }
         }
         return ticksWithBoundaries(startTick, endTick, interior)
+    }
+
+    /** 在候选中选第一个不小于需求值的步长，让刻度落在人们熟悉的间隔上。 */
+    private fun niceStep(required: Long, candidates: LongArray): Long {
+        val need = required.coerceAtLeast(1L)
+        return candidates.firstOrNull { it >= need } ?: candidates.last()
     }
 
     private fun ticksWithBoundaries(
