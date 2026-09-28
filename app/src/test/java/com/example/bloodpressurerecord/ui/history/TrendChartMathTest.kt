@@ -684,11 +684,45 @@ class TrendChartMathTest {
         assertTrue(180 in axis.min..axis.max)
     }
 
+    @Test
+    fun pulseAxisUsesOnlyRealValuesWithPaddingAndStableDrag() {
+        val visible = listOf(
+            point(0L, pulse = 68), point(1_000L, pulse = null),
+            point(2_000L, pulse = 80)
+        )
+        val axis = TrendChartMath.stablePulseYAxis(null, visible)!!
+        assertTrue(axis.min < 68 && axis.max > 80)
+        assertTrue(axis.tickStep in listOf(5, 10, 20, 25, 50))
+        assertEquals(axis, TrendChartMath.stablePulseYAxis(axis, listOf(point(3_000L, pulse = 75))))
+        val expanded = TrendChartMath.stablePulseYAxis(axis, listOf(point(4_000L, pulse = 150)))!!
+        assertTrue(150 in expanded.min..expanded.max)
+    }
+
+    @Test
+    fun pulseSamplingRetainsExtremesWithoutJoiningAcrossMissingPulse() {
+        val points = (0L until 100L).map { index ->
+            point(index * 1_000L, pulse = if (index == 50L) null else if (index == 75L) 180 else 70)
+        }
+        val sampled = TrendChartMath.samplePulse(points, 40)
+        val segments = TrendChartMath.pulseSegmentIds(points, 2L * 24L * 60L * 60L * 1_000L)
+        assertTrue(sampled.size <= 40)
+        assertTrue(sampled.any { it.pulse == 180 })
+        assertTrue(sampled.none { it.pulse == null })
+        assertTrue(segments[points[49].id] != segments[points[51].id])
+        assertEquals(points[50].id, TrendChartMath.hitTestPulse(
+            projection(0L, 99_000L), points,
+            x = projection(0L, 99_000L).xOfTime(points[50].timestamp),
+            y = 100f,
+            touchRadiusPx = 22f
+        )?.id)
+    }
+
     private fun point(
         timestamp: Long,
         id: String = "p-$timestamp",
         systolic: Int = 120,
-        diastolic: Int = 80
+        diastolic: Int = 80,
+        pulse: Int? = null
     ): TrendPoint {
         return TrendPoint(
             id = id,
@@ -697,7 +731,7 @@ class TrendChartMathTest {
             intervalEndExclusive = timestamp + 1,
             systolic = systolic,
             diastolic = diastolic,
-            pulse = null,
+            pulse = pulse,
             category = "NORMAL",
             containsHighRiskReading = false,
             recordCount = 1,

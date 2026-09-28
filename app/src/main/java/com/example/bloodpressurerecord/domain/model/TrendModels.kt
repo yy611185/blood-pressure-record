@@ -56,6 +56,7 @@ data class TrendSeries(
     val rawRecordCount: Int,
     val averageSystolic: Int?,
     val averageDiastolic: Int?,
+    val averagePulse: Int? = null,
     val yAxis: TrendYAxis,
     val rangeStart: Long,
     val rangeEnd: Long,

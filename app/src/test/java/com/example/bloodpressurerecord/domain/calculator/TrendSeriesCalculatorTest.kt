@@ -199,6 +199,29 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
+    fun averagePulseIgnoresMissingValuesAndDailyPulseStaysNullable() {
+        val records = listOf(
+            record("a", millis("2026-07-20", 7), 120, 80).copy(pulse = 70),
+            record("b", millis("2026-07-20", 21), 130, 90).copy(pulse = null),
+            record("c", millis("2026-07-21", 8), 140, 88).copy(pulse = null),
+            record("d", millis("2026-07-22", 8), 125, 82).copy(pulse = 76)
+        )
+
+        val raw = TrendSeriesCalculator.build(records, TrendRange.DAYS_7, now, zone)
+        val daily = TrendSeriesCalculator.build(records, TrendRange.ALL, now, zone)
+
+        assertEquals(73, raw.averagePulse)
+        assertEquals(listOf(70, null, null, 76), raw.points.map { it.pulse })
+        assertEquals(73, daily.averagePulse)
+        assertEquals(listOf(70, null, 76), daily.points.map { it.pulse })
+        assertEquals(
+            null,
+            TrendSeriesCalculator.build(records.map { it.copy(pulse = null) }, TrendRange.ALL, now, zone)
+                .averagePulse
+        )
+    }
+
+    @Test
     fun allRange_groupsByDeviceTimezoneAcrossUtcDateBoundary() {
         val newYork = ZoneId.of("America/New_York")
         val records = listOf(

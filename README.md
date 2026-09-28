@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册、不联网、不复杂。数据只存在你的手机里。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.0.3-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.1.1-orange)
 
 ---
 
@@ -160,6 +160,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 2.1.1 | 2026-09-28 | 新增与血压图同步的独立脉搏趋势图，完善缺失脉搏显示 |
 | 2.0.3 | 2026-09-26 | 修复趋势图短时间范围崩溃、视野与手势问题，改善大字号读数栏 |
 | 2.0.2 | 2026-09-26 | 多组读数纵向录入，简化输入框与提示 |
 | 2.0.1 | 2026-09-26 | 全面更新界面与录入流程，完善趋势图交互和布局 |
@@ -180,7 +181,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ---
 
-*最后更新：2026-09 · 版本 2.0.3 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
+*最后更新：2026-09 · 版本 2.1.1 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
 
 - `BP_RELEASE_STORE_FILE`：签名库路径
 - `BP_RELEASE_STORE_PASSWORD`：签名库密码
@@ -226,6 +227,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 2.1.1 | 2026-09-28 | 独立脉搏趋势图，与血压图同步缩放平移、选点和恢复；缺值不补造 |
 | 2.0.3 | 2026-09-26 | 趋势图崩溃、视野与手势修复，小屏大字号和深色模式适配 |
 | 2.0.2 | 2026-09-26 | 多组读数纵向录入，简化输入框与提示 |
 | 2.0.1 | 2026-09-26 | 暖色界面与三步录入、趋势图交互和布局修复 |

@@ -63,12 +63,14 @@ data class TrendTextSummary(
     val recordCount: Int = 0,
     val averageSystolic: Int? = null,
     val averageDiastolic: Int? = null,
+    val averagePulse: Int? = null,
     val highestSystolic: Int? = null,
     val highestDiastolic: Int? = null,
     val lowestSystolic: Int? = null,
     val lowestDiastolic: Int? = null,
     val systolicChange: Int? = null,
     val diastolicChange: Int? = null,
+    val pulseChange: Int? = null,
     val highRiskCount: Int = 0
 )
 
@@ -245,16 +247,21 @@ class TrendViewModel(
         val diastolicChange = statistics.averageDiastolic?.let { current ->
             previousStatistics.averageDiastolic?.let { previous -> (current - previous).roundToInt() }
         }
+        val pulseChange = statistics.averagePulse?.let { current ->
+            previousStatistics.averagePulse?.let { previous -> (current - previous).roundToInt() }
+        }
         return TrendTextSummary(
             recordCount = statistics.recordCount,
             averageSystolic = avgSys,
             averageDiastolic = avgDia,
+            averagePulse = statistics.averagePulse?.roundToInt(),
             highestSystolic = statistics.highestSystolic,
             highestDiastolic = statistics.highestDiastolic,
             lowestSystolic = statistics.lowestSystolic,
             lowestDiastolic = statistics.lowestDiastolic,
             systolicChange = systolicChange,
             diastolicChange = diastolicChange,
+            pulseChange = pulseChange,
             highRiskCount = statistics.highRiskCount
         )
     }

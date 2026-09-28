@@ -160,6 +160,13 @@ fun TrendScreen(
             onViewDayRecords = viewModel::openPointDetails
         )
 
+        PulseTrendCard(
+            series = series,
+            selectedPoint = selectedPoint,
+            chartController = chartController,
+            onPointSelected = { point -> selectedPointId = point?.id }
+        )
+
         TrendPeriodOverview(
             summary = uiState.summary,
             insights = uiState.insights,
@@ -525,6 +532,48 @@ private fun TrendCard(
     }
 }
 
+@Composable
+private fun PulseTrendCard(
+    series: TrendSeries,
+    selectedPoint: TrendPoint?,
+    chartController: TrendChartController,
+    onPointSelected: (TrendPoint?) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "脉搏趋势",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (series.averagePulse == null) {
+                Text(
+                    "这段时间暂无脉搏记录",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 20.dp)
+                )
+            } else {
+                Text(
+                    "平均 ${series.averagePulse} 次/分",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                SessionTimeSeriesPulseChart(
+                    series = series,
+                    selectedPoint = selectedPoint,
+                    onPointSelected = onPointSelected,
+                    controller = chartController
+                )
+            }
+        }
+    }
+}
+
 /**
  * 顶部数据栏：显示当前选中的记录（长按数据检查 / 点击节点 / 上一条 / 下一条）。
  *
@@ -586,6 +635,12 @@ internal fun TrendSelectionReadout(
                         style = MaterialTheme.typography.titleMedium,
                         fontFamily = NumberFontFamily,
                         fontWeight = FontWeight.Bold,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        displayed.pulse?.let { "脉搏 $it 次/分" } ?: "脉搏 —",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
                             else MaterialTheme.colorScheme.onSurface
                     )
@@ -710,10 +765,9 @@ private fun ReadoutAction(
 }
 
 private fun buildSelectionSupportingText(point: TrendPoint): String {
-    val pulse = "脉搏 ${point.pulse?.toString() ?: "未记录"}"
     return when (point.aggregation) {
-        TrendAggregation.DAILY -> "$pulse · 当日 ${point.recordCount} 次平均"
-        TrendAggregation.RAW -> "$pulse · 单次测量"
+        TrendAggregation.DAILY -> "当日 ${point.recordCount} 次平均"
+        TrendAggregation.RAW -> "单次测量"
     }
 }
 
@@ -734,15 +788,16 @@ private fun buildReadoutDescription(
     total: Int
 ): String {
     val position = if (index >= 0) "第 ${index + 1} 个，共 $total 个数据点" else "共 $total 个数据点"
+    val pulse = point.pulse?.let { "脉搏 $it 次每分" } ?: "脉搏未记录"
     return when (point.aggregation) {
         TrendAggregation.DAILY ->
             "${if (isSelected) "已选中的每日平均" else "最近的每日平均"}，" +
                 "${formatFullDate(point.timestamp)}，当日 ${point.recordCount} 次测量，平均收缩压 ${point.systolic}，" +
-                "平均舒张压 ${point.diastolic}，脉搏 ${point.pulse ?: "未记录"}，$position。"
+                "平均舒张压 ${point.diastolic}，$pulse，$position。"
         TrendAggregation.RAW ->
             "${if (isSelected) "已选中的数据点" else "最近一次测量"}，" +
                 "${formatReadoutFull(point.timestamp)}，收缩压 ${point.systolic}，舒张压 ${point.diastolic}，" +
-                "脉搏 ${point.pulse ?: "未记录"}，$position。"
+                "$pulse，$position。"
     }
 }
 
