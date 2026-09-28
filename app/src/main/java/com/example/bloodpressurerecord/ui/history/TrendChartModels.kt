@@ -119,7 +119,7 @@ class TrendTimeViewportState {
         domainEndMillis = safeDomainEnd
 
         val domainSpan = (safeDomainEnd - safeDomainStart).toDouble()
-        val safeDefaultStart = defaultStart.coerceIn(safeDomainStart, safeDomainEnd)
+        val safeDefaultStart = defaultStart.coerceIn(safeDomainStart, safeDomainEnd - 1L)
         val safeDefaultEnd = defaultEnd.coerceIn(safeDefaultStart + 1L, safeDomainEnd)
         defaultStartRatio = (safeDefaultStart - safeDomainStart) / domainSpan
         defaultEndRatio = (safeDefaultEnd - safeDomainStart) / domainSpan
@@ -127,6 +127,41 @@ class TrendTimeViewportState {
         endRatio = defaultEndRatio
         zoom = (1.0 / spanRatio).toFloat().coerceIn(1f, TrendChartMath.MAX_ZOOM)
         revision++
+    }
+
+    /**
+     * 同一范围内数据更新时刷新数据域和默认视野。用户已移动的绝对时间窗口保持
+     * 原位；若旧窗口超出新域，则维持原宽度并夹到最近的合法位置。
+     */
+    fun updateDomain(
+        domainStart: Long,
+        domainEnd: Long,
+        defaultStart: Long,
+        defaultEnd: Long
+    ) {
+        val wasAtDefault = isAtDefault
+        val oldStart = startMillis()
+        val oldEnd = endMillis()
+        if (wasAtDefault) {
+            reset(domainStart, domainEnd, defaultStart, defaultEnd)
+            return
+        }
+
+        val safeDomainStart = domainStart
+        val safeDomainEnd = domainEnd.coerceAtLeast(safeDomainStart + 1L)
+        val domainSpan = safeDomainEnd - safeDomainStart
+        val safeDefaultStart = defaultStart.coerceIn(safeDomainStart, safeDomainEnd - 1L)
+        val safeDefaultEnd = defaultEnd.coerceIn(safeDefaultStart + 1L, safeDomainEnd)
+        val oldSpan = (oldEnd - oldStart).coerceAtLeast(1L).coerceAtMost(domainSpan)
+        val newStart = oldStart.coerceIn(safeDomainStart, safeDomainEnd - oldSpan)
+
+        domainStartMillis = safeDomainStart
+        domainEndMillis = safeDomainEnd
+        defaultStartRatio = (safeDefaultStart - safeDomainStart).toDouble() / domainSpan
+        defaultEndRatio = (safeDefaultEnd - safeDomainStart).toDouble() / domainSpan
+        val newStartRatio = (newStart - safeDomainStart).toDouble() / domainSpan
+        val newEndRatio = (newStart + oldSpan - safeDomainStart).toDouble() / domainSpan
+        setWindow(newStartRatio, newEndRatio)
     }
 
     /** 回到 [reset] 设定的默认视野与位置。 */
@@ -298,7 +333,7 @@ object TrendChartMath {
     private const val DAY_MILLIS = 24L * HOUR_MILLIS
 
     /** Y 轴自适应时的数值稳定带：变化不超过该值就沿用旧轴，避免拖动时逐帧抖动。 */
-    private const val Y_AXIS_STABLE_MMHG = 2
+    private const val Y_AXIS_STABLE_MMHG = 20
 
     /** 缩放下限的像素目标：可视窗口再窄也至少覆盖约 16dp 的刻度间隔。 */
     private const val MIN_PIXELS_PER_TICK_DP = 16f
@@ -357,7 +392,7 @@ object TrendChartMath {
 
         val firstMillis = points.minOf { it.timestamp }
         val lastMillis = points.maxOf { it.timestamp }
-        val minSpan = minDefaultViewportSpan(range)
+        val minSpan = minDefaultViewportSpan(range).coerceAtMost(safeWindowEnd - safeWindowStart)
 
         if (lastMillis - firstMillis >= minSpan) {
             val padding = viewportPadding(firstMillis, lastMillis, minSpan)
@@ -380,7 +415,7 @@ object TrendChartMath {
     private fun viewportPadding(firstMillis: Long, lastMillis: Long, minSpan: Long): Long {
         val dataSpan = (lastMillis - firstMillis).coerceAtLeast(0L)
         val proportional = (dataSpan / 12L).coerceAtLeast(MINUTE_MILLIS * 30L)
-        return proportional.coerceIn(MINUTE_MILLIS * 20L, minSpan)
+        return proportional.coerceIn(minOf(MINUTE_MILLIS * 20L, minSpan), minSpan)
     }
 
     /**
@@ -555,18 +590,36 @@ object TrendChartMath {
      *   避免拖动时逐帧抖动；
      * - 上下界吸附到 10 mmHg 网格，主刻度间隔优先取 10 mmHg。
      */
-    fun stableYAxis(previous: TrendYAxis, visible: List<TrendPoint>): TrendYAxis {
+    fun stableYAxis(
+        previous: TrendYAxis,
+        visible: List<TrendPoint>,
+        targetSystolic: Int? = null,
+        targetDiastolic: Int? = null
+    ): TrendYAxis {
         if (visible.isEmpty()) return previous
-        val dataMin = visible.minOf { minOf(it.diastolic, it.systolic) }
-            .coerceIn(TrendSeriesCalculator.CHART_SAFE_MIN, TrendSeriesCalculator.CHART_SAFE_MAX)
-        val dataMax = visible.maxOf { maxOf(it.diastolic, it.systolic) }
-            .coerceIn(TrendSeriesCalculator.CHART_SAFE_MIN, TrendSeriesCalculator.CHART_SAFE_MAX)
+        val values = buildList {
+            visible.forEach { point ->
+                add(point.systolic.coerceIn(
+                    TrendSeriesCalculator.CHART_SAFE_MIN,
+                    TrendSeriesCalculator.CHART_SAFE_MAX
+                ))
+                add(point.diastolic.coerceIn(20, 200))
+            }
+            add(TrendSeriesCalculator.REFERENCE_DIASTOLIC)
+            add(TrendSeriesCalculator.REFERENCE_SYSTOLIC)
+            targetSystolic?.takeIf {
+                it in TrendSeriesCalculator.CHART_SAFE_MIN..TrendSeriesCalculator.CHART_SAFE_MAX
+            }?.let(::add)
+            targetDiastolic?.takeIf { it in 20..200 }?.let(::add)
+        }
+        val dataMin = values.min()
+        val dataMax = values.max()
 
         val target = buildYAxis(dataMin, dataMax)
-        val mustExpand = dataMin < target.min || dataMax > target.max
+        val mustExpand = dataMin < previous.min || dataMax > previous.max
         val shrunkEnough =
-            (previous.min - target.min >= Y_AXIS_STABLE_MMHG) ||
-                (target.max - previous.max >= Y_AXIS_STABLE_MMHG)
+            (target.min - previous.min > Y_AXIS_STABLE_MMHG) ||
+                (previous.max - target.max > Y_AXIS_STABLE_MMHG)
         val next = if (mustExpand || shrunkEnough) target else previous
         // 兜底：任何情况下都不允许轴裁掉可视数据。
         if (dataMin >= next.min && dataMax <= next.max) return next

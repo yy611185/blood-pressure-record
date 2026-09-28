@@ -46,7 +46,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -238,8 +237,17 @@ fun MeasurementReadingCard(
     val relationError = systolic != null && diastolic != null && diastolic >= systolic
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (removable) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "第 ${index + 1} 组",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (removable) {
                     IconButton(onClick = onRemove) {
                         Icon(Icons.Default.DeleteOutline, contentDescription = "删除第${index + 1}组读数")
                     }
@@ -334,10 +342,6 @@ fun MeasurementReadingCard(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            if (index == 0) {
-                Text("建议连续测两次，间隔 1–2 分钟。", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
     }
 }
 
@@ -396,7 +400,7 @@ private fun CompactNumberField(
             ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = colors.primary,
-                unfocusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = colors.outlineVariant.copy(alpha = 0.45f),
                 focusedContainerColor = colors.surface,
                 unfocusedContainerColor = colors.surface,
                 errorContainerColor = colors.surface
@@ -404,17 +408,7 @@ private fun CompactNumberField(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(AppDimensions.numberFieldHeight)
-                .semantics { contentDescription = accessibleLabel },
-            placeholder = {
-                // 占位符与输入文字共用同一套垂直度量，避免占位态与输入态高度不一致。
-                Text(
-                    "—",
-                    fontSize = numberSize,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    color = colors.onSurfaceVariant.copy(alpha = 0.45f)
-                )
-            }
+                .semantics { contentDescription = accessibleLabel }
         )
         Text(
             unit,

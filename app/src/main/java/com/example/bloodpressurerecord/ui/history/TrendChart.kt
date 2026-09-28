@@ -67,6 +67,7 @@ import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import com.example.bloodpressurerecord.domain.model.displayLabel
 import com.example.bloodpressurerecord.ui.theme.WarmError
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -254,8 +255,10 @@ fun SessionTimeSeriesDualLineChart(
     // 都走同一个副作用，避免出现多份互不一致的重置代码。
     val activeResetToken = controller?.resetToken ?: 0
 
-    // 默认视野：聚焦真实有数据的区间。范围切换或跨零点才重置，
-    // 同一天内新增记录不会把用户已经缩放/平移过的视野拉回去。
+    // 默认视野随记录刷新；仅首次、跨零点或显式恢复时跳转。
+    // 其余数据更新保留用户已经缩放/平移过的绝对时间窗口。
+    var appliedDay by remember(series.range) { mutableStateOf<LocalDate?>(null) }
+    var appliedResetToken by remember(series.range) { mutableIntStateOf(activeResetToken) }
     LaunchedEffect(series, domainStart, domainEnd, activeResetToken) {
         val (defaultStart, defaultEnd) = TrendChartMath.defaultViewport(
             points = series.points,
@@ -263,12 +266,20 @@ fun SessionTimeSeriesDualLineChart(
             windowStart = domainStart,
             windowEndInclusive = domainEnd
         )
-        viewport.reset(domainStart, domainEnd, defaultStart, defaultEnd)
-        claimScroll = false
-        // 视窗回到默认时，Inspect / 手工选中的节点、竖向指示线与高亮一并撤销。
-        if (activeResetToken != 0) {
+        val today = Instant.ofEpochMilli(domainEnd).atZone(zoneId).toLocalDate()
+        val explicitlyReset = activeResetToken != appliedResetToken
+        if (appliedDay == null || appliedDay != today || explicitlyReset) {
+            viewport.reset(domainStart, domainEnd, defaultStart, defaultEnd)
+            claimScroll = false
+        } else {
+            viewport.updateDomain(domainStart, domainEnd, defaultStart, defaultEnd)
+        }
+        // 只消费新增的复位信号；旧 token 不会在后续数据更新时反复清选中。
+        if (explicitlyReset) {
             onPointSelected(null)
         }
+        appliedDay = today
+        appliedResetToken = activeResetToken
     }
 
     val viewportStart = viewport.startMillis()
@@ -289,9 +300,14 @@ fun SessionTimeSeriesDualLineChart(
     // 决定（带滞回，避免拖动时逐帧抖动），始终不裁切可视数据。
     // 用 range 作 key，范围切换时回到该范围的初始轴。
     var yAxis by remember(series.range) { mutableStateOf(series.yAxis) }
-    LaunchedEffect(visiblePoints) {
+    LaunchedEffect(visiblePoints, targetSystolic, targetDiastolic) {
         if (visiblePoints.isNotEmpty()) {
-            yAxis = TrendChartMath.stableYAxis(yAxis, visiblePoints)
+            yAxis = TrendChartMath.stableYAxis(
+                yAxis,
+                visiblePoints,
+                targetSystolic,
+                targetDiastolic
+            )
         }
     }
     // 手势回调不在组合作用域内，用 rememberUpdatedState 读取最新的 Y 轴与选中点，
@@ -471,17 +487,16 @@ fun SessionTimeSeriesDualLineChart(
                     }
 
                     /** 单击 / 双击分流：双击复位视窗并撤销这次单击。 */
-                    fun resolveTap(position: Offset) {
-                        val now = SystemClock.uptimeMillis()
+                    fun resolveTap(position: Offset, tapUptimeMillis: Long) {
                         val isDoubleTap = lastTapAt != 0L &&
-                            now - lastTapAt in
+                            tapUptimeMillis - lastTapAt in
                             gestureConfig.doubleTapMinTimeMillis..gestureConfig.doubleTapTimeoutMillis &&
                             (position - lastTapPosition).getDistance() <= gestureConfig.touchSlop
                         if (isDoubleTap) {
                             lastTapAt = 0L
                             resetViewport()
                         } else {
-                            lastTapAt = now
+                            lastTapAt = tapUptimeMillis
                             lastTapPosition = position
                             handleTap(position)
                         }
@@ -509,109 +524,113 @@ fun SessionTimeSeriesDualLineChart(
                         event.changes.forEach { it.consume() }
                     }
 
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val startedWithMultiplePointers = down.pressed
-                        var mode = ChartGestureMode.PENDING
-                        // 仅统计单指移动：多指手势（捏合）的位移不应参与点按判定。
-                        var singlePointerMovement = 0f
-                        var sawMultiplePointers = startedWithMultiplePointers
-                        val downAt = SystemClock.uptimeMillis()
+                    try {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var mode = ChartGestureMode.PENDING
+                            // 仅统计单指移动：多指手势（捏合）的位移不应参与点按判定。
+                            var singlePointerMovement = 0f
+                            var sawMultiplePointers = false
+                            val downAt = SystemClock.uptimeMillis()
 
-                        while (true) {
-                            val event = if (mode == ChartGestureMode.PENDING) {
-                                val remaining =
-                                    gestureConfig.longPressTimeoutMillis -
-                                        (SystemClock.uptimeMillis() - downAt)
-                                if (remaining > 0) {
-                                    withTimeoutOrNull(remaining) { awaitPointerEvent() }
+                            while (true) {
+                                val event = if (mode == ChartGestureMode.PENDING) {
+                                    val remaining =
+                                        gestureConfig.longPressTimeoutMillis -
+                                            (SystemClock.uptimeMillis() - downAt)
+                                    if (remaining > 0) {
+                                        withTimeoutOrNull(remaining) { awaitPointerEvent() }
+                                    } else {
+                                        null
+                                    }
                                 } else {
-                                    null
+                                    awaitPointerEvent()
                                 }
-                            } else {
-                                awaitPointerEvent()
-                            }
 
-                            if (event == null) {
-                                // 长按达时且按住的是一根手指（没有移动）：
-                                // 进入数据检查模式。有明显移动就不抢，交还页面。
-                                if (singlePointerMovement > gestureConfig.touchSlop) break
-                                mode = ChartGestureMode.SCRUBBING
-                                claimScroll = true
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                scrubTo(down.position.x)
-                                continue
-                            }
+                                if (event == null) {
+                                    // 长按达时且按住的是一根手指（没有移动）：
+                                    // 进入数据检查模式。有明显移动就不抢，交还页面。
+                                    if (singlePointerMovement > gestureConfig.touchSlop) break
+                                    mode = ChartGestureMode.SCRUBBING
+                                    claimScroll = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    scrubTo(down.position.x)
+                                    continue
+                                }
 
-                            val pressed = event.changes.filter { it.pressed }
-                            if (pressed.isEmpty()) break
-                            val pointerCount = event.changes.count { it.pressed }
-                            if (pointerCount > 1) sawMultiplePointers = true
-                            if (pointerCount == 1 &&
-                                (mode == ChartGestureMode.PENDING ||
-                                    mode == ChartGestureMode.SCRUBBING)
-                            ) {
-                                singlePointerMovement += event.calculatePan().getDistance()
-                            }
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.isEmpty()) break
+                                val pointerCount = event.changes.count { it.pressed }
+                                if (pointerCount > 1) sawMultiplePointers = true
+                                if (pointerCount == 1 &&
+                                    (mode == ChartGestureMode.PENDING ||
+                                        mode == ChartGestureMode.SCRUBBING)
+                                ) {
+                                    singlePointerMovement += event.calculatePan().getDistance()
+                                }
 
-                            when (mode) {
-                                ChartGestureMode.PENDING -> {
-                                    val pan = event.calculatePan()
-                                    val zoomChange = event.calculateZoom()
-                                    when {
-                                        pointerCount > 1 || abs(zoomChange - 1f) > 0.005f -> {
-                                            mode = ChartGestureMode.ZOOMING
-                                            claimScroll = true
-                                            applyTransform(event, zoomChange, Offset.Zero)
-                                        }
-                                        // 只有放大过才平移；未放大时横向拖动无意义，
-                                        // 不接管手势，页面纵向滚动照常。
-                                        abs(pan.x) > abs(pan.y) &&
-                                            abs(pan.x) > gestureConfig.touchSlop &&
-                                            viewport.zoom > TrendChartMath.PAN_ZOOM_THRESHOLD -> {
-                                            mode = ChartGestureMode.PANNING
-                                            claimScroll = true
-                                            applyTransform(event, 1f, pan)
-                                        }
-                                        singlePointerMovement > gestureConfig.touchSlop -> {
-                                            // 纵向拖动：不接管手势，交还给页面滚动。
-                                            break
+                                when (mode) {
+                                    ChartGestureMode.PENDING -> {
+                                        val pan = event.calculatePan()
+                                        val zoomChange = event.calculateZoom()
+                                        when {
+                                            pointerCount > 1 || abs(zoomChange - 1f) > 0.005f -> {
+                                                mode = ChartGestureMode.ZOOMING
+                                                claimScroll = true
+                                                applyTransform(event, zoomChange, Offset.Zero)
+                                            }
+                                            // 只有放大过才平移；未放大时横向拖动无意义，
+                                            // 不接管手势，页面纵向滚动照常。
+                                            abs(pan.x) > abs(pan.y) &&
+                                                abs(pan.x) > gestureConfig.touchSlop &&
+                                                viewport.zoom > TrendChartMath.PAN_ZOOM_THRESHOLD -> {
+                                                mode = ChartGestureMode.PANNING
+                                                claimScroll = true
+                                                applyTransform(event, 1f, pan)
+                                            }
+                                            singlePointerMovement > gestureConfig.touchSlop -> {
+                                                // 纵向拖动：不接管手势，交还给页面滚动。
+                                                break
+                                            }
                                         }
                                     }
-                                }
 
-                                ChartGestureMode.PANNING -> {
-                                    applyTransform(event, 1f, event.calculatePan())
-                                }
+                                    ChartGestureMode.PANNING -> {
+                                        applyTransform(event, 1f, event.calculatePan())
+                                    }
 
-                                ChartGestureMode.ZOOMING -> {
-                                    applyTransform(
-                                        event,
-                                        event.calculateZoom(),
-                                        event.calculatePan()
-                                    )
-                                }
+                                    ChartGestureMode.ZOOMING -> {
+                                        applyTransform(
+                                            event,
+                                            event.calculateZoom(),
+                                            event.calculatePan()
+                                        )
+                                    }
 
-                                ChartGestureMode.SCRUBBING -> {
-                                    scrubTo(pressed.first().position.x)
-                                    event.changes.forEach { it.consume() }
+                                    ChartGestureMode.SCRUBBING -> {
+                                        scrubTo(pressed.first().position.x)
+                                        event.changes.forEach { it.consume() }
+                                    }
                                 }
                             }
-                        }
 
-                        if (mode == ChartGestureMode.PENDING) {
-                            when {
-                                // 双指轻点：按手势起点吸附一次，方便快速定位。
-                                sawMultiplePointers &&
-                                    singlePointerMovement <= gestureConfig.touchSlop ->
-                                    scrubTo(down.position.x)
+                            if (mode == ChartGestureMode.PENDING) {
+                                when {
+                                    // 双指轻点：按手势起点吸附一次，方便快速定位。
+                                    sawMultiplePointers &&
+                                        singlePointerMovement <= gestureConfig.touchSlop ->
+                                        scrubTo(down.position.x)
 
-                                // 单指轻点：选中 / 打开当日明细（见 resolveTap）。
-                                !sawMultiplePointers &&
-                                    singlePointerMovement <= gestureConfig.tapSlop ->
-                                    resolveTap(down.position)
+                                    // 单指轻点：选中 / 打开当日明细（见 resolveTap）。
+                                    !sawMultiplePointers &&
+                                        singlePointerMovement <= gestureConfig.tapSlop ->
+                                        resolveTap(down.position, down.uptimeMillis)
+                                }
                             }
+                            claimScroll = false
                         }
+                    } finally {
+                        // pointerInput 的 key 随数据变化时协程会取消；及时释放父级滚动。
                         claimScroll = false
                     }
                 }
@@ -703,7 +722,12 @@ fun SessionTimeSeriesDualLineChart(
                             drawPointNode(
                                 x = x,
                                 y = scaler.yOfValue(point.systolic),
-                                color = valueColor(point.systolic, palette.systolic, palette.outlier),
+                                color = valueColor(
+                                    point.systolic,
+                                    palette.systolic,
+                                    palette.outlier,
+                                    TrendSeriesCalculator.CHART_SAFE_MIN..TrendSeriesCalculator.CHART_SAFE_MAX
+                                ),
                                 backgroundColor = palette.nodeBackground,
                                 ringColor = palette.selectionRing,
                                 selected = isPointSelected
@@ -713,7 +737,12 @@ fun SessionTimeSeriesDualLineChart(
                             drawPointNode(
                                 x = x,
                                 y = scaler.yOfValue(point.diastolic),
-                                color = valueColor(point.diastolic, palette.diastolic, palette.outlier),
+                                color = valueColor(
+                                    point.diastolic,
+                                    palette.diastolic,
+                                    palette.outlier,
+                                    20..200
+                                ),
                                 backgroundColor = palette.nodeBackground,
                                 ringColor = palette.selectionRing,
                                 selected = isPointSelected
@@ -972,8 +1001,13 @@ private fun DrawScope.drawPointNode(
     )
 }
 
-private fun valueColor(value: Int, normalColor: Color, outlierColor: Color): Color {
-    return if (value in TrendSeriesCalculator.CHART_SAFE_MIN..TrendSeriesCalculator.CHART_SAFE_MAX) {
+private fun valueColor(
+    value: Int,
+    normalColor: Color,
+    outlierColor: Color,
+    validRange: IntRange
+): Color {
+    return if (value in validRange) {
         normalColor
     } else {
         outlierColor

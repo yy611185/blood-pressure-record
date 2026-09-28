@@ -475,6 +475,73 @@ class TrendChartMathTest {
         assertTrue(single.second <= windowEnd)
     }
 
+    @Test
+    fun allRangeDefaultViewportFitsDataDomainShorterThanFourteenDays() {
+        val now = 1_800_000_000_000L
+        val oneDay = 24L * 60L * 60L * 1_000L
+        for (domainSpan in listOf(1L, 3L * oneDay, 13L * oneDay)) {
+            val domainStart = now - domainSpan
+            val sampleTime = domainStart + domainSpan / 2L
+            val (start, end) = TrendChartMath.defaultViewport(
+                points = listOf(point(timestamp = sampleTime)),
+                range = TrendRange.ALL,
+                windowStart = domainStart,
+                windowEndInclusive = now
+            )
+            assertTrue("$domainSpan: invalid window", start < end)
+            assertTrue("$domainSpan: sample clipped", sampleTime in start..end)
+            assertTrue("$domainSpan: outside domain", start >= domainStart && end <= now)
+        }
+    }
+
+    @Test
+    fun allRangeDefaultViewportHandlesPointsAtBothEndsOfOneMillisecondDomain() {
+        val start = 1_800_000_000_000L
+        val end = start + 1L
+
+        val actual = TrendChartMath.defaultViewport(
+            points = listOf(point(timestamp = start), point(timestamp = end)),
+            range = TrendRange.ALL,
+            windowStart = start,
+            windowEndInclusive = end
+        )
+
+        assertEquals(start to end, actual)
+    }
+
+    @Test
+    fun viewportDataRefreshPreservesManualAbsoluteWindowAndUpdatesResetTarget() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(0L, 10_000L, 4_000L, 8_000L)
+        viewport.zoomBy(2f, focusRatio = 0.5, minSpanRatio = 0.001)
+        viewport.panBy(0.1)
+        val manualStart = viewport.startMillis()
+        val manualEnd = viewport.endMillis()
+
+        viewport.updateDomain(0L, 12_000L, 8_000L, 12_000L)
+
+        assertEquals(manualStart, viewport.startMillis())
+        assertEquals(manualEnd, viewport.endMillis())
+        assertTrue(!viewport.isAtDefault)
+
+        viewport.resetToDefault()
+        assertEquals(8_000L, viewport.startMillis())
+        assertEquals(12_000L, viewport.endMillis())
+    }
+
+    @Test
+    fun viewportDataRefreshClampsManualWindowWhenDomainContracts() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(0L, 10_000L, 0L, 10_000L)
+        viewport.zoomBy(2f, focusRatio = 0.5, minSpanRatio = 0.001)
+        viewport.panBy(100.0)
+
+        viewport.updateDomain(0L, 7_000L, 3_000L, 7_000L)
+
+        assertEquals(2_000L, viewport.startMillis())
+        assertEquals(7_000L, viewport.endMillis())
+    }
+
     /** 跨月、跨年的聚焦视野仍能给出可读刻度。 */
     @Test
     fun focusedViewportProducesReadableTicksAcrossMonthAndYearBoundaries() {
@@ -586,6 +653,35 @@ class TrendChartMathTest {
 
         // 变化未超过稳定带：沿用旧轴，拖动时不会逐帧抖动。
         assertEquals(previous, axis)
+    }
+
+    @Test
+    fun stableYAxisShrinksAfterLeavingExtremeReadingsWithoutHidingReferences() {
+        val extreme = TrendYAxis(min = 20, max = 300, tickStep = 50)
+        val ordinary = listOf(point(timestamp = 0L, systolic = 126, diastolic = 80))
+
+        val axis = TrendChartMath.stableYAxis(extreme, ordinary)
+
+        assertTrue(axis.max < extreme.max)
+        assertTrue(axis.min > extreme.min)
+        assertTrue(90 in axis.min..axis.max)
+        assertTrue(140 in axis.min..axis.max)
+    }
+
+    @Test
+    fun stableYAxisIncludesLegalLowDiastolicAndUserTargets() {
+        val previous = TrendYAxis(min = 60, max = 160, tickStep = 10)
+        val low = listOf(point(timestamp = 0L, systolic = 120, diastolic = 20))
+
+        val axis = TrendChartMath.stableYAxis(
+            previous = previous,
+            visible = low,
+            targetSystolic = 180,
+            targetDiastolic = 30
+        )
+
+        assertTrue(20 in axis.min..axis.max)
+        assertTrue(180 in axis.min..axis.max)
     }
 
     private fun point(
