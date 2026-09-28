@@ -3,7 +3,6 @@ package com.example.bloodpressurerecord.ui.record
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -94,7 +93,6 @@ fun AddMeasurementScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showExitDialog by remember { mutableStateOf(false) }
-    var selectedGroup by rememberSaveable { mutableStateOf(0) }
     // 录入主线为三步：读数 → 情况 → 完成（不再有静坐引导页）。
     var step by rememberSaveable { mutableIntStateOf(0) }
     var savedSystolic by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -255,60 +253,43 @@ fun AddMeasurementScreen(
                 )
             }
             if (step == 0) {
-            Text("连续测量，更接近真实血压", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
             val readings = listOf(state.reading1, state.reading2) + state.extraReadings
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
             ) {
                 readings.forEachIndexed { index, reading ->
-                    val complete = reading.systolic.isNotBlank() && reading.diastolic.isNotBlank()
-                    SessionChoiceChip(
-                        text = "第 ${index + 1} 组${if (complete) " ✓" else ""}",
-                        selected = index == selectedGroup.coerceIn(0, readings.lastIndex),
-                        onClick = { selectedGroup = index }
+                    MeasurementReadingCard(
+                        index = index,
+                        reading = reading,
+                        removable = index >= 2,
+                        onSystolicChange = {
+                            when (index) {
+                                0 -> viewModel.updateReading1Systolic(it)
+                                1 -> viewModel.updateReading2Systolic(it)
+                                else -> viewModel.updateExtraReadingSystolic(index - 2, it)
+                            }
+                        },
+                        onDiastolicChange = {
+                            when (index) {
+                                0 -> viewModel.updateReading1Diastolic(it)
+                                1 -> viewModel.updateReading2Diastolic(it)
+                                else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
+                            }
+                        },
+                        onPulseChange = {
+                            when (index) {
+                                0 -> viewModel.updateReading1Pulse(it)
+                                1 -> viewModel.updateReading2Pulse(it)
+                                else -> viewModel.updateExtraReadingPulse(index - 2, it)
+                            }
+                        },
+                        onRemove = { viewModel.removeExtraReading(index - 2) }
                     )
                 }
             }
-            val index = selectedGroup.coerceIn(0, readings.lastIndex)
-            val reading = readings[index]
-            MeasurementReadingCard(
-                index = index,
-                reading = reading,
-                removable = index >= 2,
-                onSystolicChange = {
-                    when (index) {
-                        0 -> viewModel.updateReading1Systolic(it)
-                        1 -> viewModel.updateReading2Systolic(it)
-                        else -> viewModel.updateExtraReadingSystolic(index - 2, it)
-                    }
-                },
-                onDiastolicChange = {
-                    when (index) {
-                        0 -> viewModel.updateReading1Diastolic(it)
-                        1 -> viewModel.updateReading2Diastolic(it)
-                        else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
-                    }
-                },
-                onPulseChange = {
-                    when (index) {
-                        0 -> viewModel.updateReading1Pulse(it)
-                        1 -> viewModel.updateReading2Pulse(it)
-                        else -> viewModel.updateExtraReadingPulse(index - 2, it)
-                    }
-                },
-                onRemove = {
-                    viewModel.removeExtraReading(index - 2)
-                    selectedGroup = (index - 1).coerceAtLeast(0)
-                }
-            )
             DashedAddGroupButton(
                 enabled = readings.size < MeasurementInputRules.MAX_READING_COUNT,
-                onClick = {
-                    viewModel.addNextReadingGroup()
-                    selectedGroup = readings.size
-                }
+                onClick = viewModel::addNextReadingGroup
             )
 
             if (state.avgSystolic != null && state.avgDiastolic != null) {

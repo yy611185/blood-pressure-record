@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -41,12 +42,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -80,13 +83,14 @@ fun TrendScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // 选中读数提升到页面层：范围切换时重置，不受图表重组影响。
-    var selectedPoint by remember(uiState.range) { mutableStateOf<TrendPoint?>(null) }
+    var selectedPointId by remember(uiState.range) { mutableStateOf<String?>(null) }
     // 「恢复」按钮与图表双击复位共用的控制器：缩放、平移、视窗、选中一次归零。
     val chartController = remember(uiState.range) { TrendChartController() }
     // 上一条 / 下一条在**当前图表真正显示的数据点**之间移动：
     // 7 天 / 30 天是每次原始测量，「全部」是每日平均。
     // 不能按日期 ±1 天推算——有些日期根本没有记录。
     val displayPoints = uiState.series.points
+    val selectedPoint = displayPoints.firstOrNull { it.id == selectedPointId }
 
     uiState.dayDetails?.let { details ->
         TrendDayDetailsSheet(
@@ -127,7 +131,7 @@ fun TrendScreen(
             selected = uiState.range,
             label = { it.label },
             onSelected = { range ->
-                selectedPoint = null
+                selectedPointId = null
                 viewModel.setRange(range)
             }
         )
@@ -152,7 +156,7 @@ fun TrendScreen(
             targetDiastolic = uiState.targetDiastolic,
             chartController = chartController,
             onMetricChange = viewModel::setMetric,
-            onPointSelected = { point -> selectedPoint = point },
+            onPointSelected = { point -> selectedPointId = point?.id },
             onViewDayRecords = viewModel::openPointDetails
         )
 
@@ -531,8 +535,9 @@ private fun TrendCard(
  * - 明细：打开**当前显示点**所属日期的原始测量明细（真实数据库记录）；
  * - 恢复：图表回到该范围首次打开时的默认状态（与双击复位同一套重置逻辑）。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrendSelectionReadout(
+internal fun TrendSelectionReadout(
     points: List<TrendPoint>,
     selectedPoint: TrendPoint?,
     onPointSelected: (TrendPoint?) -> Unit,
@@ -540,9 +545,9 @@ private fun TrendSelectionReadout(
     onResetChart: () -> Unit
 ) {
     if (points.isEmpty()) return
-    val displayed = selectedPoint?.takeIf { point -> points.any { it.id == point.id } }
-        ?: points.last()
-    val isSelected = selectedPoint != null
+    val currentSelection = points.firstOrNull { it.id == selectedPoint?.id }
+    val displayed = currentSelection ?: points.last()
+    val isSelected = currentSelection != null
     // 极端情况下选中点可能已经不在新序列里，索引兜底为最后一点，避免越界。
     val index = points.indexOfFirst { it.id == displayed.id }.takeIf { it >= 0 } ?: points.lastIndex
     val canGoPrevious = index > 0
@@ -552,10 +557,9 @@ private fun TrendSelectionReadout(
     } else {
         MaterialTheme.colorScheme.surfaceVariant
     }
-    val readoutDescription = remember(displayed.id, isSelected, index, points.size) {
+    val readoutDescription = remember(displayed, isSelected, index, points.size) {
         buildReadoutDescription(displayed, isSelected, index, points.size)
     }
-    // 数据较长时顶部栏保持单行，避免长按逐点切换导致图表上下跳动。
     val supportingText = remember(displayed) { buildSelectionSupportingText(displayed) }
 
     Column(
@@ -568,85 +572,121 @@ private fun TrendSelectionReadout(
             },
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = buildReadoutTitle(displayed, isSelected),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-                Text(
-                    "${displayed.systolic}/${displayed.diastolic} mmHg",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = NumberFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
-                )
-            }
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                StatusChip(
-                    text = CategoryPresentation.label(displayed.category),
-                    isAbnormal = !displayed.category.equals("NORMAL", true),
-                    status = bloodPressureVisualStatus(displayed.category, false)
-                )
-                if (displayed.containsHighRiskReading) {
-                    StatusChip(
-                        "高风险",
-                        true,
-                        status = bloodPressureVisualStatus(displayed.category, true)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val stacked = maxWidth / LocalDensity.current.fontScale < 260.dp
+            val readings: @Composable (Modifier) -> Unit = { modifier ->
+                Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = buildReadoutTitle(displayed, isSelected),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Text(
+                        "${displayed.systolic}/${displayed.diastolic} mmHg",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = NumberFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            val statuses: @Composable () -> Unit = {
+                val chips: @Composable () -> Unit = {
+                    StatusChip(
+                        text = CategoryPresentation.label(displayed.category),
+                        isAbnormal = !displayed.category.equals("NORMAL", true),
+                        status = bloodPressureVisualStatus(displayed.category, false)
+                    )
+                    if (displayed.containsHighRiskReading) {
+                        StatusChip(
+                            "高风险",
+                            true,
+                            status = bloodPressureVisualStatus(displayed.category, true)
+                        )
+                    }
+                }
+                if (stacked) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) { chips() }
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) { chips() }
+                }
+            }
+            if (stacked) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    readings(Modifier.fillMaxWidth())
+                    statuses()
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    readings(Modifier.weight(1f))
+                    statuses()
                 }
             }
         }
         Text(
             text = supportingText,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        // 四枚按钮同处一行、等宽平分：普通手机宽度（约 360dp）下每枚仍有
-        // 约 65dp，配合 13sp 文案与 4dp 内边距不会拥挤、截断或换行。
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ReadoutAction(
-                text = "上一条",
-                onClick = { onPointSelected(points[index - 1]) },
-                enabled = canGoPrevious,
-                modifier = Modifier.weight(1f)
-            )
-            ReadoutAction(
-                text = "下一条",
-                onClick = { onPointSelected(points[index + 1]) },
-                enabled = canGoNext,
-                modifier = Modifier.weight(1f)
-            )
-            ReadoutAction(
-                text = "明细",
-                onClick = { onViewDayRecords(displayed) },
-                modifier = Modifier.weight(1f)
-            )
-            ReadoutAction(
-                text = "恢复",
-                onClick = onResetChart,
-                modifier = Modifier.weight(1f)
-            )
+        // 按实际文字宽度选择四列、两列或单列，保留系统字体缩放。
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val textMeasurer = rememberTextMeasurer()
+            val actionStyle = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp)
+            val labelWidth = with(density) {
+                textMeasurer.measure("上一条", actionStyle, softWrap = false).size.width.toDp()
+            }
+            val minActionWidth = maxOf(48.dp, labelWidth + 8.dp)
+            val columns = when {
+                maxWidth >= minActionWidth * 4 + 12.dp -> 4
+                maxWidth >= minActionWidth * 2 + 4.dp -> 2
+                else -> 1
+            }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                maxItemsInEachRow = columns,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                ReadoutAction(
+                    text = "上一条",
+                    onClick = { onPointSelected(points[index - 1]) },
+                    enabled = canGoPrevious,
+                    modifier = Modifier.weight(1f)
+                )
+                ReadoutAction(
+                    text = "下一条",
+                    onClick = { onPointSelected(points[index + 1]) },
+                    enabled = canGoNext,
+                    modifier = Modifier.weight(1f)
+                )
+                ReadoutAction(
+                    text = "明细",
+                    onClick = { onViewDayRecords(displayed) },
+                    modifier = Modifier.weight(1f)
+                )
+                ReadoutAction(
+                    text = "恢复",
+                    onClick = onResetChart,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
 
 /**
- * 操作区按钮：等宽、单行、居中，最小高度 44dp。
- *
- * 不用 Material 默认的 64dp 最小宽度 + 12dp 内边距——四枚并排时会直接放不下，
- * 在窄屏上被压成「换行 / 截断」。这里显式收紧内边距，同时保留足够触摸高度。
+ * 操作区按钮由父布局按文字宽度重排，触控高度至少 48dp。
  */
 @Composable
 private fun ReadoutAction(
@@ -658,15 +698,13 @@ private fun ReadoutAction(
     TextButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.heightIn(min = 44.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+        modifier = modifier.heightIn(min = 48.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium,
-            fontSize = 13.sp,
-            maxLines = 1,
-            softWrap = false
+            fontSize = 13.sp
         )
     }
 }
