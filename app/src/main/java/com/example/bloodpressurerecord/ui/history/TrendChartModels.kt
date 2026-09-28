@@ -489,6 +489,90 @@ object TrendChartMath {
         return best ?: nearestPoint(visible, projection.timeAtX(x))
     }
 
+    /** 脉搏为空的记录仍可通过时间位置选中，只是不参与节点命中。 */
+    fun hitTestPulse(
+        projection: ChartProjection,
+        visible: List<TrendPoint>,
+        x: Float,
+        y: Float,
+        touchRadiusPx: Float
+    ): TrendPoint? {
+        val nearestByTime = nearestPoint(visible, projection.timeAtX(x))
+        if (nearestByTime?.pulse == null) return nearestByTime
+        visible.forEach { point ->
+            val pulse = point.pulse ?: return@forEach
+            if (abs(x - projection.xOfTime(point.timestamp)) <= touchRadiusPx &&
+                abs(y - projection.yOfValue(pulse)) <= touchRadiusPx
+            ) return point
+        }
+        return nearestByTime
+    }
+
+    /** 每个像素桶保留脉搏极值。缺值不进采样，而由原始序列的段号阻止跨缺值连线。 */
+    fun samplePulse(points: List<TrendPoint>, maxPoints: Int): List<TrendPoint> {
+        val present = points.filter { it.pulse != null }
+        if (present.size <= maxPoints || maxPoints < 4) return present
+        val bucketCount = (maxPoints / 4).coerceAtLeast(1)
+        val bucketSize = ceil(points.size / bucketCount.toDouble()).toInt().coerceAtLeast(1)
+        val selected = linkedSetOf<Int>()
+        var start = 0
+        while (start < points.size) {
+            val end = (start + bucketSize).coerceAtMost(points.size)
+            val valid = (start until end).filter { points[it].pulse != null }
+            if (valid.isNotEmpty()) {
+                selected += valid.first()
+                selected += valid.last()
+                selected += valid.minBy { points[it].pulse!! }
+                selected += valid.maxBy { points[it].pulse!! }
+            }
+            start = end
+        }
+        // 每桶最多四点，桶数不超过 maxPoints / 4，因此首尾与所有桶极值都能保留。
+        return selected.sorted().map(points::get)
+    }
+
+    /** null 与超过两天的缺测都另起一段；降采样后仍可据此断开折线。 */
+    fun pulseSegmentIds(points: List<TrendPoint>, gapMillis: Long): Map<String, Int> {
+        val segments = HashMap<String, Int>(points.size)
+        var segment = 0
+        var previous: TrendPoint? = null
+        points.forEach { point ->
+            if (point.pulse == null) {
+                segment++
+                previous = null
+            } else {
+                if (previous != null && point.timestamp - previous!!.timestamp > gapMillis) segment++
+                segments[point.id] = segment
+                previous = point
+            }
+        }
+        return segments
+    }
+
+    fun stablePulseYAxis(previous: TrendYAxis?, visible: List<TrendPoint>): TrendYAxis? {
+        val values = visible.mapNotNull { it.pulse }
+        if (values.isEmpty()) return previous
+        val min = values.min()
+        val max = values.max()
+        val target = pulseYAxis(min, max)
+        if (previous == null || min < previous.min || max > previous.max) return target
+        val slack = maxOf(20, previous.tickStep * 3)
+        return if (target.min - previous.min >= slack || previous.max - target.max >= slack) {
+            target
+        } else previous
+    }
+
+    fun pulseYAxis(dataMin: Int, dataMax: Int): TrendYAxis {
+        val spread = (dataMax - dataMin).coerceAtLeast(0)
+        val padding = maxOf(5, spread / 5)
+        val desiredSpan = spread + padding * 2
+        val step = listOf(5, 10, 20, 25, 50, 100, 200, 500)
+            .firstOrNull { desiredSpan <= it * 7 } ?: 1000
+        val min = floor((dataMin - padding) / step.toDouble()).toInt() * step
+        val max = ceil((dataMax + padding) / step.toDouble()).toInt() * step
+        return TrendYAxis(min, maxOf(max, min + step), step)
+    }
+
     /**
      * 绘制与连线共用的降采样。
      *

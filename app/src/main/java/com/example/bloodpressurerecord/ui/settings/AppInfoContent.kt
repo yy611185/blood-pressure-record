@@ -84,6 +84,15 @@ object AppReleaseNotes {
     val notes = listOf(
         ReleaseNote(
             version = AppInfoContent.CURRENT_VERSION,
+            summary = "新增独立脉搏趋势图，与血压趋势共用时间窗口和选点操作。",
+            changes = listOf(
+                "血压图下方新增脉搏趋势图，使用独立的次/分动态纵轴；两张图同步缩放、平移和恢复。",
+                "顶部读数显示所选记录的脉搏；缺少脉搏时显示“—”，脉搏图不补值、不跨缺失记录连线。",
+                "上一条、下一条和明细继续按全部血压记录操作；没有脉搏数据时，血压图照常显示。"
+            )
+        ),
+        ReleaseNote(
+            version = "2.0.3",
             summary = "修复趋势图崩溃与交互问题，改善小屏幕、大字号和深色模式下的读数显示。",
             changes = listOf(
                 "修复全部记录在仅有一条记录或时间跨度较短时可能崩溃的问题。",

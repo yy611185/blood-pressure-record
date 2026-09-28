@@ -98,6 +98,10 @@ object TrendSeriesCalculator {
                 ?.map { it.diastolic }
                 ?.average()
                 ?.roundToInt(),
+            averagePulse = sorted.mapNotNull { it.pulse }
+                .takeIf { it.isNotEmpty() }
+                ?.average()
+                ?.roundToInt(),
             yAxis = calculateYAxis(points, targetSystolic, targetDiastolic),
             rangeStart = seriesStart,
             rangeEnd = seriesEnd,
