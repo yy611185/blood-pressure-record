@@ -57,7 +57,7 @@
 
 ### 安装
 
-- **获取方式**：通过 [Releases](https://github.com/yy611185/blood-pressure-record/releases) 下载自签名 Release APK 安装（首次安装需允许"未知来源"）
+- **获取方式**：通过 [Latest Release](https://github.com/yy611185/blood-pressure-record/releases/latest) 下载最新自签名 Release APK（首次安装需允许"未知来源"）\n- **发布规则**：正式 APK/AAB 只放在 GitHub Releases，源码仓库不保存安装包
 - 最低支持 **Android 8.0 (API 26)**，建议 Android 10+
 
 ### 第一次使用（3 步）
