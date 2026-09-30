@@ -42,6 +42,7 @@ export BP_RELEASE_KEY_PASSWORD='<key密码>'
 密钥文件与密码的保管要求：
 
 - `release.jks` **只存在你的本机**，用 `base64 -i release.jks | tr -d '\n'` 转码后存入 GitHub Secret `ANDROID_KEYSTORE_BASE64`（仅 CI 构建用）
+- 上述 4 项必须添加在仓库 `Settings → Secrets and variables → Actions → Repository secrets`，不要放在 Variables 或未绑定到工作流的 Environment secrets
 - 密码至少 16 位，与 GitHub Secret（`ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD`）一致
 - **离线备份密钥库文件 + 密码**（加密压缩包存两处），丢失 = 永远无法更新已发布应用
 
