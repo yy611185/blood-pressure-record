@@ -43,3 +43,14 @@ Thumbs.db
 *.tar.gz
 *.hprof
 *.log
+# Local AI/design tooling and private test material
+.impeccable/
+.qoder/
+.zcode/
+design_handoff_warm_ui/
+测试照片/
+
+# OCR/device samples: keep instructions, ignore local sample media
+scan_samples/*
+!scan_samples/README.md
+
