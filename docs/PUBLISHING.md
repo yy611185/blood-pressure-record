@@ -41,8 +41,8 @@ export BP_RELEASE_KEY_PASSWORD='<key密码>'
 
 密钥文件与密码的保管要求：
 
-- `release.jks` **只存在你的本机**，用 `base64 -i release.jks | tr -d '\n'` 转码后存入 GitHub Secret `KEYSTORE_BASE64`（仅 CI 构建用）
-- 密码至少 16 位，与 GitHub Secret（`KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`）一致
+- `release.jks` **只存在你的本机**，用 `base64 -i release.jks | tr -d '\n'` 转码后存入 GitHub Secret `ANDROID_KEYSTORE_BASE64`（仅 CI 构建用）
+- 密码至少 16 位，与 GitHub Secret（`ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD`）一致
 - **离线备份密钥库文件 + 密码**（加密压缩包存两处），丢失 = 永远无法更新已发布应用
 
 ### 1.3 构建命令
@@ -133,7 +133,7 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 - [ ] 用 §1.3 的 `assembleRelease` 产物（**不是** debug 包，也**不是** Play 用的 AAB）
 - [ ] 首次分发时向对方说明：这是自签名应用，安装需允许"未知来源"，后续更新**必须用同一把密钥签名**的 APK 才能覆盖安装
 - [ ] 分发文件命名建议：`blood-pressure-record-v2.0.1-release.apk`（含版本号，避免混淆）
-- [ ] 分发渠道：网盘 / 微信传输（**注意**：导出的健康数据 Excel 是明文，APK 本身不含用户数据，可放心传）
+- [ ] 分发渠道：**GitHub Releases**（正式 APK/AAB 不提交到源码目录；如需临时转发，可再通过网盘 / 微信发送 Release 中的 APK）
 - [ ] 升级分发：直接发新版本 APK，用户覆盖安装即可（签名一致时数据保留）
 
 > ⚠️ **红线：路径 A 与 B 不要混用签名**
