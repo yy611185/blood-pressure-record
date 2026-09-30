@@ -27,6 +27,7 @@ keystore/*
 !keystore/.gitignore
 
 # Release artifacts
+/releases/
 *.apk
 *.aab
 *.tgz
