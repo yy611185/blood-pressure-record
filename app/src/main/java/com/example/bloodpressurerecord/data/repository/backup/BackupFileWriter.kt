@@ -108,7 +108,7 @@ class BackupFileWriter {
             val width = when (MEASUREMENT_COLUMNS[index]) {
                 "record_id" -> 38
                 "measured_at", "created_at", "updated_at" -> 21
-                "note" -> 36
+                "note", "symptom_note", "factor_note" -> 36
                 else -> 13
             }
             sheet.setColumnWidth(index, width * 256)
@@ -194,7 +194,10 @@ class BackupFileWriter {
             item.note,
             item.createdAt,
             item.updatedAt,
-            item.averageStrategy
+            item.averageStrategy,
+            item.timePeriod,
+            item.symptomNote,
+            item.factorNote
         )
     }
 
@@ -238,7 +241,10 @@ class BackupFileWriter {
             "note",
             "created_at",
             "updated_at",
-            "average_strategy"
+            "average_strategy",
+            "time_period",
+            "symptom_note",
+            "factor_note"
         )
         val READING_COLUMNS = listOf(
             "record_id",

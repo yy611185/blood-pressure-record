@@ -24,7 +24,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -502,17 +501,6 @@ fun SettingsDisplayScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         SettingsSwitchRow("显示趋势图", uiState.showTrendChart, viewModel::setShowTrendChart)
         SettingsSwitchRow("启用高风险提醒", uiState.highRiskAlertEnabled, viewModel::setHighRiskAlertEnabled)
         SettingsSwitchRow("大字号显示", uiState.isLargeTextEnabled, viewModel::setLargeTextEnabled)
-        SettingsSwitchRow(
-            "平均值不计第一组读数",
-            uiState.discardFirstReading,
-            viewModel::setDiscardFirstReading
-        )
-        Text(
-            "家庭自测第一次读数常偏高。开启后，新保存的记录计算平均值时会弃用第一组" +
-                "（仅一组时仍按全部计算）；高风险提醒始终检查每一组原始读数。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 

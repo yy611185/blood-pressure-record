@@ -163,7 +163,7 @@ class SessionFormComponentsTest {
     fun save_button_is_disabled_when_readings_are_incomplete() {
         composeRule.setContent {
             BloodPressureRecordTheme {
-                SessionSaveBottomBar(
+                InlineSessionAction(
                     canSave = false,
                     disabledReason = "至少填写两组有效读数后才能保存。",
                     isSaving = false,

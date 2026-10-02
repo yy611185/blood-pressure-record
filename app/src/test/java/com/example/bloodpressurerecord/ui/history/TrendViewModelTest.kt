@@ -7,6 +7,8 @@ import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.TrendRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
 import com.example.bloodpressurerecord.domain.model.TrendRecord
+import com.example.bloodpressurerecord.domain.model.DayNightAverage
+import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.ui.home.MainDispatcherRule
 import java.time.LocalDate
 import java.time.ZoneId
@@ -28,6 +30,59 @@ class TrendViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
     private val zone = ZoneId.of("Asia/Taipei")
+
+    @Test
+    fun `昼夜统计沿用七天三十天全部范围且不额外包含跨午夜窗口外记录`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val now = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val repo = FakeTrendRepository()
+        repo.records.value = listOf(0L, 6L, 7L, 29L, 30L).flatMapIndexed { index, daysAgo ->
+            val date = today.minusDays(daysAgo)
+            listOf(
+                TrendRecord(
+                    id = "day-$daysAgo",
+                    measuredAt = date.atTime(6, 0).atZone(zone).toInstant().toEpochMilli(),
+                    systolic = 120 + index * 20,
+                    diastolic = 80 + index * 10,
+                    pulse = null,
+                    category = "NORMAL"
+                ),
+                TrendRecord(
+                    id = "night-$daysAgo",
+                    measuredAt = date.atTime(if (daysAgo == 0L) 0 else 22, 0)
+                        .atZone(zone).toInstant().toEpochMilli(),
+                    systolic = 110 + index * 20,
+                    diastolic = 70 + index * 10,
+                    pulse = null,
+                    category = "NORMAL"
+                )
+            )
+        }
+        val vm = TrendViewModel(
+            trendRepository = repo,
+            settingsRepository = FakeSettingsRepository(),
+            clockMillis = { now },
+            zoneId = zone,
+            computeContext = UnconfinedTestDispatcher(testScheduler),
+            todayTicks = flowOf(today)
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+
+        vm.setRange(TrendRange.DAYS_7)
+        advanceUntilIdle()
+        assertEquals(DayNightAverage(130, 85, 2, 2), vm.uiState.value.insights.daytimeAverage)
+        assertEquals(DayNightAverage(120, 75, 2, 2), vm.uiState.value.insights.nighttimeAverage)
+
+        vm.setRange(TrendRange.DAYS_30)
+        advanceUntilIdle()
+        assertEquals(DayNightAverage(150, 95, 4, 4), vm.uiState.value.insights.daytimeAverage)
+        assertEquals(DayNightAverage(140, 85, 4, 4), vm.uiState.value.insights.nighttimeAverage)
+
+        vm.setRange(TrendRange.ALL)
+        advanceUntilIdle()
+        assertEquals(DayNightAverage(160, 100, 5, 5), vm.uiState.value.insights.daytimeAverage)
+        assertEquals(DayNightAverage(150, 90, 5, 5), vm.uiState.value.insights.nighttimeAverage)
+    }
 
     @Test
     fun `打开趋势页之后新增的记录会进入折线`() = runTest {
@@ -66,6 +121,9 @@ class TrendViewModelTest {
         assertEquals(listOf("later"), vm.uiState.value.series.points.map { it.id })
         assertEquals(1, vm.uiState.value.series.rawRecordCount)
         assertEquals(1, vm.uiState.value.series.points.single().recordCount)
+        assertEquals(1, vm.uiState.value.insights.recordCount)
+        assertEquals(1, vm.uiState.value.insights.recordDays)
+        assertEquals(128 to 82, vm.uiState.value.insights.periodAverage)
     }
 
     private class FakeTrendRepository : TrendRepository {

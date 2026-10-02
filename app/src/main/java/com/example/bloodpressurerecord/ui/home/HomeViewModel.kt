@@ -5,13 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
-import com.example.bloodpressurerecord.ui.common.MeasurementTags
+import com.example.bloodpressurerecord.domain.time.MeasurementPeriod
 import com.example.bloodpressurerecord.ui.common.SessionFormLogic
 import com.example.bloodpressurerecord.ui.common.SessionDraftStore
 import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
 import com.example.bloodpressurerecord.ui.common.SessionFormDraft
 import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
-import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
@@ -29,31 +28,30 @@ import kotlinx.coroutines.withContext
 
 data class HomeUiState(
     val measuredAtText: String = DateTimeInputFormatter.nowText(),
-    val scene: String = MeasurementTags.defaultSceneFor(java.time.LocalTime.now().hour),
+    val scene: String = MeasurementPeriod.labelFor(System.currentTimeMillis()),
     val reading1: SessionReadingInputUi = SessionReadingInputUi(),
     val reading2: SessionReadingInputUi = SessionReadingInputUi(),
     val extraReadings: List<SessionReadingInputUi> = emptyList(),
-    val showExtraReadings: Boolean = false,
     val note: String = "",
-    val selectedSymptoms: Set<String> = emptySet(),
-    val selectedFactors: Set<String> = emptySet(),
+    val legacySymptoms: Set<String> = emptySet(),
+    val symptomNote: String = "",
+    val factorNote: String = "",
     val avgSystolic: Int? = null,
     val avgDiastolic: Int? = null,
     val avgPulse: Int? = null,
     val averagedGroupCount: Int = 0,
-    val discardedFirstReading: Boolean = false,
     val containsHighRiskReading: Boolean = false,
     val categoryLabel: String = "待计算",
     val formMessage: String = "",
     val formMessageIsError: Boolean = false,
     val saved: Boolean = false,
+    val savedSessionId: String? = null,
+    val completionDeadlineMillis: Long? = null,
     val showHighRiskDialog: Boolean = false,
     val showAbnormalConfirmDialog: Boolean = false,
     val abnormalConfirmMessage: String = "",
     val isSaving: Boolean = false,
     val canSave: Boolean = false,
-    val canContinueReadings: Boolean = false,
-    val readingsDisabledReason: String = "至少填写两组有效读数。",
     val saveDisabledReason: String = "把两组的高压和低压都填好，就可以保存啦",
     val isDirty: Boolean = false
 )
@@ -61,83 +59,50 @@ data class HomeUiState(
 class HomeViewModel(
     private val repository: BloodPressureRepository,
     highRiskAlertEnabled: Flow<Boolean> = flowOf(true),
-    discardFirstReading: Flow<Boolean> = flowOf(false),
-    savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     draftRepository: SessionDraftRepository? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) : ViewModel() {
-    // 注意：discardFirstEnabled 必须先于 localState 初始化，
-    // 因为恢复草稿时 recomputeDerived 会读取当前平均策略。
     private val highRiskAlertsEnabled = highRiskAlertEnabled.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = true
     )
-    private val discardFirstEnabled = discardFirstReading.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = false
-    )
     private val draftStore = SessionDraftStore(savedStateHandle, "add_session", draftRepository)
     private val restoredDraft = draftStore.restore()
     private val localState = MutableStateFlow(
-        restoredDraft?.toHomeUiState() ?: HomeUiState()
+        (restoredDraft?.toHomeUiState() ?: HomeUiState()).copy(
+            savedSessionId = savedStateHandle.get<String>("add_session.saved_id") ?: restoredDraft?.sessionId,
+            saved = savedStateHandle["add_session.completed"] ?: false,
+            completionDeadlineMillis = savedStateHandle["add_session.deadline"]
+        )
     )
     private var pendingSaveInput: SaveSessionInput? = null
     private var pendingSaveContainsHighRisk: Boolean = false
 
     val uiState: StateFlow<HomeUiState> = localState.asStateFlow()
 
-    init {
-        // 策略切换时同步刷新预览的平均值和分级。
-        viewModelScope.launch {
-            discardFirstEnabled.collect {
-                localState.update { state -> recomputeDerived(state) }
-            }
-        }
-    }
-
-    private fun averageStrategy(): AverageStrategy =
-        if (discardFirstEnabled.value) AverageStrategy.DISCARD_FIRST else AverageStrategy.ALL
-
-    // 用户手动选过场景后，改测量时间不再自动跟随时段。
-    private var sceneManuallyChosen: Boolean = restoredDraft != null
-
     fun updateMeasuredAtText(value: String) = updateForm { state ->
-        val next = state.copy(measuredAtText = value)
-        if (sceneManuallyChosen) {
-            next
-        } else {
-            val hour = DateTimeInputFormatter.parse(value)
-                ?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).hour }
-            if (hour != null) next.copy(scene = MeasurementTags.defaultSceneFor(hour)) else next
-        }
+        val period = DateTimeInputFormatter.parse(value)?.let { MeasurementPeriod.labelFor(it) }
+        state.copy(measuredAtText = value, scene = period ?: state.scene)
     }
 
-    fun updateScene(value: String) {
-        sceneManuallyChosen = true
-        updateForm { it.copy(scene = value) }
+    fun updateSymptomNote(value: String) = updateForm { it.copy(symptomNote = value) }
+    fun updateFactorNote(value: String) = updateForm { it.copy(factorNote = value) }
+
+    fun editSavedSession() {
+        if (localState.value.savedSessionId == null) return
+        savedStateHandle["add_session.completed"] = false
+        savedStateHandle.remove<Long>("add_session.deadline")
+        localState.update { it.copy(saved = false, completionDeadlineMillis = null, formMessage = "") }
     }
 
-    fun toggleFactor(factor: String) {
-        localState.update { state ->
-            val next = state.selectedFactors.toMutableSet()
-            if (!next.add(factor)) next.remove(factor)
-            state.copy(selectedFactors = next, isDirty = true)
+    fun closeSavedSession() {
+        draftStore.clear()
+        listOf("saved_id", "completed", "deadline").forEach {
+            savedStateHandle.remove<Any>("add_session.$it")
         }
-        persistDraft()
-    }
-
-    fun toggleThirdReading(show: Boolean) {
-        localState.update { state ->
-            val nextExtras = if (show) {
-                if (state.extraReadings.isEmpty()) listOf(SessionReadingInputUi()) else state.extraReadings
-            } else {
-                emptyList()
-            }
-            recomputeDerived(state.copy(showExtraReadings = show, extraReadings = nextExtras))
-        }
-        persistDraft()
+        localState.value = HomeUiState()
     }
 
     fun addNextReadingGroup() = updateReading { state ->
@@ -148,7 +113,6 @@ class HomeViewModel(
             )
         }
         state.copy(
-            showExtraReadings = true,
             extraReadings = state.extraReadings + SessionReadingInputUi()
         )
     }
@@ -173,33 +137,13 @@ class HomeViewModel(
 
     fun removeExtraReading(index: Int) = updateReading { state ->
         state.copy(
-            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index },
-            showExtraReadings = state.extraReadings.size > 1
+            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index }
         )
-    }
-
-    fun updateNote(value: String) = updateForm { it.copy(note = value) }
-
-    fun toggleSymptom(symptom: String) {
-        localState.update { state ->
-            val next = state.selectedSymptoms.toMutableSet()
-            if (symptom == "无症状") {
-                if (symptom in next) next.clear() else {
-                    next.clear()
-                    next += symptom
-                }
-            } else {
-                next.remove("无症状")
-                if (!next.add(symptom)) next.remove(symptom)
-            }
-            state.copy(selectedSymptoms = next, isDirty = true)
-        }
-        persistDraft()
     }
 
     fun onSaveClicked() {
         val state = localState.value
-        if (state.isSaving) return
+        if (state.isSaving || state.saved || state.showAbnormalConfirmDialog || state.showHighRiskDialog) return
         val measuredAt = DateTimeInputFormatter.parse(state.measuredAtText)
         if (measuredAt == null) {
             localState.update {
@@ -217,7 +161,7 @@ class HomeViewModel(
         val validate = SessionFormLogic.validateAndBuildReadings(
             readings = allReadings(state),
             requiredCount = 2,
-            strategy = averageStrategy()
+            strategy = AverageStrategy.ALL
         )
         if (validate.error != null) {
             localState.update { it.copy(formMessage = validate.error, formMessageIsError = true) }
@@ -225,12 +169,14 @@ class HomeViewModel(
         }
         val input = SaveSessionInput(
             measuredAt = measuredAt,
-            scene = state.scene,
+            scene = MeasurementPeriod.labelFor(measuredAt),
             note = state.note,
-            // 症状与影响因素合并存入同一标签列表，展示时按已知因素表拆分。
-            symptoms = (state.selectedSymptoms + state.selectedFactors).toList(),
+            symptoms = state.legacySymptoms.toList(),
+            timePeriod = MeasurementPeriod.labelFor(measuredAt),
+            symptomNote = state.symptomNote,
+            factorNote = state.factorNote,
             readings = validate.readings,
-            averageStrategy = averageStrategy()
+            averageStrategy = AverageStrategy.ALL
         )
         pendingSaveInput = input
         pendingSaveContainsHighRisk = validate.containsHighRiskReading
@@ -273,7 +219,7 @@ class HomeViewModel(
     }
 
     fun discardDraft() {
-        draftStore.clear()
+        closeSavedSession()
         pendingSaveInput = null
         pendingSaveContainsHighRisk = false
     }
@@ -304,32 +250,44 @@ class HomeViewModel(
             )
         }
         viewModelScope.launch {
-            repository.saveSession(input)
-                .onSuccess {
-                    // 用 saved 标志驱动导航，避免界面依赖文案字符串做控制流。
-                    // 表单重置为当前时间，场景恢复按时段自动预选。
-                    sceneManuallyChosen = false
-                    localState.value = HomeUiState(
-                        measuredAtText = DateTimeInputFormatter.nowText(),
-                        scene = MeasurementTags.defaultSceneFor(java.time.LocalTime.now().hour),
-                        formMessage = "保存成功。",
-                        saved = true
+            val existingId = localState.value.savedSessionId
+            val result = if (existingId == null) {
+                repository.saveSession(input)
+            } else {
+                repository.updateSession(existingId, input).map { existingId }
+            }
+            result.onSuccess { sessionId ->
+                val deadline = nowMillis() + 5_000
+                savedStateHandle["add_session.saved_id"] = sessionId
+                savedStateHandle["add_session.completed"] = true
+                savedStateHandle["add_session.deadline"] = deadline
+                localState.update {
+                    it.copy(
+                        saved = true,
+                        savedSessionId = sessionId,
+                        completionDeadlineMillis = deadline,
+                        isSaving = false,
+                        isDirty = false,
+                        formMessage = "",
+                        showHighRiskDialog = false,
+                        showAbnormalConfirmDialog = false
                     )
-                    draftStore.clear()
-                    pendingSaveInput = null
-                    pendingSaveContainsHighRisk = false
                 }
-                .onFailure { throwable ->
-                    localState.update {
-                        it.copy(
-                            formMessage = "保存失败：${throwable.message ?: "请稍后重试"}",
-                            formMessageIsError = true,
-                            isSaving = false,
-                            showHighRiskDialog = false,
-                            showAbnormalConfirmDialog = false
-                        )
-                    }
+                draftStore.clear()
+                persistDraft()
+                pendingSaveInput = null
+                pendingSaveContainsHighRisk = false
+            }.onFailure { throwable ->
+                localState.update {
+                    it.copy(
+                        formMessage = "保存失败：${throwable.message ?: "请稍后重试"}",
+                        formMessageIsError = true,
+                        isSaving = false,
+                        showHighRiskDialog = false,
+                        showAbnormalConfirmDialog = false
+                    )
                 }
+            }
         }
     }
 
@@ -354,7 +312,11 @@ class HomeViewModel(
             scene = state.scene,
             readings = allReadings(state),
             note = state.note,
-            symptoms = state.selectedSymptoms + state.selectedFactors
+            symptoms = state.legacySymptoms,
+            timePeriod = state.scene,
+            symptomNote = state.symptomNote,
+            factorNote = state.factorNote,
+            sessionId = state.savedSessionId
         )
     }
 
@@ -362,7 +324,7 @@ class HomeViewModel(
         val derived = SessionFormLogic.recomputeDerived(
             readings = allReadings(state),
             requiredCount = 2,
-            strategy = averageStrategy()
+            strategy = AverageStrategy.ALL
         )
         val readingError = SessionFormLogic.saveDisabledReason(allReadings(state))
         return state.copy(
@@ -370,11 +332,8 @@ class HomeViewModel(
             avgDiastolic = derived.avgDiastolic,
             avgPulse = derived.avgPulse,
             averagedGroupCount = derived.averagedGroupCount,
-            discardedFirstReading = derived.discardedFirstReading,
             containsHighRiskReading = derived.containsHighRiskReading,
             categoryLabel = derived.categoryLabel,
-            canContinueReadings = readingError == null,
-            readingsDisabledReason = readingError.orEmpty(),
             canSave = readingError == null,
             saveDisabledReason = readingError.orEmpty()
         )
@@ -396,18 +355,17 @@ class HomeViewModel(
         val first = readings.getOrNull(0) ?: SessionReadingInputUi()
         val second = readings.getOrNull(1) ?: SessionReadingInputUi()
         val extras = readings.drop(2)
-        val (symptomTags, factorTags) = MeasurementTags.splitSymptomsAndFactors(symptoms)
         return recomputeDerived(
             HomeUiState(
                 measuredAtText = measuredAtText,
-                scene = scene,
+                scene = DateTimeInputFormatter.parse(measuredAtText)?.let { MeasurementPeriod.labelFor(it) } ?: scene,
                 reading1 = first,
                 reading2 = second,
                 extraReadings = extras,
-                showExtraReadings = extras.isNotEmpty(),
                 note = note,
-                selectedSymptoms = symptomTags,
-                selectedFactors = factorTags,
+                legacySymptoms = symptoms,
+                symptomNote = symptomNote.orEmpty(),
+                factorNote = factorNote.orEmpty(),
                 formMessage = "已恢复未保存的测量草稿。",
                 isDirty = true
             )

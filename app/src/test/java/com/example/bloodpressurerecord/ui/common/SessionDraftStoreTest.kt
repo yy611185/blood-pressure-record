@@ -19,7 +19,11 @@ class SessionDraftStoreTest {
                 SessionReadingInputUi("124", "84", "74")
             ),
             note = "未保存备注",
-            symptoms = setOf("头晕")
+            symptoms = setOf("头晕"),
+            timePeriod = "上午",
+            symptomNote = "有点头晕",
+            factorNote = "刚喝咖啡",
+            sessionId = "saved-session-1"
         )
 
         store.save(draft)
@@ -37,7 +41,11 @@ class SessionDraftStoreTest {
             scene = "晨起",
             readings = listOf(SessionReadingInputUi("123", "81", "68")),
             note = "跨页面恢复",
-            symptoms = setOf("头晕", "咖啡")
+            symptoms = setOf("头晕", "咖啡"),
+            timePeriod = "上午",
+            symptomNote = "头晕",
+            factorNote = "咖啡",
+            sessionId = "saved-session-2"
         )
 
         SessionDraftStore(SavedStateHandle(), "add", repository).persist(draft).getOrThrow()

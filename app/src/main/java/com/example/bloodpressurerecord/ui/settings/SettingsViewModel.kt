@@ -7,7 +7,6 @@ import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
-import com.example.bloodpressurerecord.data.repository.backup.BackupContainerFormatException
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import com.example.bloodpressurerecord.data.repository.backup.BackupPassphraseException
@@ -25,7 +24,6 @@ data class SettingsUiState(
     val showTrendChart: Boolean = true,
     val appearanceMode: String = "system",
     val showBuddy: Boolean = true,
-    val discardFirstReading: Boolean = false,
     val morningReminderEnabled: Boolean = false,
     val morningReminderTime: String = "07:30",
     val eveningReminderEnabled: Boolean = false,
@@ -89,7 +87,6 @@ class SettingsViewModel(
                         showTrendChart = bundle.appSettings.showTrendChart,
                         appearanceMode = bundle.appSettings.appearanceMode,
                         showBuddy = bundle.appSettings.showBuddy,
-                        discardFirstReading = bundle.appSettings.discardFirstReading,
                         morningReminderEnabled = bundle.appSettings.morningReminderEnabled,
                         morningReminderTime = bundle.appSettings.morningReminderTime,
                         eveningReminderEnabled = bundle.appSettings.eveningReminderEnabled,
@@ -127,10 +124,6 @@ class SettingsViewModel(
 
     fun setShowBuddy(enabled: Boolean) {
         viewModelScope.launch { repository.setShowBuddy(enabled) }
-    }
-
-    fun setDiscardFirstReading(enabled: Boolean) {
-        viewModelScope.launch { repository.setDiscardFirstReading(enabled) }
     }
 
     fun setMorningReminderEnabled(enabled: Boolean) {

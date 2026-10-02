@@ -122,7 +122,10 @@ interface MeasurementSessionDao {
     @Query(
         """
         SELECT measuredAt,
-               CASE WHEN note IS NULL THEN NULL ELSE SUBSTR(note, 1, 40) END AS noteSummary,
+               SUBSTR(COALESCE(NULLIF(
+                   COALESCE(symptomNote, '') ||
+                   CASE WHEN symptomNote IS NOT NULL AND factorNote IS NOT NULL THEN ' · ' ELSE '' END ||
+                   COALESCE(factorNote, ''), ''), note), 1, 40) AS noteSummary,
                highRiskAlertTriggered AS containsHighRiskReading
         FROM measurement_sessions
         WHERE measuredAt >= :startInclusive AND measuredAt < :endExclusive
@@ -136,8 +139,12 @@ interface MeasurementSessionDao {
 
     @Query(
         """
-        SELECT id, measuredAt, avgSystolic, avgDiastolic, avgPulse, category, scene,
-               CASE WHEN note IS NULL THEN NULL ELSE SUBSTR(note, 1, 40) END AS noteSummary,
+        SELECT id, measuredAt, avgSystolic, avgDiastolic, avgPulse, category,
+               COALESCE(timePeriod, scene) AS scene,
+               SUBSTR(COALESCE(NULLIF(
+                   COALESCE(symptomNote, '') ||
+                   CASE WHEN symptomNote IS NOT NULL AND factorNote IS NOT NULL THEN ' · ' ELSE '' END ||
+                   COALESCE(factorNote, ''), ''), note), 1, 40) AS noteSummary,
                highRiskAlertTriggered AS containsHighRiskReading
         FROM measurement_sessions
         WHERE measuredAt >= :startInclusive AND measuredAt < :endExclusive

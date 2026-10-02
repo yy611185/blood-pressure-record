@@ -29,5 +29,9 @@ data class MeasurementSessionEntity(
     @ColumnInfo(name = "highRiskAlertTriggered")
     val containsHighRiskReading: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    /** null 表示旧版记录；升级时不回填历史场景。 */
+    val timePeriod: String? = null,
+    val symptomNote: String? = null,
+    val factorNote: String? = null
 )

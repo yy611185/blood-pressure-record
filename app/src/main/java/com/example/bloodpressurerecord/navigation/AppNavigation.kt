@@ -50,7 +50,6 @@ import com.example.bloodpressurerecord.ui.settings.SettingsAppGuideScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoReleaseNotesScreen
 import java.time.LocalDate
-import kotlinx.coroutines.flow.map
 
 private val TopLevelRoutes = setOf(
     AppDestination.Measure.route,
@@ -186,7 +185,12 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     AddMeasurementScreen(
                         viewModel = homeVm,
                         onBack = { navController.popBackStack() },
-                        onSaved = { navController.popBackStack() }
+                        onSaved = {
+                            navController.navigate(AppDestination.Measure.route) {
+                                popUpTo(navController.graph.findStartDestination().id)
+                                launchSingleTop = true
+                            }
+                        }
                     )
                 }
                 composable(AppDestination.History.route) { backStack ->
@@ -236,16 +240,18 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                         EditSessionViewModel.provideFactory(
                             sessionId = sessionId,
                             repository = application.appContainer.bloodPressureRepository,
-                            discardFirstReading = application.appContainer.settingsRepository
-                                .observeSettings()
-                                .map { it.appSettings.discardFirstReading },
                             draftRepository = application.appContainer.sessionDraftRepository
                         )
                     }
                     val vm: EditSessionViewModel = viewModel(factory = editFactory)
                     EditSessionScreen(
                         viewModel = vm,
-                        onSaved = { navController.popBackStack() },
+                        onSaved = {
+                            navController.navigate(AppDestination.Measure.route) {
+                                popUpTo(navController.graph.findStartDestination().id)
+                                launchSingleTop = true
+                            }
+                        },
                         onBack = { navController.popBackStack() }
                     )
                 }

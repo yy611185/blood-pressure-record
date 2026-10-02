@@ -382,7 +382,7 @@ private fun <T> SelectionRow(
     onSelected: (T) -> Unit
 ) {
     val selectedIndex = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
-    // 与「我的 → 平均值怎么算」共用同一个分段胶囊组件，视觉与无障碍语义保持一致。
+    // 使用分段胶囊组件，保留一致的视觉与无障碍语义。
     SegmentedPillGroup(
         options = options.map { it.second },
         selectedIndex = selectedIndex,

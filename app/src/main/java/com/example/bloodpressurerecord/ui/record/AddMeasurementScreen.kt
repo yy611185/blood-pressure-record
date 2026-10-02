@@ -5,10 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,25 +23,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Button
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,38 +44,24 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.ui.common.AppTopBar
-import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.InlineSessionAction
 import com.example.bloodpressurerecord.ui.common.MeasurementDateTimePicker
-import com.example.bloodpressurerecord.ui.common.MeasurementTags
+import com.example.bloodpressurerecord.ui.common.SessionCompletedDialog
+import com.example.bloodpressurerecord.ui.common.SessionSupplementFields
+import com.example.bloodpressurerecord.ui.common.SessionAverageCard
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
-import com.example.bloodpressurerecord.ui.common.SessionChoiceChip
-import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
-import com.example.bloodpressurerecord.ui.home.Buddy
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
-import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
-import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
-import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 
-/** 存储值保持“无症状”不变，仅展示时使用口语化文案。 */
-private fun symptomLabel(symptom: String): String =
-    if (symptom == "无症状") "没有，挺好的" else symptom
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddMeasurementScreen(
     viewModel: HomeViewModel,
@@ -93,19 +70,11 @@ fun AddMeasurementScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showExitDialog by remember { mutableStateOf(false) }
-    // 录入主线为三步：读数 → 情况 → 完成（不再有静坐引导页）。
-    var step by rememberSaveable { mutableIntStateOf(0) }
-    var savedSystolic by rememberSaveable { mutableStateOf<Int?>(null) }
-    var savedDiastolic by rememberSaveable { mutableStateOf<Int?>(null) }
-    var savedCategory by rememberSaveable { mutableStateOf("") }
-    var savedRisk by rememberSaveable { mutableStateOf(false) }
-    var savedPulse by rememberSaveable { mutableStateOf<Int?>(null) }
-    var savedGroupCount by rememberSaveable { mutableIntStateOf(0) }
-    var savedDiscardedFirst by rememberSaveable { mutableStateOf(false) }
+    var showSupplement by rememberSaveable { mutableStateOf(false) }
     val requestBack = {
         when {
-            step == 2 -> onSaved()
-            step == 1 -> step = 0
+            state.saved -> { viewModel.closeSavedSession(); onSaved() }
+            showSupplement -> showSupplement = false
             state.isDirty -> showExitDialog = true
             else -> onBack()
         }
@@ -155,8 +124,16 @@ fun AddMeasurementScreen(
         )
     }
 
-    LaunchedEffect(state.saved) {
-        if (state.saved) step = 2
+    if (state.saved) {
+        SessionCompletedDialog(
+            avgSystolic = state.avgSystolic,
+            avgDiastolic = state.avgDiastolic,
+            measuredAtText = state.measuredAtText,
+            timePeriod = state.scene,
+            deadlineMillis = state.completionDeadlineMillis,
+            onEdit = { viewModel.editSavedSession(); showSupplement = false },
+            onClose = { viewModel.closeSavedSession(); onSaved() }
+        )
     }
 
     val topBarScroll = rememberHideOnScrollState()
@@ -172,32 +149,9 @@ fun AddMeasurementScreen(
             // 只在记录页外层加，不动全局 AppTopBar，避免其他已自行处理安全区的页面重复 inset。
             Box(modifier = Modifier.padding(top = statusBarTopPadding())) {
                 AppTopBar(
-                    title = when (step) {
-                        0 -> "记一次血压"
-                        1 -> "测的时候怎么样？"
-                        else -> "记好啦"
-                    },
+                    title = if (showSupplement) "补充情况" else "记一次血压",
                     onBack = requestBack,
-                    hideOnScroll = topBarScroll,
-                    actions = {
-                        Row(
-                            modifier = Modifier.semantics { contentDescription = "第 ${step + 1} 步，共 3 步" },
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            repeat(3) { index ->
-                                val color = when {
-                                    index == step -> MaterialTheme.colorScheme.primary
-                                    index < step -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
-                                }
-                                androidx.compose.foundation.layout.Box(
-                                    Modifier.width(if (index == step) 30.dp else 18.dp)
-                                        .height(6.dp)
-                                        .background(color, RoundedCornerShape(3.dp))
-                                )
-                            }
-                        }
-                    }
+                    hideOnScroll = topBarScroll
                 )
             }
         }
@@ -214,262 +168,84 @@ fun AddMeasurementScreen(
                 .padding(bottom = AppDimensions.pageBottomGap),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
-            // 读数页的「下一步 · 补充情况」与情况页的「保存这次记录」都作为
-            // 页面滚动内容末尾的普通主按钮，不再拥有独立白色 Dock、不随键盘上浮。
-            val action: @Composable () -> Unit = {
-                InlineSessionAction(
-                    canSave = when (step) {
-                        0 -> state.canContinueReadings
-                        1 -> state.canSave
-                        else -> true
-                    },
-                    disabledReason = when (step) {
-                        0 -> state.readingsDisabledReason
-                        1 -> state.saveDisabledReason
-                        else -> ""
-                    },
-                    isSaving = state.isSaving,
-                    buttonText = when (step) {
-                        0 -> "下一步 · 补充情况"
-                        1 -> "保存这次记录"
-                        else -> "完成"
-                    },
-                    onSave = {
-                        when (step) {
-                            0 -> step = 1
-                            1 -> {
-                                savedSystolic = state.avgSystolic
-                                savedDiastolic = state.avgDiastolic
-                                savedCategory = state.categoryLabel
-                                savedRisk = state.containsHighRiskReading
-                                savedPulse = state.avgPulse
-                                savedGroupCount = state.averagedGroupCount
-                                savedDiscardedFirst = state.discardedFirstReading
-                                viewModel.onSaveClicked()
-                            }
-                            else -> onSaved()
-                        }
-                    }
+            if (!showSupplement) {
+                Text("测量时间", style = MaterialTheme.typography.titleMedium)
+                MeasurementDateTimePicker(
+                    measuredAtText = state.measuredAtText,
+                    onMeasuredAtChange = viewModel::updateMeasuredAtText
                 )
-            }
-            if (step == 0) {
-            val readings = listOf(state.reading1, state.reading2) + state.extraReadings
-            Column(
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
-            ) {
-                readings.forEachIndexed { index, reading ->
-                    MeasurementReadingCard(
-                        index = index,
-                        reading = reading,
-                        removable = index >= 2,
-                        onSystolicChange = {
-                            when (index) {
-                                0 -> viewModel.updateReading1Systolic(it)
-                                1 -> viewModel.updateReading2Systolic(it)
-                                else -> viewModel.updateExtraReadingSystolic(index - 2, it)
-                            }
-                        },
-                        onDiastolicChange = {
-                            when (index) {
-                                0 -> viewModel.updateReading1Diastolic(it)
-                                1 -> viewModel.updateReading2Diastolic(it)
-                                else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
-                            }
-                        },
-                        onPulseChange = {
-                            when (index) {
-                                0 -> viewModel.updateReading1Pulse(it)
-                                1 -> viewModel.updateReading2Pulse(it)
-                                else -> viewModel.updateExtraReadingPulse(index - 2, it)
-                            }
-                        },
-                        onRemove = { viewModel.removeExtraReading(index - 2) }
-                    )
-                }
-            }
-            DashedAddGroupButton(
-                enabled = readings.size < MeasurementInputRules.MAX_READING_COUNT,
-                onClick = viewModel::addNextReadingGroup
-            )
-
-            if (state.avgSystolic != null && state.avgDiastolic != null) {
-                AverageResultCard(
-                    groupLabel = if (state.discardedFirstReading) {
-                        "不计第一组 · ${state.averagedGroupCount}组平均"
-                    } else {
-                        "${state.averagedGroupCount}组平均"
-                    },
-                    avgText = "${state.avgSystolic} / ${state.avgDiastolic}",
-                    avgPulse = state.avgPulse,
-                    categoryLabel = state.categoryLabel
-                )
-            }
-            if (state.containsHighRiskReading) {
-                Surface(shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.errorContainer) {
-                    Text("有读数达到高风险范围。请休息后复测，身体不适请及时就医。",
-                        modifier = Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer)
-                }
-            }
-            action()
-            }
-
-            if (step == 1) {
-            Text("本次平均 ${state.avgSystolic ?: "—"}/${state.avgDiastolic ?: "—"} mmHg",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary)
-            Text("什么时候测的？", style = MaterialTheme.typography.titleMedium)
-            MeasurementDateTimePicker(
-                measuredAtText = state.measuredAtText,
-                onMeasuredAtChange = viewModel::updateMeasuredAtText
-            )
-
-            Text("在什么情况下测的？", style = MaterialTheme.typography.titleMedium)
-            // 时段标签随测量时间自动预选；旧记录的历史标签（如“居家安静”）
-            // 不在标准列表时追加显示，保证选中态可见。
-            val sceneOptions = remember(state.scene) {
-                if (state.scene in MeasurementTags.scenes) {
-                    MeasurementTags.scenes
-                } else {
-                    MeasurementTags.scenes + state.scene
-                }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
-            ) {
-                sceneOptions.forEach { scene ->
-                    SessionChoiceChip(
-                        text = scene,
-                        selected = state.scene == scene,
-                        onClick = { viewModel.updateScene(scene) }
-                    )
-                }
-            }
-
-            Text("有没有不舒服的地方？", style = MaterialTheme.typography.titleMedium)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
-            ) {
-                MeasurementTags.symptoms.forEach { symptom ->
-                    SessionChoiceChip(
-                        text = symptomLabel(symptom),
-                        selected = symptom in state.selectedSymptoms,
-                        onClick = { viewModel.toggleSymptom(symptom) }
-                    )
-                }
-            }
-
-            val dangerSymptoms = state.selectedSymptoms.filter {
-                it == "胸闷或胸痛" || it == "视物模糊"
-            }
-            val highPressure = state.avgSystolic?.let { systolic ->
-                state.avgDiastolic?.let { diastolic ->
-                    CategoryCalculator.calculate(systolic, diastolic) in
-                        setOf(BloodPressureCategory.STAGE2, BloodPressureCategory.STAGE3)
-                }
-            } == true
-            if (dangerSymptoms.isNotEmpty() && (state.containsHighRiskReading || highPressure)) {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth()
+                val readings = listOf(state.reading1, state.reading2) + state.extraReadings
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
                 ) {
-                    Text(
-                        "血压偏高且伴有${dangerSymptoms.joinToString("、")}，请尽快就医或拨打 120。",
-                        modifier = Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            }
-
-                Text("有没有可能影响血压的情况？", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "比如刚喝了咖啡、没睡好，记下来方便对照数值。（可多选）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
-                ) {
-                    MeasurementTags.factors.forEach { factor ->
-                        SessionChoiceChip(
-                            text = factor,
-                            selected = factor in state.selectedFactors,
-                            onClick = { viewModel.toggleFactor(factor) }
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = state.note,
-                    onValueChange = viewModel::updateNote,
-                    placeholder = {
-                        Text(
-                            "想补充点什么？比如「早饭前测的」（选填）",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    minLines = 3
-                )
-                action()
-            }
-            if (step == 2) {
-                Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth().padding(top = 36.dp)) {
-                    Column(Modifier.padding(30.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Buddy(if (savedRisk) "STAGE3" else savedCategory, Modifier.size(96.dp, 90.dp))
-                        Text("记录保存好了", style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold)
-                        Text("${savedSystolic ?: "—"} / ${savedDiastolic ?: "—"}",
-                            style = MaterialTheme.typography.displayMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold)
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            StatusChip(savedCategory, isAbnormal = savedCategory != "正常")
-                            if (savedRisk) {
-                                StatusChip("高风险读数", isAbnormal = true,
-                                    status = BloodPressureVisualStatus.HIGH_RISK)
-                            }
-                        }
-                        Text(
-                            if (savedRisk) "这次有读数达到 180/120 以上。请先静坐休息后复测；如伴有胸痛、剧烈头痛、视物模糊、说话不清等，请立即就医或拨打 120。"
-                            else "今天也辛苦啦",
-                            modifier = Modifier.fillMaxWidth()
-                                .background(
-                                    if (savedRisk) MaterialTheme.colorScheme.errorContainer
-                                    else MaterialTheme.colorScheme.primaryContainer,
-                                    RoundedCornerShape(18.dp)
-                                ).padding(14.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            color = if (savedRisk) MaterialTheme.colorScheme.onErrorContainer
-                                else MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Text(
-                            buildString {
-                                append(if (savedDiscardedFirst) "弃第1组 · " else "")
-                                append("${savedGroupCount}组平均")
-                                savedPulse?.let { append(" · 脉搏 $it 次/分") }
+                    readings.forEachIndexed { index, reading ->
+                        MeasurementReadingCard(
+                            index = index,
+                            reading = reading,
+                            removable = index >= 2,
+                            onSystolicChange = {
+                                when (index) {
+                                    0 -> viewModel.updateReading1Systolic(it)
+                                    1 -> viewModel.updateReading2Systolic(it)
+                                    else -> viewModel.updateExtraReadingSystolic(index - 2, it)
+                                }
                             },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            onDiastolicChange = {
+                                when (index) {
+                                    0 -> viewModel.updateReading1Diastolic(it)
+                                    1 -> viewModel.updateReading2Diastolic(it)
+                                    else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
+                                }
+                            },
+                            onPulseChange = {
+                                when (index) {
+                                    0 -> viewModel.updateReading1Pulse(it)
+                                    1 -> viewModel.updateReading2Pulse(it)
+                                    else -> viewModel.updateExtraReadingPulse(index - 2, it)
+                                }
+                            },
+                            onRemove = { viewModel.removeExtraReading(index - 2) }
                         )
                     }
                 }
-                action()
+                DashedAddGroupButton(
+                    enabled = readings.size < MeasurementInputRules.MAX_READING_COUNT,
+                    onClick = viewModel::addNextReadingGroup
+                )
+
+                if (state.avgSystolic != null && state.avgDiastolic != null) {
+                    SessionAverageCard(state.avgSystolic, state.avgDiastolic, state.averagedGroupCount)
+                }
+                if (state.containsHighRiskReading) {
+                    Surface(shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.errorContainer) {
+                        Text("有读数达到高风险范围。请休息后复测，身体不适请及时就医。",
+                            modifier = Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+            }
+
+            if (showSupplement) {
+                SessionSupplementFields(
+                    symptomNote = state.symptomNote,
+                    factorNote = state.factorNote,
+                    onSymptomNoteChange = viewModel::updateSymptomNote,
+                    onFactorNoteChange = viewModel::updateFactorNote
+                )
+            }
+            InlineSessionAction(
+                canSave = state.canSave && !state.saved,
+                disabledReason = state.saveDisabledReason,
+                isSaving = state.isSaving,
+                buttonText = "保存记录",
+                onSave = viewModel::onSaveClicked
+            )
+            if (!showSupplement) {
+                TextButton(onClick = { showSupplement = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("补充情况（选填）")
+                }
             }
             if (state.formMessage.isNotBlank() && !state.isSaving && !state.saved) {
                 Text(
@@ -524,46 +300,5 @@ private fun DashedAddGroupButton(
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary
         )
-    }
-}
-
-@Composable
-private fun AverageResultCard(
-    groupLabel: String,
-    avgText: String,
-    avgPulse: Int?,
-    categoryLabel: String
-) {
-    val visualStatus = when (categoryLabel) {
-        "正常" -> BloodPressureVisualStatus.NORMAL
-        "血压偏低" -> BloodPressureVisualStatus.LOW
-        "正常高值" -> BloodPressureVisualStatus.ELEVATED
-        else -> BloodPressureVisualStatus.HIGH
-    }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(groupLabel, style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(avgText, style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                avgPulse?.let { Text("♥ $it", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-            StatusChip(
-                text = categoryLabel,
-                isAbnormal = visualStatus != BloodPressureVisualStatus.NORMAL,
-                status = visualStatus
-            )
-        }
     }
 }

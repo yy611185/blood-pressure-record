@@ -28,7 +28,7 @@ import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
         MedicationTimeEntity::class,
         MedicationIntakeLogEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +38,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun medicationDao(): MedicationDao
 
     companion object {
+        /** 仅扩展新流程字段，保留历史代表值、平均策略和原始数据。 */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE measurement_sessions ADD COLUMN timePeriod TEXT")
+                db.execSQL("ALTER TABLE measurement_sessions ADD COLUMN symptomNote TEXT")
+                db.execSQL("ALTER TABLE measurement_sessions ADD COLUMN factorNote TEXT")
+            }
+        }
+
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE medication_times ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
@@ -56,7 +65,8 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
-                MIGRATION_7_8
+                MIGRATION_7_8,
+                MIGRATION_8_9
             ).build()
         }
 

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -502,50 +501,6 @@ fun InlineSessionAction(
     }
 }
 
-/**
- * 分步表单的固定底栏形态（编辑测量页仍在用）。
- *
- * 只负责底部安全区与背景，**不再使用 `imePadding()`**：底栏一旦随键盘长高，
- * 会被 Scaffold 计入 `innerPadding.bottom` 并把整个表单顶上去。
- */
-@Composable
-fun SessionSaveBottomBar(
-    canSave: Boolean,
-    disabledReason: String,
-    isSaving: Boolean,
-    buttonText: String,
-    onSave: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                MaterialTheme.colorScheme.surface,
-                RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-            )
-            .navigationBarsPadding()
-            .padding(
-                horizontal = AppSpacing.medium,
-                vertical = AppSpacing.medium
-            ),
-        verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
-    ) {
-        if (!canSave && disabledReason.isNotBlank()) {
-            Text(
-                disabledReason,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        AppPrimaryButton(
-            text = if (isSaving) "正在保存…" else buttonText,
-            onClick = onSave,
-            enabled = canSave && !isSaving,
-            modifier = Modifier.fillMaxWidth().height(AppDimensions.saveButtonHeight)
-        )
-    }
-}
-
 @Composable
 fun UnsavedChangesDialog(
     onContinueEditing: () -> Unit,
@@ -565,5 +520,103 @@ fun UnsavedChangesDialog(
                 TextButton(onClick = onDiscard) { Text("放弃") }
             }
         }
+    )
+}
+
+/** 本次记录的自由文本，不写入预设标签库。 */
+@Composable
+fun SessionSupplementFields(
+    symptomNote: String,
+    factorNote: String,
+    onSymptomNoteChange: (String) -> Unit,
+    onFactorNoteChange: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.large)) {
+        OutlinedTextField(
+            value = symptomNote,
+            onValueChange = onSymptomNoteChange,
+            label = { Text("有没有不舒服？") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            minLines = 3
+        )
+        OutlinedTextField(
+            value = factorNote,
+            onValueChange = onFactorNoteChange,
+            label = { Text("有没有可能影响血压的情况？") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            minLines = 3
+        )
+    }
+}
+
+@Composable
+fun SessionAverageCard(systolic: Int?, diastolic: Int?, measurementCount: Int) {
+    DataCard {
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+            Text("$systolic / $diastolic mmHg", style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("$measurementCount 次测量", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+fun SessionCompletedDialog(
+    avgSystolic: Int?,
+    avgDiastolic: Int?,
+    measuredAtText: String,
+    timePeriod: String,
+    deadlineMillis: Long?,
+    onEdit: () -> Unit,
+    onClose: () -> Unit
+) {
+    val currentOnClose by androidx.compose.runtime.rememberUpdatedState(onClose)
+    var countdownJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var handled by remember(deadlineMillis) { mutableStateOf(false) }
+    val close = {
+        if (!handled) {
+            handled = true
+            countdownJob?.cancel()
+            onClose()
+        }
+    }
+    val edit = {
+        if (!handled) {
+            handled = true
+            countdownJob?.cancel()
+            onEdit()
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(deadlineMillis) {
+        countdownJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
+        deadlineMillis?.let {
+            kotlinx.coroutines.delay((it - System.currentTimeMillis()).coerceAtLeast(0))
+            if (!handled) {
+                handled = true
+                currentOnClose()
+            }
+        }
+    }
+    val timestamp = DateTimeInputFormatter.parse(measuredAtText)
+        ?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()) }
+    val timestampLabel = if (timestamp?.toLocalDate() == java.time.LocalDate.now()) {
+        "今天 ${timestamp.format(DateTimeFormatter.ofPattern("HH:mm"))}"
+    } else measuredAtText
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text("记录完成") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
+                Text("${avgSystolic ?: "—"} / ${avgDiastolic ?: "—"} mmHg",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("$timestampLabel · $timePeriod")
+            }
+        },
+        confirmButton = { TextButton(onClick = close) { Text("关闭") } },
+        dismissButton = { TextButton(onClick = edit) { Text("修改") } }
     )
 }

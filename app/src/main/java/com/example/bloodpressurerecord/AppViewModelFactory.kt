@@ -41,8 +41,6 @@ class AppViewModelFactory(
                     repository = container.bloodPressureRepository,
                     highRiskAlertEnabled = container.settingsRepository.observeSettings()
                         .map { it.appSettings.highRiskAlertEnabled },
-                    discardFirstReading = container.settingsRepository.observeSettings()
-                        .map { it.appSettings.discardFirstReading },
                     savedStateHandle = savedStateHandle,
                     draftRepository = container.sessionDraftRepository
                 ) as T

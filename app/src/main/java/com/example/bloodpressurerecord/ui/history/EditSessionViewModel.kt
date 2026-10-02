@@ -7,7 +7,9 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
-import com.example.bloodpressurerecord.ui.common.MeasurementTags
+import com.example.bloodpressurerecord.domain.time.MeasurementPeriod
+import com.example.bloodpressurerecord.ui.common.SessionDerivedResult
+import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import com.example.bloodpressurerecord.ui.common.SessionFormLogic
 import com.example.bloodpressurerecord.ui.common.SessionDraftStore
 import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
@@ -17,14 +19,10 @@ import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -32,14 +30,16 @@ import kotlinx.coroutines.withContext
 
 data class EditSessionUiState(
     val measuredAtText: String = DateTimeInputFormatter.nowText(),
-    val scene: String = "晨起",
+    val scene: String = MeasurementPeriod.labelFor(System.currentTimeMillis()),
     val reading1: SessionReadingInputUi = SessionReadingInputUi(),
     val reading2: SessionReadingInputUi = SessionReadingInputUi(),
     val extraReadings: List<SessionReadingInputUi> = emptyList(),
-    val showExtraReadings: Boolean = false,
     val note: String = "",
-    val selectedSymptoms: Set<String> = emptySet(),
-    val selectedFactors: Set<String> = emptySet(),
+    val legacySymptoms: Set<String> = emptySet(),
+    val symptomNote: String = "",
+    val factorNote: String = "",
+    val averagedGroupCount: Int = 0,
+    val completionDeadlineMillis: Long? = null,
     val avgSystolic: Int? = null,
     val avgDiastolic: Int? = null,
     val avgPulse: Int? = null,
@@ -59,16 +59,10 @@ data class EditSessionUiState(
 class EditSessionViewModel(
     private val sessionId: String,
     private val repository: BloodPressureRepository,
-    discardFirstReading: Flow<Boolean> = flowOf(false),
-    savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     draftRepository: SessionDraftRepository? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) : ViewModel() {
-    private val discardFirstEnabled = discardFirstReading.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = false
-    )
     private val _uiState = MutableStateFlow(EditSessionUiState())
     val uiState: StateFlow<EditSessionUiState> = _uiState.asStateFlow()
     private val draftStore = SessionDraftStore(
@@ -77,38 +71,24 @@ class EditSessionViewModel(
     private val restoredDraft = draftStore.restore()
     private var hasInitFromData = false
     private var persistedAverageStrategy: AverageStrategy? = null
+    private var originalReadings: List<SessionReadingInputUi> = emptyList()
+    private var originalDerived: SessionDerivedResult? = null
     private var minimumReadingCount = MeasurementInputRules.MIN_READING_COUNT
     private var pendingSaveInput: SaveSessionInput? = null
     private var pendingSaveContainsHighRisk: Boolean = false
 
-    private fun averageStrategy(): AverageStrategy =
-        persistedAverageStrategy
-            ?: if (discardFirstEnabled.value) AverageStrategy.DISCARD_FIRST else AverageStrategy.ALL
+    private fun averageStrategy(): AverageStrategy = persistedAverageStrategy ?: AverageStrategy.ALL
 
-    init {
-        // 设置流首次发射是异步的：策略值到达或变化时重算预览，
-        // 保证初始「自动计算结果」与存储记录使用同一策略。
-        viewModelScope.launch {
-            discardFirstEnabled.collect {
-                _uiState.update { state ->
-                    if (state.loading || persistedAverageStrategy != null) {
-                        state
-                    } else {
-                        val derived = SessionFormLogic.recomputeDerived(
-                            readings = allReadings(state),
-                            requiredCount = minimumReadingCount,
-                            strategy = averageStrategy()
-                        )
-                        state.copy(
-                            avgSystolic = derived.avgSystolic,
-                            avgDiastolic = derived.avgDiastolic,
-                            avgPulse = derived.avgPulse,
-                            categoryLabel = derived.categoryLabel
-                        )
-                    }
-                }
-            }
-        }
+    fun editSavedSession() {
+        savedStateHandle["edit_session.$sessionId.completed"] = false
+        savedStateHandle.remove<Long>("edit_session.$sessionId.deadline")
+        _uiState.update { it.copy(saved = false, completionDeadlineMillis = null, message = "") }
+    }
+
+    fun closeSavedSession() {
+        draftStore.clear()
+        savedStateHandle.remove<Boolean>("edit_session.$sessionId.completed")
+        savedStateHandle.remove<Long>("edit_session.$sessionId.deadline")
     }
 
     init {
@@ -118,10 +98,6 @@ class EditSessionViewModel(
                     hasInitFromData = true
                     // 编辑旧记录必须沿用它保存时的策略，不能受当前全局设置变化影响。
                     persistedAverageStrategy = session.averageStrategy
-                    if (restoredDraft != null) {
-                        _uiState.value = restoredDraft.toEditUiState()
-                        return@collectLatest
-                    }
                     val sortedReadings = session.readings.sortedBy { it.orderIndex }
                     minimumReadingCount = minOf(
                         MeasurementInputRules.MIN_READING_COUNT,
@@ -130,23 +106,30 @@ class EditSessionViewModel(
                     val reading1 = sortedReadings.getOrNull(0)?.toInputUi() ?: SessionReadingInputUi()
                     val reading2 = sortedReadings.getOrNull(1)?.toInputUi() ?: SessionReadingInputUi()
                     val extras = sortedReadings.drop(2).map { it.toInputUi() }
-                    val derived = SessionFormLogic.recomputeDerived(
-                        readings = listOf(reading1, reading2) + extras,
-                        requiredCount = minimumReadingCount,
-                        strategy = averageStrategy()
+                    originalReadings = listOf(reading1, reading2) + extras
+                    originalDerived = SessionDerivedResult(
+                        session.avgSystolic, session.avgDiastolic, session.avgPulse,
+                        CategoryPresentation.label(session.category), session.containsHighRiskReading,
+                        sortedReadings.size
                     )
-                    val (symptomTags, factorTags) =
-                        MeasurementTags.splitSymptomsAndFactors(session.symptoms)
+                    if (restoredDraft != null) {
+                        _uiState.value = restoredDraft.toEditUiState()
+                        return@collectLatest
+                    }
+                    val derived = originalDerived!!
                     _uiState.value = EditSessionUiState(
                         measuredAtText = DateTimeInputFormatter.format(session.measuredAt),
-                        scene = session.scene,
+                        scene = MeasurementPeriod.labelFor(session.measuredAt),
                         reading1 = reading1,
                         reading2 = reading2,
                         extraReadings = extras,
-                        showExtraReadings = extras.isNotEmpty(),
                         note = session.note.orEmpty(),
-                        selectedSymptoms = symptomTags,
-                        selectedFactors = factorTags,
+                        legacySymptoms = session.symptoms.toSet(),
+                        symptomNote = session.symptomNote.orEmpty(),
+                        factorNote = session.factorNote.orEmpty(),
+                        averagedGroupCount = derived.averagedGroupCount,
+                        saved = savedStateHandle["edit_session.$sessionId.completed"] ?: false,
+                        completionDeadlineMillis = savedStateHandle["edit_session.$sessionId.deadline"],
                         avgSystolic = derived.avgSystolic,
                         avgDiastolic = derived.avgDiastolic,
                         avgPulse = derived.avgPulse,
@@ -170,16 +153,12 @@ class EditSessionViewModel(
         }
     }
 
-    fun updateMeasuredAtText(value: String) = updateForm { it.copy(measuredAtText = value) }
-    fun updateScene(value: String) = updateForm { it.copy(scene = value) }
-    fun toggleThirdReading(show: Boolean) = updateReading {
-        val nextExtras = if (show) {
-            if (it.extraReadings.isEmpty()) listOf(SessionReadingInputUi()) else it.extraReadings
-        } else {
-            emptyList()
-        }
-        it.copy(showExtraReadings = show, extraReadings = nextExtras)
+    fun updateMeasuredAtText(value: String) = updateForm { state ->
+        state.copy(measuredAtText = value,
+            scene = DateTimeInputFormatter.parse(value)?.let { MeasurementPeriod.labelFor(it) } ?: state.scene)
     }
+    fun updateSymptomNote(value: String) = updateForm { it.copy(symptomNote = value) }
+    fun updateFactorNote(value: String) = updateForm { it.copy(factorNote = value) }
 
     fun addNextReadingGroup() = updateReading {
         if (allReadings(it).size >= SessionFormLogic.UI_MAX_READING_COUNT) {
@@ -187,7 +166,7 @@ class EditSessionViewModel(
                 message = "每次测量最多 ${SessionFormLogic.UI_MAX_READING_COUNT} 组读数。"
             )
         }
-        it.copy(showExtraReadings = true, extraReadings = it.extraReadings + SessionReadingInputUi())
+        it.copy(extraReadings = it.extraReadings + SessionReadingInputUi())
     }
 
     fun updateReading1Systolic(value: String) = updateReading { it.copy(reading1 = it.reading1.copy(systolic = value)) }
@@ -210,41 +189,13 @@ class EditSessionViewModel(
 
     fun removeExtraReading(index: Int) = updateReading { state ->
         state.copy(
-            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index },
-            showExtraReadings = state.extraReadings.size > 1
+            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index }
         )
-    }
-
-    fun updateNote(value: String) = updateForm { it.copy(note = value) }
-
-    fun toggleFactor(factor: String) {
-        _uiState.update { state ->
-            val next = state.selectedFactors.toMutableSet()
-            if (!next.add(factor)) next.remove(factor)
-            state.copy(selectedFactors = next, isDirty = true)
-        }
-        persistDraft()
-    }
-
-    fun toggleSymptom(symptom: String) {
-        _uiState.update { state ->
-            val set = state.selectedSymptoms.toMutableSet()
-            if (symptom == "无症状") {
-                if (symptom in set) set.clear() else {
-                    set.clear()
-                    set += symptom
-                }
-            } else {
-                set.remove("无症状")
-                if (!set.add(symptom)) set.remove(symptom)
-            }
-            state.copy(selectedSymptoms = set, isDirty = true)
-        }
-        persistDraft()
     }
 
     fun onSaveClicked() {
         val state = _uiState.value
+        if (state.isSaving || state.saved || state.showHighRiskDialog || state.showAbnormalConfirmDialog) return
         val measuredAt = DateTimeInputFormatter.parse(state.measuredAtText)
         if (measuredAt == null) {
             _uiState.update { it.copy(message = "测量时间格式不正确，请使用 yyyy-MM-dd HH:mm") }
@@ -266,9 +217,12 @@ class EditSessionViewModel(
         }
         val input = SaveSessionInput(
             measuredAt = measuredAt,
-            scene = state.scene,
+            scene = MeasurementPeriod.labelFor(measuredAt),
             note = state.note,
-            symptoms = (state.selectedSymptoms + state.selectedFactors).toList(),
+            symptoms = state.legacySymptoms.toList(),
+            timePeriod = MeasurementPeriod.labelFor(measuredAt),
+            symptomNote = state.symptomNote,
+            factorNote = state.factorNote,
             readings = validate.readings,
             averageStrategy = averageStrategy()
         )
@@ -320,9 +274,21 @@ class EditSessionViewModel(
         viewModelScope.launch {
             repository.updateSession(sessionId, input)
                 .onSuccess {
+                    // 后续“修改”以刚保存的原始读数和代表值为基准。
+                    val savedReadings = input.readings.map {
+                        SessionReadingInputUi(it.systolic.toString(), it.diastolic.toString(), it.pulse?.toString().orEmpty())
+                    }
+                    val savedDerived = deriveFor(savedReadings)
+                    originalReadings = savedReadings
+                    originalDerived = savedDerived
+                    val deadline = nowMillis() + 5_000
+                    savedStateHandle["edit_session.$sessionId.completed"] = true
+                    savedStateHandle["edit_session.$sessionId.deadline"] = deadline
                     _uiState.update {
                         it.copy(
                             saved = true,
+                            isDirty = false,
+                            completionDeadlineMillis = deadline,
                             message = "编辑已保存。",
                             isSaving = false,
                             showAbnormalConfirmDialog = false,
@@ -330,6 +296,7 @@ class EditSessionViewModel(
                         )
                     }
                     draftStore.clear()
+                    persistDraft()
                     pendingSaveInput = null
                     pendingSaveContainsHighRisk = false
                 }
@@ -349,15 +316,12 @@ class EditSessionViewModel(
     private fun updateReading(transform: (EditSessionUiState) -> EditSessionUiState) {
         _uiState.update { state ->
             val next = transform(state)
-            val derived = SessionFormLogic.recomputeDerived(
-                readings = allReadings(next),
-                requiredCount = minimumReadingCount,
-                strategy = averageStrategy()
-            )
+            val derived = deriveFor(allReadings(next))
             next.copy(
                 avgSystolic = derived.avgSystolic,
                 avgDiastolic = derived.avgDiastolic,
                 avgPulse = derived.avgPulse,
+                averagedGroupCount = derived.averagedGroupCount,
                 categoryLabel = derived.categoryLabel,
                 canSave = SessionFormLogic.saveDisabledReason(
                     allReadings(next), minimumReadingCount, MeasurementInputRules.MAX_READING_COUNT
@@ -399,7 +363,10 @@ class EditSessionViewModel(
             scene = state.scene,
             readings = allReadings(state),
             note = state.note,
-            symptoms = state.selectedSymptoms + state.selectedFactors
+            symptoms = state.legacySymptoms,
+            timePeriod = state.scene,
+            symptomNote = state.symptomNote,
+            factorNote = state.factorNote
         )
     }
 
@@ -407,6 +374,14 @@ class EditSessionViewModel(
         draftStore.clear()
         pendingSaveInput = null
         pendingSaveContainsHighRisk = false
+    }
+
+    private fun deriveFor(readings: List<SessionReadingInputUi>): SessionDerivedResult {
+        fun values(items: List<SessionReadingInputUi>) = items
+            .filter { it.systolic.isNotBlank() || it.diastolic.isNotBlank() || it.pulse.isNotBlank() }
+            .map { Triple(it.systolic.toIntOrNull(), it.diastolic.toIntOrNull(), it.pulse.toIntOrNull()) }
+        if (values(readings) == values(originalReadings)) originalDerived?.let { return it }
+        return SessionFormLogic.recomputeDerived(readings, minimumReadingCount, averageStrategy())
     }
 
     private fun allReadings(state: EditSessionUiState): List<SessionReadingInputUi> {
@@ -425,30 +400,28 @@ class EditSessionViewModel(
         val first = readings.getOrNull(0) ?: SessionReadingInputUi()
         val second = readings.getOrNull(1) ?: SessionReadingInputUi()
         val extras = readings.drop(2)
-        val (symptomTags, factorTags) = MeasurementTags.splitSymptomsAndFactors(symptoms)
         val base = EditSessionUiState(
             measuredAtText = measuredAtText,
-            scene = scene,
+            scene = DateTimeInputFormatter.parse(measuredAtText)?.let { MeasurementPeriod.labelFor(it) } ?: scene,
             reading1 = first,
             reading2 = second,
             extraReadings = extras,
-            showExtraReadings = extras.isNotEmpty(),
             note = note,
-            selectedSymptoms = symptomTags,
-            selectedFactors = factorTags,
+            legacySymptoms = symptoms,
+            symptomNote = symptomNote.orEmpty(),
+            factorNote = factorNote.orEmpty(),
+            saved = savedStateHandle["edit_session.$sessionId.completed"] ?: false,
+            completionDeadlineMillis = savedStateHandle["edit_session.$sessionId.deadline"],
             message = "已恢复未保存的编辑草稿。",
             loading = false,
             isDirty = true
         )
-        val derived = SessionFormLogic.recomputeDerived(
-            allReadings(base),
-            requiredCount = minimumReadingCount,
-            strategy = averageStrategy()
-        )
+        val derived = deriveFor(allReadings(base))
         return base.copy(
             avgSystolic = derived.avgSystolic,
             avgDiastolic = derived.avgDiastolic,
             avgPulse = derived.avgPulse,
+            averagedGroupCount = derived.averagedGroupCount,
             categoryLabel = derived.categoryLabel,
             canSave = SessionFormLogic.saveDisabledReason(
                 allReadings(base), minimumReadingCount, MeasurementInputRules.MAX_READING_COUNT
@@ -471,14 +444,13 @@ class EditSessionViewModel(
         fun provideFactory(
             sessionId: String,
             repository: BloodPressureRepository,
-            discardFirstReading: Flow<Boolean> = flowOf(false),
             draftRepository: SessionDraftRepository? = null
         ): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     return EditSessionViewModel(
-                        sessionId, repository, discardFirstReading,
+                        sessionId, repository,
                         draftRepository = draftRepository
                     ) as T
                 }
@@ -491,7 +463,6 @@ class EditSessionViewModel(
                     return EditSessionViewModel(
                         sessionId,
                         repository,
-                        discardFirstReading,
                         extras.createSavedStateHandle(),
                         draftRepository
                     ) as T

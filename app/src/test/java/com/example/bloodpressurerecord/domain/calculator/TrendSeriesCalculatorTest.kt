@@ -57,20 +57,20 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
-    fun aggregationFollowsRangeGranularity() {
-        assertEquals(
-            TrendAggregation.RAW,
-            TrendSeriesCalculator.aggregationFor(TrendRange.DAYS_7)
+    fun everyRangeUsesSessionRepresentatives() {
+        val records = listOf(
+            record("first", millis("2026-07-22", 7), 120, 80),
+            record("second", millis("2026-07-22", 7), 150, 95)
+                .copy(containsHighRiskReading = true)
         )
-        // 30 天改为显示原始测量；只有「全部」按自然日聚合成每日平均。
-        assertEquals(
-            TrendAggregation.RAW,
-            TrendSeriesCalculator.aggregationFor(TrendRange.DAYS_30)
-        )
-        assertEquals(
-            TrendAggregation.DAILY,
-            TrendSeriesCalculator.aggregationFor(TrendRange.ALL)
-        )
+        TrendRange.entries.forEach { range ->
+            val series = TrendSeriesCalculator.build(records, range, now, zone)
+            assertEquals(TrendAggregation.RAW, series.aggregation)
+            assertEquals(records.map { it.id }, series.points.map { it.id })
+            assertEquals(records.map { it.systolic }, series.points.map { it.systolic })
+            assertEquals(records.map { it.containsHighRiskReading }, series.points.map { it.containsHighRiskReading })
+            assertTrue(series.points.all { it.recordCount == 1 })
+        }
     }
 
     @Test
@@ -176,7 +176,7 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
-    fun allRange_aggregatesByLocalDateAndKeepsRecordCount() {
+    fun allRange_preservesEverySessionEvenOnTheSameDay() {
         val records = listOf(
             record("a", millis("2026-07-20", 7), 120, 80),
             record("b", millis("2026-07-20", 21), 130, 90),
@@ -185,21 +185,21 @@ class TrendSeriesCalculatorTest {
 
         val series = TrendSeriesCalculator.build(records, TrendRange.ALL, now, zone)
 
-        assertEquals(2, series.points.size)
-        assertEquals(2, series.points.first().recordCount)
-        assertEquals(125, series.points.first().systolic)
-        assertEquals(85, series.points.first().diastolic)
-        assertEquals("day:2026-07-20", series.points.first().id)
-        assertTrue(series.points.all { it.aggregation == TrendAggregation.DAILY })
-        // 每日节点保留当天半开区间，点击后可回查当天全部原始记录。
+        assertEquals(3, series.points.size)
+        assertEquals(1, series.points.first().recordCount)
+        assertEquals(120, series.points.first().systolic)
+        assertEquals(80, series.points.first().diastolic)
+        assertEquals(records.map { it.id }, series.points.map { it.id })
+        assertEquals(records.map { it.measuredAt }, series.points.map { it.timestamp })
+        assertTrue(series.points.all { it.aggregation == TrendAggregation.RAW })
         assertEquals(
-            millis("2026-07-21", 0) - millis("2026-07-20", 0),
+            1L,
             series.points.first().intervalEndExclusive - series.points.first().intervalStart
         )
     }
 
     @Test
-    fun averagePulseIgnoresMissingValuesAndDailyPulseStaysNullable() {
+    fun averagePulseIgnoresMissingValuesAndSessionPulseStaysNullable() {
         val records = listOf(
             record("a", millis("2026-07-20", 7), 120, 80).copy(pulse = 70),
             record("b", millis("2026-07-20", 21), 130, 90).copy(pulse = null),
@@ -208,12 +208,12 @@ class TrendSeriesCalculatorTest {
         )
 
         val raw = TrendSeriesCalculator.build(records, TrendRange.DAYS_7, now, zone)
-        val daily = TrendSeriesCalculator.build(records, TrendRange.ALL, now, zone)
+        val all = TrendSeriesCalculator.build(records, TrendRange.ALL, now, zone)
 
         assertEquals(73, raw.averagePulse)
         assertEquals(listOf(70, null, null, 76), raw.points.map { it.pulse })
-        assertEquals(73, daily.averagePulse)
-        assertEquals(listOf(70, null, 76), daily.points.map { it.pulse })
+        assertEquals(73, all.averagePulse)
+        assertEquals(listOf(70, null, null, 76), all.points.map { it.pulse })
         assertEquals(
             null,
             TrendSeriesCalculator.build(records.map { it.copy(pulse = null) }, TrendRange.ALL, now, zone)
@@ -222,7 +222,7 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
-    fun allRange_groupsByDeviceTimezoneAcrossUtcDateBoundary() {
+    fun allRange_preservesTimestampsAcrossUtcDateBoundary() {
         val newYork = ZoneId.of("America/New_York")
         val records = listOf(
             record("late", Instant.parse("2026-07-21T03:30:00Z").toEpochMilli(), 120, 80),
@@ -238,6 +238,7 @@ class TrendSeriesCalculatorTest {
 
         assertEquals(2, series.points.size)
         assertEquals(listOf(1, 1), series.points.map { it.recordCount })
+        assertEquals(records.map { it.measuredAt }, series.points.map { it.timestamp })
     }
 
     @Test
@@ -312,7 +313,7 @@ class TrendSeriesCalculatorTest {
     }
 
     @Test
-    fun tenThousandRecordsBecomeAtMostOnePointPerDayInAllRange() {
+    fun tenThousandRecordsStayOnePointPerSessionInAllRange() {
         val start = LocalDate.of(2000, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val records = (0 until 10_000).map { index ->
             TrendRecord(
@@ -332,8 +333,8 @@ class TrendSeriesCalculatorTest {
         }
 
         assertEquals(10_000, series.rawRecordCount)
-        assertTrue(series.points.size <= 1_668)
-        assertTrue("10k aggregation took ${elapsedMillis}ms", elapsedMillis < 1_500)
+        assertEquals(10_000, series.points.size)
+        assertTrue("10k Session points took ${elapsedMillis}ms", elapsedMillis < 1_500)
     }
 
     /**
@@ -341,7 +342,7 @@ class TrendSeriesCalculatorTest {
      * 图表点数与耗时都必须可控。
      */
     @Test
-    fun typicalDataVolumesStayLightAfterAggregation() {
+    fun typicalDataVolumesStayLightWithSessionPoints() {
         val hourMillis = 60L * 60L * 1_000L
         val dayMillis = 24L * hourMillis
 
@@ -376,7 +377,7 @@ class TrendSeriesCalculatorTest {
         assertTrue(thirtyDaySeries.points.all { it.aggregation == TrendAggregation.RAW })
         assertEquals(1, thirtyDaySeries.points.first().recordCount)
 
-        // 全部约 1000 条：同样按自然日聚合，耗时可控。
+        // 全部约 1000 条：每次 Session 一个节点，耗时可控。
         val allRecords = (0 until 1_000).map { index ->
             record(
                 id = "a$index",
@@ -391,9 +392,9 @@ class TrendSeriesCalculatorTest {
         }
 
         assertEquals(1_000, allSeries.rawRecordCount)
-        assertTrue(allSeries.points.size <= 418)
-        assertTrue("1000 条聚合约 ${elapsedMillis}ms", elapsedMillis < 500)
-        // 每个自然日一个节点，缺测日期不会补零，折线按真实 timestamp 断档。
+        assertEquals(1_000, allSeries.points.size)
+        assertTrue("1000 条 Session 节点约 ${elapsedMillis}ms", elapsedMillis < 500)
+        // 每次 Session 一个节点，缺测日期不会补零，折线按真实 timestamp 断档。
         assertTrue(allSeries.points.zipWithNext().all { (a, b) -> a.timestamp < b.timestamp })
     }
 

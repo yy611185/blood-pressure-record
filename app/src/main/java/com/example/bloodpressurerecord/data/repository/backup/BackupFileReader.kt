@@ -37,7 +37,10 @@ data class BackupImportMeasurement(
     val createdAt: String?,
     val updatedAt: String?,
     val readings: List<BackupImportReading>,
-    val backupAverageStrategy: String? = null
+    val backupAverageStrategy: String? = null,
+    val timePeriod: String? = null,
+    val symptomNote: String? = null,
+    val factorNote: String? = null
 )
 
 data class BackupImportDocument(
@@ -332,6 +335,9 @@ class BackupFileReader {
                 scene = row.optionalText(columns, "scene"),
                 symptomsJson = row.optionalText(columns, "symptoms_json"),
                 note = row.optionalText(columns, "note"),
+                timePeriod = row.optionalText(columns, "time_period"),
+                symptomNote = row.optionalText(columns, "symptom_note"),
+                factorNote = row.optionalText(columns, "factor_note"),
                 createdAt = row.optionalText(columns, "created_at"),
                 updatedAt = row.optionalText(columns, "updated_at"),
                 readings = readingRows[recordId].orEmpty()
@@ -513,7 +519,7 @@ class BackupFileReader {
         private const val SHEET_MEDICATION_TIMES = "服药时间"
         private const val SHEET_MEDICATION_LOGS = "服药打卡"
         private const val XML_TOKEN_OVERLAP = 8
-        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3, 4, 5)
+        private val SUPPORTED_FORMAT_VERSIONS = setOf(2, 3, 4, 5, 6)
         private val TIME_PATTERN = Regex("^(?:[01]\\d|2[0-3]):[0-5]\\d$")
 
     }

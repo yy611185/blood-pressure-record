@@ -6,7 +6,6 @@ import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
-import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.abs
@@ -43,17 +42,6 @@ object TrendSeriesCalculator {
         }
     }
 
-    /**
-     * 数据粒度：7 天与 30 天保留每次测量，只有「全部」按自然日聚合成每日平均。
-     * 每日平均节点仍保留当天的半开区间，点击后可回查当天全部原始记录。
-     */
-    fun aggregationFor(range: TrendRange): TrendAggregation = when (range) {
-        TrendRange.DAYS_7,
-        TrendRange.DAYS_30 -> TrendAggregation.RAW
-
-        TrendRange.ALL -> TrendAggregation.DAILY
-    }
-
     fun build(
         records: List<TrendRecord>,
         range: TrendRange,
@@ -68,11 +56,8 @@ object TrendSeriesCalculator {
             .filter { it.measuredAt in requestedStart..nowMillis }
             .sortedBy { it.measuredAt }
             .toList()
-        val aggregation = aggregationFor(range)
-        val points = when (aggregation) {
-            TrendAggregation.RAW -> sorted.map { it.toRawPoint() }
-            TrendAggregation.DAILY -> sorted.toDailyPoints(zoneId)
-        }
+        // 每个节点始终是一次 Session 已保存的代表值，不重新平均历史测量组。
+        val points = sorted.map { it.toRawPoint() }
         val seriesStart = when {
             range != TrendRange.ALL -> requestedStart
             points.isNotEmpty() -> points.first().intervalStart
@@ -105,7 +90,7 @@ object TrendSeriesCalculator {
             yAxis = calculateYAxis(points, targetSystolic, targetDiastolic),
             rangeStart = seriesStart,
             rangeEnd = seriesEnd,
-            aggregation = aggregation,
+            aggregation = TrendAggregation.RAW,
             windowStart = requestedStart,
             firstMeasuredAt = sorted.firstOrNull()?.measuredAt,
             lastMeasuredAt = sorted.lastOrNull()?.measuredAt
@@ -197,30 +182,6 @@ object TrendSeriesCalculator {
             recordCount = 1,
             aggregation = TrendAggregation.RAW
         )
-    }
-
-    private fun List<TrendRecord>.toDailyPoints(zoneId: ZoneId): List<TrendPoint> {
-        return groupBy {
-            Instant.ofEpochMilli(it.measuredAt).atZone(zoneId).toLocalDate()
-        }.toSortedMap().map { (date, dayRecords) ->
-            val range = date.toEpochMillisRange(zoneId)
-            val systolic = dayRecords.map { it.systolic }.average().roundToInt()
-            val diastolic = dayRecords.map { it.diastolic }.average().roundToInt()
-            val pulseValues = dayRecords.mapNotNull { it.pulse }
-            TrendPoint(
-                id = "day:$date",
-                timestamp = range.startInclusive,
-                intervalStart = range.startInclusive,
-                intervalEndExclusive = range.endExclusive,
-                systolic = systolic,
-                diastolic = diastolic,
-                pulse = pulseValues.takeIf { it.isNotEmpty() }?.average()?.roundToInt(),
-                category = CategoryCalculator.calculate(systolic, diastolic).name,
-                containsHighRiskReading = dayRecords.any { it.containsHighRiskReading },
-                recordCount = dayRecords.size,
-                aggregation = TrendAggregation.DAILY
-            )
-        }
     }
 
     private fun Long.saturatedPlusOne(): Long {

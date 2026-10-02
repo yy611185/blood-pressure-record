@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
+import com.example.bloodpressurerecord.domain.model.DayNightAverage
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendRange
@@ -63,6 +64,7 @@ import com.example.bloodpressurerecord.domain.model.displayLabel
 import com.example.bloodpressurerecord.ui.common.AppBackButton
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
@@ -86,8 +88,7 @@ fun TrendScreen(
     var selectedPointId by remember(uiState.range) { mutableStateOf<String?>(null) }
     // 「恢复」按钮与图表双击复位共用的控制器：缩放、平移、视窗、选中一次归零。
     val chartController = remember(uiState.range) { TrendChartController() }
-    // 上一条 / 下一条在**当前图表真正显示的数据点**之间移动：
-    // 7 天 / 30 天是每次原始测量，「全部」是每日平均。
+    // 上一条 / 下一条在当前图表的 Session 代表值节点之间移动。
     // 不能按日期 ±1 天推算——有些日期根本没有记录。
     val displayPoints = uiState.series.points
     val selectedPoint = displayPoints.firstOrNull { it.id == selectedPointId }
@@ -138,37 +139,50 @@ fun TrendScreen(
 
         if (series.points.isEmpty()) {
             TrendEmptySection(range = uiState.range, onAddMeasurement = onAddMeasurement)
-            return@Column
         }
 
-        // 紧凑摘要：周期、次数、平均值、样本区间与最近一次测量一次说完。
-        TrendCompactSummary(
-            series = series,
-            summary = uiState.summary
-        )
+        // 顶部只展示周期与样本摘要，平均值集中在下方统计区。
+        if (series.points.isNotEmpty()) {
+            TrendCompactSummary(
+                series = series,
+                insights = uiState.insights
+            )
+        }
 
-        TrendCard(
-            series = series,
-            metric = uiState.metric,
-            selectedPoint = selectedPoint,
-            displayPoints = displayPoints,
-            targetSystolic = uiState.targetSystolic,
-            targetDiastolic = uiState.targetDiastolic,
-            chartController = chartController,
-            onMetricChange = viewModel::setMetric,
-            onPointSelected = { point -> selectedPointId = point?.id },
-            onViewDayRecords = viewModel::openPointDetails
-        )
+        ExpandableSection(
+            title = "血压趋势",
+            summary = uiState.insights.periodAverage.pressureText().let {
+                if (it == "—") "暂无数据" else "期间平均 $it mmHg"
+            },
+            initiallyExpanded = true
+        ) {
+            TrendCard(
+                series = series,
+                metric = uiState.metric,
+                selectedPoint = selectedPoint,
+                displayPoints = displayPoints,
+                targetSystolic = uiState.targetSystolic,
+                targetDiastolic = uiState.targetDiastolic,
+                chartController = chartController,
+                onMetricChange = viewModel::setMetric,
+                onPointSelected = { point -> selectedPointId = point?.id },
+                onViewDayRecords = viewModel::openPointDetails
+            )
+        }
 
-        PulseTrendCard(
-            series = series,
-            selectedPoint = selectedPoint,
-            chartController = chartController,
-            onPointSelected = { point -> selectedPointId = point?.id }
-        )
+        ExpandableSection(
+            title = "脉搏趋势",
+            summary = series.averagePulse?.let { "最近平均 $it 次/分" } ?: "暂无数据"
+        ) {
+            PulseTrendCard(
+                series = series,
+                selectedPoint = selectedPoint,
+                chartController = chartController,
+                onPointSelected = { point -> selectedPointId = point?.id }
+            )
+        }
 
         TrendPeriodOverview(
-            summary = uiState.summary,
             insights = uiState.insights,
             targetSystolic = uiState.targetSystolic,
             targetDiastolic = uiState.targetDiastolic
@@ -180,13 +194,8 @@ fun TrendScreen(
 @Composable
 private fun TrendCompactSummary(
     series: TrendSeries,
-    summary: TrendTextSummary
+    insights: TrendInsights
 ) {
-    val averageText = if (summary.averageSystolic != null && summary.averageDiastolic != null) {
-        "${summary.averageSystolic}/${summary.averageDiastolic}"
-    } else {
-        "—"
-    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -202,49 +211,28 @@ private fun TrendCompactSummary(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "${series.range.title} · ${series.aggregation.displayLabel()}",
+                    series.range.title,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    "${summary.recordCount} 次测量" +
-                        if (summary.highRiskCount > 0) " · ${summary.highRiskCount} 次高风险" else "",
+                    "${insights.recordCount} 次测量 · ${insights.recordDays} 天记录",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    averageText,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = NumberFontFamily,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "mmHg 平均",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 2.dp)
-                )
-                Box(Modifier.weight(1f))
-                Text(
-                    buildSampleRangeText(series),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End
-                )
-            }
+            Text(
+                buildSampleRangeText(series),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 /**
- * 样本区间：明确写出实际有数据的日期以及最近一次测量日期，
+ * 样本区间：明确写出实际有数据的日期，
  * 避免用户把「某天没有记录」误读成应用忽略了数据。
  */
 private fun buildSampleRangeText(series: TrendSeries): String {
@@ -253,16 +241,12 @@ private fun buildSampleRangeText(series: TrendSeries): String {
     val firstDate = formatSampleDate(first)
     val lastDate = formatSampleDate(last)
     val range = if (firstDate == lastDate) firstDate else "$firstDate – $lastDate"
-    return "样本 $range · 最近一次 ${formatSampleDateTime(last)}"
+    return "记录日期 $range"
 }
 
 private fun formatSampleDate(millis: Long): String =
     Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("M月d日"))
-
-private fun formatSampleDateTime(millis: Long): String =
-    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
+        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
 
 @Composable
 private fun TrendEmptySection(range: TrendRange, onAddMeasurement: () -> Unit) {
@@ -293,141 +277,197 @@ private fun TrendEmptySection(range: TrendRange, onAddMeasurement: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TrendPeriodOverview(
-    summary: TrendTextSummary,
     insights: TrendInsights,
     targetSystolic: Int?,
     targetDiastolic: Int?
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+    ExpandableSection(
+        title = "平均血压",
+        summary = if (insights.periodAverage == null) "暂无数据" else
+            "期间 ${insights.periodAverage.pressureText()} · 早间 ${insights.morningAverage.pressureText()} · 晚间 ${insights.eveningAverage.pressureText()}",
+        initiallyExpanded = true
     ) {
-        Text("这段时间", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        TrendStatCell(
+            "期间平均",
+            insights.periodAverage?.let { "${it.first}/${it.second}" } ?: "—",
+            "mmHg · ${insights.recordCount}次/${insights.recordDays}天",
+            Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TrendStatCell(
+                "早间平均",
+                insights.morningAverage?.let { "${it.first}/${it.second}" } ?: "—",
+                "${insights.morningCount}次/${insights.morningDays}天 · 05:00–11:59",
+                Modifier.weight(1f)
+            )
+            TrendStatCell(
+                "晚间平均",
+                insights.eveningAverage?.let { "${it.first}/${it.second}" } ?: "—",
+                "${insights.eveningCount}次/${insights.eveningDays}天 · 18:00–23:59",
+                Modifier.weight(1f)
+            )
+        }
+    }
+    ExpandableSection(
+        title = "昼夜统计",
+        summary = if (insights.daytimeAverage.sessionCount + insights.nighttimeAverage.sessionCount == 0)
+            "暂无数据" else "日间 ${insights.daytimeAverage.pressureText()} · 夜间 ${insights.nighttimeAverage.pressureText()}"
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            DayNightStatCell("日间平均", insights.daytimeAverage, "06:00–21:59", Modifier.weight(1f))
+            DayNightStatCell("夜间平均", insights.nighttimeAverage, "22:00–05:59", Modifier.weight(1f))
+        }
         Text(
-            "${summary.recordCount} 次测量" + if (summary.highRiskCount > 0) " · ${summary.highRiskCount} 次高风险" else "",
-            style = MaterialTheme.typography.labelMedium,
+            "夜间平均仅描述固定夜间时段内主动记录的家庭血压。",
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    // 高风险信息保持直接可见，避免折叠次级统计后遗漏。
+    if (insights.highRiskCount > 0) {
+        TrendStatCell(
+            "高风险记录", "${insights.highRiskCount} 次",
+            "按本次记录是否含高风险读数统计", Modifier.fillMaxWidth()
+        )
+    }
+    ExpandableSection(
+        title = "更多统计",
+        summary = if (insights.recordCount == 0) "暂无数据" else
+            "达标率 ${insights.targetRate?.let { "$it%" } ?: "—"} · 最高 ${insights.highestReading?.let { "${it.systolic}/${it.diastolic}" } ?: "—"}"
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        val sweep = (insights.targetRate ?: 0) * 3.6f
-                        drawArc(
-                            color = Color(0xFFDDE8DF),
-                            startAngle = -90f,
-                            sweepAngle = 360f,
-                            useCenter = false,
-                            style = Stroke(width = 11.dp.toPx())
-                        )
-                        drawArc(
-                            color = Color(0xFF70B78D),
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            style = Stroke(width = 11.dp.toPx())
-                        )
-                    }
-                    Text(
-                        insights.targetRate?.let { "$it%" } ?: "—",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = NumberFontFamily,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("达标率", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    val targetText = if (targetSystolic != null && targetDiastolic != null) {
-                        "低于目标 $targetSystolic/$targetDiastolic 且不偏低的占比。"
-                    } else "在“我的”设置目标后可查看达标率。"
-                    val previous = insights.previousTargetRate
-                    val current = insights.targetRate
-                    val comparison = if (previous != null && current != null) {
-                        when {
-                            current - previous >= 5 -> "比上个周期（$previous%）更稳了。"
-                            previous - current >= 5 -> "比上个周期（$previous%）有所下降。"
-                            else -> "和上个周期（$previous%）接近。"
-                        }
-                    } else ""
-                    Text(
-                        targetText + comparison,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            val order = listOf(
-                BloodPressureCategory.NORMAL,
-                BloodPressureCategory.HIGH_NORMAL,
-                BloodPressureCategory.STAGE1,
-                BloodPressureCategory.STAGE2,
-                BloodPressureCategory.STAGE3,
-                BloodPressureCategory.LOW
-            )
-            val categories = order.mapNotNull { category ->
-                insights.categoryCounts[category]?.takeIf { it > 0 }?.let { category to it }
-            }
-            if (categories.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth().height(18.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    categories.forEach { (category, count) ->
-                        Box(Modifier.weight(count.toFloat()).fillMaxSize()
-                            .background(trendGradeColor(category), RoundedCornerShape(5.dp)))
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    categories.forEach { (category, count) ->
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Box(Modifier.size(9.dp).background(trendGradeColor(category), CircleShape))
-                            Text(
-                                "${trendCategoryLabel(category)} $count",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(26.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val sweep = (insights.targetRate ?: 0) * 3.6f
+                            drawArc(
+                                color = Color(0xFFDDE8DF),
+                                startAngle = -90f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                style = Stroke(width = 11.dp.toPx())
+                            )
+                            drawArc(
+                                color = Color(0xFF70B78D),
+                                startAngle = -90f,
+                                sweepAngle = sweep,
+                                useCenter = false,
+                                style = Stroke(width = 11.dp.toPx())
                             )
                         }
+                        Text(
+                            insights.targetRate?.let { "$it%" } ?: "—",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontFamily = NumberFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("达标率", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        val targetText = if (targetSystolic != null && targetDiastolic != null) {
+                            "低于目标 $targetSystolic/$targetDiastolic 且不偏低的占比。"
+                        } else "在“我的”设置目标后可查看达标率。"
+                        val previous = insights.previousTargetRate
+                        val current = insights.targetRate
+                        val comparison = if (previous != null && current != null) {
+                            when {
+                                current - previous >= 5 -> "比上个周期（$previous%）更稳了。"
+                                previous - current >= 5 -> "比上个周期（$previous%）有所下降。"
+                                else -> "和上个周期（$previous%）接近。"
+                            }
+                        } else ""
+                        Text(
+                            targetText + comparison,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                val order = listOf(
+                    BloodPressureCategory.NORMAL,
+                    BloodPressureCategory.HIGH_NORMAL,
+                    BloodPressureCategory.STAGE1,
+                    BloodPressureCategory.STAGE2,
+                    BloodPressureCategory.STAGE3,
+                    BloodPressureCategory.LOW
+                )
+                val categories = order.mapNotNull { category ->
+                    insights.categoryCounts[category]?.takeIf { it > 0 }?.let { category to it }
+                }
+                if (categories.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth().height(18.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        categories.forEach { (category, count) ->
+                            Box(Modifier.weight(count.toFloat()).fillMaxSize()
+                                .background(trendGradeColor(category), RoundedCornerShape(5.dp)))
+                        }
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        categories.forEach { (category, count) ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Box(Modifier.size(9.dp).background(trendGradeColor(category), CircleShape))
+                                Text(
+                                    "${trendCategoryLabel(category)} $count",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TrendStatCell("平均", "${summary.averageSystolic ?: "—"}/${summary.averageDiastolic ?: "—"}", "mmHg", Modifier.weight(1f))
-            val highest = insights.highestReading
-            TrendStatCell(
-                "最高一次",
-                highest?.let { "${it.systolic}/${it.diastolic}" } ?: "—",
-                highest?.let {
-                    Instant.ofEpochMilli(it.measuredAt).atZone(ZoneId.systemDefault())
-                        .format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
-                } ?: "",
-                Modifier.weight(1f)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val highest = insights.highestReading
+                TrendStatCell(
+                    "最高一次",
+                    highest?.let { "${it.systolic}/${it.diastolic}" } ?: "—",
+                    highest?.let {
+                        Instant.ofEpochMilli(it.measuredAt).atZone(ZoneId.systemDefault())
+                            .format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
+                    } ?: "",
+                    Modifier.weight(1f)
+                )
+                val lowest = insights.lowestReading
+                TrendStatCell(
+                    "最低一次",
+                    lowest?.let { "${it.systolic}/${it.diastolic}" } ?: "—",
+                    lowest?.let {
+                        Instant.ofEpochMilli(it.measuredAt).atZone(ZoneId.systemDefault())
+                            .format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
+                    } ?: "",
+                    Modifier.weight(1f)
+                )
+            }
+            if (insights.highRiskCount == 0) TrendStatCell(
+                "高风险记录",
+                "${insights.highRiskCount} 次",
+                "按本次记录是否含高风险读数统计",
+                Modifier.fillMaxWidth()
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TrendStatCell(
-                "上午平均",
-                insights.morningAverage?.let { "${it.first}/${it.second}" } ?: "—",
-                "${insights.morningCount} 次 · 12 点前",
-                Modifier.weight(1f)
-            )
-            TrendStatCell(
-                "下午及晚上",
-                insights.afternoonAverage?.let { "${it.first}/${it.second}" } ?: "—",
-                "${insights.afternoonCount} 次 · 12 点后",
-                Modifier.weight(1f)
-            )
-        }
     }
+}
+
+private fun Pair<Int, Int>?.pressureText(): String = this?.let { "${it.first}/${it.second}" } ?: "—"
+
+private fun DayNightAverage.pressureText(): String =
+    if (systolic != null && diastolic != null) "$systolic/$diastolic" else "—"
+
+@Composable
+private fun DayNightStatCell(title: String, average: DayNightAverage, timeRange: String, modifier: Modifier) {
+    TrendStatCell(
+        title, average.pressureText(),
+        "${average.sessionCount}次 · ${average.recordDays}天\n$timeRange", modifier
+    )
 }
 
 @Composable
@@ -545,11 +585,6 @@ private fun PulseTrendCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "脉搏趋势",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
             if (series.averagePulse == null) {
                 Text(
                     "这段时间暂无脉搏记录",
@@ -577,8 +612,7 @@ private fun PulseTrendCard(
 /**
  * 顶部数据栏：显示当前选中的记录（长按数据检查 / 点击节点 / 上一条 / 下一条）。
  *
- * 未选中时退回「最近一次」——7 天 / 30 天是当前范围最近一次测量，
- * 「全部」是最近一个有记录日期的每日平均（[points] 的最后一个点）。
+ * 未选中时退回当前范围最近一次 Session（[points] 的最后一个点）。
  * 操作区固定四枚按钮：
  * - 上一条 / 下一条：在 [points] 上移动，不按日期 ±1 天推算；
  * - 明细：打开**当前显示点**所属日期的原始测量明细（真实数据库记录）；
@@ -767,7 +801,7 @@ private fun ReadoutAction(
 private fun buildSelectionSupportingText(point: TrendPoint): String {
     return when (point.aggregation) {
         TrendAggregation.DAILY -> "当日 ${point.recordCount} 次平均"
-        TrendAggregation.RAW -> "单次测量"
+        TrendAggregation.RAW -> "本次记录代表值"
     }
 }
 
@@ -929,10 +963,8 @@ private fun TrendDayDetailsSheet(
  * 避免「7/30 天单次测量节点」显示成「当日 1 次」而掩盖同一天的其他记录。
  */
 private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
-    if (details.loading || details.error != null) {
-        return "当日 ${details.point.recordCount} 次，平均 " +
-            "${details.point.systolic}/${details.point.diastolic} mmHg"
-    }
+    if (details.loading) return "正在读取当天记录"
+    if (details.error != null) return "当天记录读取失败"
     val records = details.records
     if (records.isEmpty()) return "当天没有原始记录"
     val systolic = records.map { it.systolic }.average().roundToInt()
@@ -941,7 +973,8 @@ private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
 }
 
 @Composable
-private fun TrendDayRecordRow(record: TrendRecord) {    Row(
+private fun TrendDayRecordRow(record: TrendRecord) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 12.dp),

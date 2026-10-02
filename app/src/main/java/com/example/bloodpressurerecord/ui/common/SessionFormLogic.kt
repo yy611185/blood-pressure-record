@@ -20,8 +20,7 @@ data class SessionDerivedResult(
     val avgPulse: Int?,
     val categoryLabel: String,
     val containsHighRiskReading: Boolean = false,
-    val averagedGroupCount: Int = 0,
-    val discardedFirstReading: Boolean = false
+    val averagedGroupCount: Int = 0
 )
 
 data class SessionValidationResult(
@@ -66,15 +65,13 @@ object SessionFormLogic {
             )
         }
         val derived = MeasurementDerivation.derive(validReadings, strategy)
-        val discardedFirst = strategy == AverageStrategy.DISCARD_FIRST && validReadings.size >= 2
         return SessionDerivedResult(
             avgSystolic = derived.average.avgSystolic,
             avgDiastolic = derived.average.avgDiastolic,
             avgPulse = derived.average.avgPulse,
             categoryLabel = CategoryPresentation.label(derived.category),
             containsHighRiskReading = derived.containsHighRiskReading,
-            averagedGroupCount = validReadings.size - if (discardedFirst) 1 else 0,
-            discardedFirstReading = discardedFirst
+            averagedGroupCount = validReadings.size
         )
     }
 

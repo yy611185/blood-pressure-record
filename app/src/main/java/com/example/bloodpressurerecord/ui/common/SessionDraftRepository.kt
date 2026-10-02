@@ -21,7 +21,7 @@ class FileSessionDraftRepository(context: Context) : SessionDraftRepository {
         val file = draftFile(key)
         if (!file.exists()) return@runCatching null
         val root = JSONObject(AtomicFile(file).readFully().toString(Charsets.UTF_8))
-        require(root.optInt("version") == FORMAT_VERSION) { "不支持的草稿版本" }
+        require(root.optInt("version") in 1..FORMAT_VERSION) { "不支持的草稿版本" }
         val readingsJson = root.getJSONArray("readings")
         val readings = List(readingsJson.length()) { index ->
             val reading = readingsJson.getJSONObject(index)
@@ -34,12 +34,16 @@ class FileSessionDraftRepository(context: Context) : SessionDraftRepository {
         val symptomsJson = root.optJSONArray("symptoms") ?: JSONArray()
         SessionFormDraft(
             measuredAtText = root.optString("measuredAtText"),
-            scene = root.optString("scene", "晨起"),
+            scene = root.optString("scene", "清晨"),
             readings = readings.ifEmpty { List(2) { SessionReadingInputUi() } },
             note = root.optString("note"),
             symptoms = buildSet {
                 repeat(symptomsJson.length()) { add(symptomsJson.getString(it)) }
-            }
+            },
+            timePeriod = root.optionalString("timePeriod"),
+            symptomNote = root.optionalString("symptomNote"),
+            factorNote = root.optionalString("factorNote"),
+            sessionId = root.optionalString("sessionId")
         )
     }
 
@@ -61,6 +65,10 @@ class FileSessionDraftRepository(context: Context) : SessionDraftRepository {
             put("readings", readings)
             put("note", draft.note)
             put("symptoms", JSONArray(draft.symptoms.sorted()))
+            put("timePeriod", draft.timePeriod ?: JSONObject.NULL)
+            put("symptomNote", draft.symptomNote ?: JSONObject.NULL)
+            put("factorNote", draft.factorNote ?: JSONObject.NULL)
+            put("sessionId", draft.sessionId ?: JSONObject.NULL)
         }
         val atomicFile = AtomicFile(draftFile(key))
         val output = atomicFile.startWrite()
@@ -92,8 +100,11 @@ class FileSessionDraftRepository(context: Context) : SessionDraftRepository {
         return File(directory, "$safeKey.json")
     }
 
+    private fun JSONObject.optionalString(key: String): String? =
+        if (has(key) && !isNull(key)) getString(key) else null
+
     private companion object {
         const val DIRECTORY_NAME = "session_drafts"
-        const val FORMAT_VERSION = 1
+        const val FORMAT_VERSION = 2
     }
 }

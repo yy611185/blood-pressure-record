@@ -15,8 +15,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
-import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
-import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
@@ -103,7 +101,7 @@ fun HistoryDetailScreen(
             ) {
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${uiState.measuredAtText} · ${session.scene}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${uiState.measuredAtText} · ${session.timePeriod ?: session.scene.replace("晨起", "清晨")}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         "${session.avgSystolic}/${session.avgDiastolic}",
                         style = MaterialTheme.typography.displaySmall,
@@ -139,8 +137,12 @@ fun HistoryDetailScreen(
             }
 
             DataCard {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("原始读数", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                ExpandableSection(
+                    title = "原始读数",
+                    summary = "${session.readings.size} 次测量",
+                    initiallyExpanded = session.readings.size <= 3,
+                    stateKey = "history-readings-$sessionId"
+                ) {
                     DetailReadingRow("组", "高压", "低压", "脉搏", header = true)
                     session.readings.forEachIndexed { index, reading ->
                         DetailReadingRow(
@@ -156,13 +158,34 @@ fun HistoryDetailScreen(
             val (symptomTags, factorTags) = remember(session.symptoms) {
                 MeasurementTags.splitSymptomsAndFactors(session.symptoms)
             }
-            if (symptomTags.isNotEmpty() || factorTags.isNotEmpty() || !session.note.isNullOrBlank()) {
+            val supplementaryDetails = buildList {
+                session.symptomNote?.takeIf { it.isNotBlank() }?.let { add("不舒服：$it") }
+                session.factorNote?.takeIf { it.isNotBlank() }?.let { add("可能影响血压：$it") }
+                if (session.timePeriod != null && session.scene.isNotBlank() && session.scene != session.timePeriod) {
+                    add("原场景：${session.scene}")
+                }
+                if (symptomTags.isNotEmpty()) add("症状：${symptomTags.joinToString("、")}")
+                if (factorTags.isNotEmpty()) add("影响因素：${factorTags.joinToString("、")}")
+                session.note?.takeIf { it.isNotBlank() }?.let { add("“$it”") }
+            }
+            if (supplementaryDetails.isNotEmpty()) {
+                val supplementarySummary = buildList {
+                    if (symptomTags.isNotEmpty()) add("症状：${symptomTags.joinToString("、")}")
+                    else if (!session.symptomNote.isNullOrBlank()) add("有不舒服记录")
+                    if (factorTags.isNotEmpty()) add("影响因素：${factorTags.joinToString("、")}")
+                    else if (!session.factorNote.isNullOrBlank()) add("有影响因素记录")
+                    if (session.timePeriod != null && session.scene.isNotBlank() && session.scene != session.timePeriod) {
+                        add("原场景：${session.scene}")
+                    }
+                    if (!session.note.isNullOrBlank()) add("有备注")
+                }.joinToString(" · ")
                 DataCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("测量备注", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        if (symptomTags.isNotEmpty()) Text("症状：${symptomTags.joinToString("、")}")
-                        if (factorTags.isNotEmpty()) Text("影响因素：${factorTags.joinToString("、")}")
-                        session.note?.takeIf { it.isNotBlank() }?.let { Text("“$it”") }
+                    ExpandableSection(
+                        title = "补充情况",
+                        summary = supplementarySummary,
+                        stateKey = "history-supplement-$sessionId"
+                    ) {
+                        supplementaryDetails.forEach { Text(it) }
                     }
                 }
             }

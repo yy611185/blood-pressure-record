@@ -9,6 +9,7 @@ import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
+import com.example.bloodpressurerecord.domain.time.MeasurementPeriod
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -88,7 +89,10 @@ class DefaultBloodPressureRepository(
         val now = nowMillis()
         val session = buildSessionEntity(
             sessionId = sessionId,
-            input = input,
+            input = input.copy(
+                averageStrategy = AverageStrategy.ALL,
+                timePeriod = MeasurementPeriod.labelFor(input.measuredAt)
+            ),
             createdAt = now,
             updatedAt = now,
             minimumReadingCount = MeasurementInputRules.MIN_READING_COUNT
@@ -103,10 +107,22 @@ class DefaultBloodPressureRepository(
         requireValidMeasurementTime(input.measuredAt)
         val existing = sessionDao.getSessionWithReadings(sessionId)
             ?: error("记录不存在，无法编辑")
+        val existingInputs = existing.readings.sortedBy { it.orderIndex }.map {
+            SessionReadingInput(it.systolic, it.diastolic, it.pulse)
+        }
+        val strategy = existing.session.averageStrategy.toAverageStrategy()
+        val timePeriod = MeasurementPeriod.labelFor(input.measuredAt)
         val now = nowMillis()
-        val session = buildSessionEntity(
+        val rebuilt = buildSessionEntity(
             sessionId = sessionId,
-            input = input,
+            input = input.copy(
+                averageStrategy = strategy,
+                timePeriod = timePeriod,
+                // 旧版场景继续保存；新记录的兼容场景别名跟随自动时间段。
+                scene = if (existing.session.timePeriod == null ||
+                    existing.session.scene != existing.session.timePeriod
+                ) existing.session.scene else timePeriod
+            ),
             createdAt = existing.session.createdAt,
             updatedAt = now,
             minimumReadingCount = minOf(
@@ -114,7 +130,19 @@ class DefaultBloodPressureRepository(
                 existing.readings.size.coerceAtLeast(1)
             )
         )
-        val readings = buildReadingEntities(sessionId, input.readings)
+        // 仅修改时间或补充情况时，历史代表值与分级完全保留。
+        val session = if (existingInputs == input.readings) {
+            rebuilt.copy(
+                avgSystolic = existing.session.avgSystolic,
+                avgDiastolic = existing.session.avgDiastolic,
+                avgPulse = existing.session.avgPulse,
+                category = existing.session.category,
+                containsHighRiskReading = existing.session.containsHighRiskReading
+            )
+        } else rebuilt
+        val readings = if (existingInputs == input.readings) {
+            existing.readings
+        } else buildReadingEntities(sessionId, input.readings)
         check(sessionDao.updateSessionWithReadings(session, readings)) {
             "记录不存在，无法编辑"
         }
@@ -137,21 +165,36 @@ class DefaultBloodPressureRepository(
             note = session.note,
             symptoms = session.symptoms,
             readings = orderedReadings,
-            averageStrategy = session.averageStrategy
+            averageStrategy = session.averageStrategy,
+            timePeriod = session.timePeriod,
+            symptomNote = session.symptomNote,
+            factorNote = session.factorNote
         )
-        val entity = buildSessionEntity(
-            sessionId = session.id,
-            input = input,
+        validateReadings(input, minimumReadingCount = 1)
+        val entity = MeasurementSessionEntity(
+            id = session.id,
+            measuredAt = session.measuredAt,
+            scene = session.scene,
+            note = session.note,
+            symptomsJson = session.symptoms.takeIf { it.isNotEmpty() }?.let { JSONArray(it).toString() },
+            avgSystolic = session.avgSystolic,
+            avgDiastolic = session.avgDiastolic,
+            avgPulse = session.avgPulse,
+            averageStrategy = session.averageStrategy.name,
+            category = session.category,
+            containsHighRiskReading = session.containsHighRiskReading,
             createdAt = session.createdAt.takeIf { it > 0L } ?: nowMillis(),
             updatedAt = session.updatedAt.takeIf { it > 0L } ?: session.createdAt.takeIf { it > 0L }
                 ?: nowMillis(),
-            minimumReadingCount = 1
+            timePeriod = session.timePeriod,
+            symptomNote = session.symptomNote,
+            factorNote = session.factorNote
         )
-        val readings = session.readings.sortedBy { it.orderIndex }.mapIndexed { index, reading ->
+        val readings = session.readings.sortedBy { it.orderIndex }.map { reading ->
             MeasurementReadingEntity(
                 id = reading.id,
                 sessionId = session.id,
-                orderIndex = index + 1,
+                orderIndex = reading.orderIndex,
                 systolic = reading.systolic,
                 diastolic = reading.diastolic,
                 pulse = reading.pulse
@@ -168,16 +211,7 @@ class DefaultBloodPressureRepository(
         updatedAt: Long,
         minimumReadingCount: Int
     ): MeasurementSessionEntity {
-        val readingValues = input.readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
-        require(readingValues.size in minimumReadingCount..MeasurementInputRules.MAX_READING_COUNT) {
-            "每次测量必须包含 $minimumReadingCount 至 " +
-                "${MeasurementInputRules.MAX_READING_COUNT} 组读数"
-        }
-        readingValues.forEachIndexed { index, reading ->
-            require(MeasurementInputRules.validateReading(reading) == null) {
-                "第 ${index + 1} 组读数不符合统一输入规则"
-            }
-        }
+        val readingValues = validateReadings(input, minimumReadingCount)
         val derived = MeasurementDerivation.derive(readingValues, input.averageStrategy)
         val symptomsJson = if (input.symptoms.isEmpty()) null else JSONArray(input.symptoms).toString()
         return MeasurementSessionEntity(
@@ -193,8 +227,25 @@ class DefaultBloodPressureRepository(
             category = derived.category.name,
             containsHighRiskReading = derived.containsHighRiskReading,
             createdAt = createdAt,
-            updatedAt = updatedAt
+            updatedAt = updatedAt,
+            timePeriod = input.timePeriod,
+            symptomNote = input.symptomNote?.takeIf { it.isNotBlank() },
+            factorNote = input.factorNote?.takeIf { it.isNotBlank() }
         )
+    }
+
+    private fun validateReadings(input: SaveSessionInput, minimumReadingCount: Int): List<ReadingValue> {
+        val readingValues = input.readings.map { ReadingValue(it.systolic, it.diastolic, it.pulse) }
+        require(readingValues.size in minimumReadingCount..MeasurementInputRules.MAX_READING_COUNT) {
+            "每次测量必须包含 $minimumReadingCount 至 " +
+                "${MeasurementInputRules.MAX_READING_COUNT} 组读数"
+        }
+        readingValues.forEachIndexed { index, reading ->
+            require(MeasurementInputRules.validateReading(reading) == null) {
+                "第 ${index + 1} 组读数不符合统一输入规则"
+            }
+        }
+        return readingValues
     }
 
     private fun requireValidMeasurementTime(measuredAt: Long) {
@@ -235,6 +286,9 @@ class DefaultBloodPressureRepository(
             containsHighRiskReading = session.containsHighRiskReading,
             createdAt = session.createdAt,
             updatedAt = session.updatedAt,
+            timePeriod = session.timePeriod,
+            symptomNote = session.symptomNote,
+            factorNote = session.factorNote,
             readings = readings.sortedBy { it.orderIndex }.map {
                 SessionReading(
                     id = it.id,

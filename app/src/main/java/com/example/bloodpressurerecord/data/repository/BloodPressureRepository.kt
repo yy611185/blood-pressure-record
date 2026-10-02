@@ -54,8 +54,11 @@ data class SaveSessionInput(
     val note: String?,
     val symptoms: List<String>,
     val readings: List<SessionReadingInput>,
-    /** 平均值计算策略；保存时用于派生平均值与分级。 */
-    val averageStrategy: AverageStrategy = AverageStrategy.ALL
+    /** 兼容旧调用方；新增记录固定使用 ALL，编辑保留原记录策略。 */
+    val averageStrategy: AverageStrategy = AverageStrategy.ALL,
+    val timePeriod: String? = null,
+    val symptomNote: String? = null,
+    val factorNote: String? = null
 )
 
 data class SessionReading(
@@ -81,7 +84,10 @@ data class SessionRecord(
     val averageStrategy: AverageStrategy = AverageStrategy.ALL,
     /** 用于恢复/撤销时保留原始记录的时间元数据。旧调用方可使用默认值。 */
     val createdAt: Long = 0L,
-    val updatedAt: Long = 0L
+    val updatedAt: Long = 0L,
+    val timePeriod: String? = null,
+    val symptomNote: String? = null,
+    val factorNote: String? = null
 )
 
 interface BloodPressureRepository {

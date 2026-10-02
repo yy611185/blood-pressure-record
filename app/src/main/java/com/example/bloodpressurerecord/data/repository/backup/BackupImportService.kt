@@ -12,6 +12,8 @@ import com.example.bloodpressurerecord.data.db.entity.MedicationTimeEntity
 import com.example.bloodpressurerecord.data.db.entity.MedicationIntakeLogEntity
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.calculator.MeasurementDerivation
+import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
+import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.ReadingValue
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
@@ -409,7 +411,7 @@ class BackupImportService(
                 }
         }
 
-        // v3 直接使用显式策略；v2 为兼容旧备份，按收缩压、舒张压和脉搏三项平均值反推。
+        // 显式策略优先；v2 按三项代表值反推策略，但不因此替换备份中的代表值。
         val allDerived = MeasurementDerivation.derive(readingValues, AverageStrategy.ALL)
         val strategy = if (explicitStrategy != null) {
             explicitStrategy
@@ -422,15 +424,28 @@ class BackupImportService(
                 ?: AverageStrategy.ALL
         }
         val derived = MeasurementDerivation.derive(readingValues, strategy)
+        // 合法备份保留保存时的代表值，避免换机或升级导入后历史趋势变化。
+        val backupAverage = if (source.backupAvgSystolic != null && source.backupAvgDiastolic != null) {
+            ReadingValue(source.backupAvgSystolic, source.backupAvgDiastolic, source.backupAvgPulse)
+                .takeIf { MeasurementInputRules.validateReading(it) == null }
+        } else null
+        val average = backupAverage?.let {
+            derived.average.copy(avgSystolic = it.systolic, avgDiastolic = it.diastolic, avgPulse = it.pulse)
+        } ?: derived.average
+        val category = if (backupAverage != null) {
+            source.backupLevel?.takeIf { it.isNotBlank() }
+                ?: CategoryCalculator.calculate(average.avgSystolic, average.avgDiastolic).name
+        } else derived.category.name
+        val highRisk = if (backupAverage != null) {
+            source.backupHighAlert ?: BloodPressureRules.containsHighRiskReading(readingValues, average)
+        } else derived.containsHighRiskReading
         val createdAt = parseDateTime(source.createdAt, zoneId) ?: measuredAt
         val updatedAt = parseDateTime(source.updatedAt, zoneId) ?: createdAt
         val (symptomsJson, symptomsCorrected) = normalizeSymptomsJson(source.symptomsJson)
         val corrected = source.backupGroupCount != readingValues.size ||
-            source.backupAvgSystolic != derived.average.avgSystolic ||
-            source.backupAvgDiastolic != derived.average.avgDiastolic ||
-            source.backupAvgPulse != derived.average.avgPulse ||
-            source.backupLevel?.uppercase() != derived.category.name ||
-            source.backupHighAlert != derived.containsHighRiskReading ||
+            backupAverage == null ||
+            source.backupLevel.isNullOrBlank() ||
+            source.backupHighAlert == null ||
             parseDateTime(source.createdAt, zoneId) == null ||
             parseDateTime(source.updatedAt, zoneId) == null ||
             symptomsCorrected
@@ -441,14 +456,17 @@ class BackupImportService(
             scene = source.scene ?: "备份导入",
             note = source.note,
             symptomsJson = symptomsJson,
-            avgSystolic = derived.average.avgSystolic,
-            avgDiastolic = derived.average.avgDiastolic,
-            avgPulse = derived.average.avgPulse,
+            avgSystolic = average.avgSystolic,
+            avgDiastolic = average.avgDiastolic,
+            avgPulse = average.avgPulse,
             averageStrategy = strategy.name,
-            category = derived.category.name,
-            containsHighRiskReading = derived.containsHighRiskReading,
+            category = category,
+            containsHighRiskReading = highRisk,
             createdAt = createdAt,
-            updatedAt = updatedAt
+            updatedAt = updatedAt,
+            timePeriod = source.timePeriod,
+            symptomNote = source.symptomNote,
+            factorNote = source.factorNote
         )
         val readings = source.readings.zip(readingValues).map { (sourceReading, reading) ->
             val orderIndex = requireNotNull(sourceReading.orderIndex)

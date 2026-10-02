@@ -162,7 +162,10 @@ class BackupExportService(
             symptomsJson = session.symptomsJson,
             note = session.note,
             createdAt = formatDateTime(session.createdAt),
-            updatedAt = formatDateTime(session.updatedAt)
+            updatedAt = formatDateTime(session.updatedAt),
+            timePeriod = session.timePeriod,
+            symptomNote = session.symptomNote,
+            factorNote = session.factorNote
         )
     }
 
@@ -288,6 +291,6 @@ class BackupExportService(
     }
 
     companion object {
-        const val EXPORT_FORMAT_VERSION = 5
+        const val EXPORT_FORMAT_VERSION = 6
     }
 }

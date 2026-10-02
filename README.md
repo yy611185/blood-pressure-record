@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册、不联网、不复杂。数据只存在你的手机里。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.1.1-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.1.2-orange)
 
 ---
 
@@ -28,16 +28,16 @@
 
 | 功能 | 说明 |
 |---|---|
-| 📝 一次记多组 | 一次测量可录入多组收缩压/舒张压/脉搏，自动算平均值（可选"不计第一组"） |
+| 📝 一次记多组 | 一次测量可录入多组收缩压/舒张压/脉搏，自动计算全部有效组的平均值，输入后可直接保存 |
 | 🏷 自动分级 | 按《中国高血压防治指南》成人诊室标准分级：正常 / 正常高值 / 1–3 级 + 偏低提示 |
 | 📅 历史日历 | 按月查看、详情、编辑、删除、**撤销** |
-| 📈 趋势图 | 7/30 天/全部，支持缩放、参考线、每日聚合、当天明细 |
+| 📈 趋势图 | 7/30 天/全部按每次测量展示，支持缩放、参考线、当天明细和期间/早间/晚间平均 |
 | 💊 服药提醒 | 晨/晚提醒 + 每日打卡 + 可选写入系统日历（需授权） |
 | 📲 桌面小部件 | 不打开 App 也能看到最新血压与今日进度 |
-| 💾 Excel 导入导出 | v4 完整备份测量、设置、药品、服药时间与打卡，兼容读取 v2/v3 |
+| 💾 Excel 导入导出 | v6 完整备份测量、补充情况、设置和用药数据，兼容读取 v2–v5 |
 | 🔐 加密备份 | 可选 .bpx 加密导出：AES-256-GCM + 口令派生密钥，导入需相同口令 |
 
-- 支持 Excel (.xlsx) 格式导入和导出；格式 v4 保留平均策略和完整用药数据，并向后兼容 v2/v3。
+- 支持 Excel (.xlsx) 格式导入和导出；格式 v6 保留自动时间段、两项补充情况、历史平均值/策略和完整用药数据，并向后兼容 v2–v5。
 - 导出文件包含使用说明、测量记录、全部原始读数、用户资料、药品、每日服药时间、打卡历史和导出信息。
 - 文件交给用户选择的 Android 文件位置或文件提供方；应用不会自行上传服务器。
 - 即使暂无测量记录，也可导出用户资料与设置。

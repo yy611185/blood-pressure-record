@@ -3,7 +3,6 @@ package com.example.bloodpressurerecord.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,7 +24,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.HorizontalDivider
@@ -46,8 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.RoundIconBadge
-import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
@@ -108,47 +106,56 @@ fun SettingsScreen(
                         TargetTile("目标高压", state.targetSystolicText.ifBlank { "—" }, Modifier.weight(1f))
                         TargetTile("目标低压", state.targetDiastolicText.ifBlank { "—" }, Modifier.weight(1f))
                     }
-                    Text("平均值怎么算", style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp))
-                    SegmentedPillGroup(
-                        options = listOf("全部组平均", "不计第一组"),
-                        selectedIndex = if (state.discardFirstReading) 1 else 0,
-                        onSelect = { index -> viewModel.setDiscardFirstReading(index == 1) }
-                    )
-                    Text("只影响之后的新记录；高风险判断始终检查每组读数。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             SettingsSectionTitle("提醒")
             SettingsGroup {
                 SettingRow("提醒中心", "早晚测量、服药和日历同步", Icons.Outlined.Notifications, onOpenReminder)
             }
-            SettingsSectionTitle("显示")
-            SettingsGroup {
-                SettingSwitchRow("大字模式", "字号放大，按钮更好按", Icons.Outlined.Visibility,
-                    state.isLargeTextEnabled, viewModel::setLargeTextEnabled)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingSwitchRow("深色模式", if (state.appearanceMode == "system") "跟随系统" else "手动设置",
-                    Icons.Outlined.DarkMode, darkEnabled) {
-                    viewModel.setAppearanceMode(if (it) "dark" else "light")
+            ExpandableSection(
+                title = "显示",
+                summary = listOf(
+                    if (state.isLargeTextEnabled) "大字模式已开启" else "标准字号",
+                    when (state.appearanceMode) {
+                        "dark" -> "深色模式"
+                        "light" -> "浅色模式"
+                        else -> "外观跟随系统"
+                    },
+                    if (state.showBuddy) "显示小压" else "隐藏小压"
+                ).joinToString(" · "),
+                initiallyExpanded = true,
+                stateKey = "settings-display"
+            ) {
+                SettingsGroup {
+                    SettingSwitchRow("大字模式", "字号放大，按钮更好按", Icons.Outlined.Visibility,
+                        state.isLargeTextEnabled, viewModel::setLargeTextEnabled)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingSwitchRow("深色模式", if (state.appearanceMode == "system") "跟随系统" else "手动设置",
+                        Icons.Outlined.DarkMode, darkEnabled) {
+                        viewModel.setAppearanceMode(if (it) "dark" else "light")
+                    }
+                    if (state.appearanceMode != "system") {
+                        TextButton(onClick = { viewModel.setAppearanceMode("system") },
+                            modifier = Modifier.fillMaxWidth()) { Text("恢复跟随系统") }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingSwitchRow("显示小压", "首页小伙伴会跟着血压变表情", Icons.Outlined.FavoriteBorder,
+                        state.showBuddy, viewModel::setShowBuddy)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow("显示设置", "趋势图和高风险提醒", Icons.Outlined.Visibility, onOpenDisplay)
                 }
-                if (state.appearanceMode != "system") {
-                    TextButton(onClick = { viewModel.setAppearanceMode("system") },
-                        modifier = Modifier.fillMaxWidth()) { Text("恢复跟随系统") }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingSwitchRow("显示小压", "首页小伙伴会跟着血压变表情", Icons.Outlined.FavoriteBorder,
-                    state.showBuddy, viewModel::setShowBuddy)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingRow("显示设置", "趋势图和高风险提醒", Icons.Outlined.Visibility, onOpenDisplay)
             }
-            SettingsSectionTitle("数据")
-            SettingsGroup {
-                SettingRow("导出、加密备份与导入", "数据保存在本机", Icons.Outlined.Folder,
-                    onOpenDataManagement)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingRow("关于与更新说明", "应用功能和版本变化", Icons.Outlined.Info, onOpenInfo)
+            ExpandableSection(
+                title = "数据",
+                summary = "导出 · 加密备份 · 导入 · 更新说明",
+                stateKey = "settings-data"
+            ) {
+                SettingsGroup {
+                    SettingRow("导出、加密备份与导入", "数据保存在本机", Icons.Outlined.Folder,
+                        onOpenDataManagement)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingRow("关于与更新说明", "应用功能和版本变化", Icons.Outlined.Info, onOpenInfo)
+                }
             }
             Surface(shape = RoundedCornerShape(22.dp),
                 color = MaterialTheme.colorScheme.secondaryContainer,

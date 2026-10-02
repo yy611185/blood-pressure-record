@@ -23,7 +23,10 @@ data class BackupMeasurementRow(
     val note: String?,
     val createdAt: String?,
     val updatedAt: String?,
-    val averageStrategy: String = "ALL"
+    val averageStrategy: String = "ALL",
+    val timePeriod: String? = null,
+    val symptomNote: String? = null,
+    val factorNote: String? = null
 )
 
 data class BackupReadingRow(

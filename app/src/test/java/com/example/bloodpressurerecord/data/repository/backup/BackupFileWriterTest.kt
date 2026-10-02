@@ -11,7 +11,7 @@ import org.junit.Test
 
 class BackupFileWriterTest {
     @Test
-    fun writeXlsx_createsVersion3SheetsWithExplicitAverageStrategy() {
+    fun writeXlsx_createsVersion6SheetsWithExplicitAverageStrategyAndNotes() {
         val payload = samplePayload()
 
         val bytes = ByteArrayOutputStream().use { output ->
@@ -64,7 +64,10 @@ class BackupFileWriterTest {
                     symptomsJson = "[\"头晕\"]",
                     note = "morning",
                     createdAt = "2026-04-23 08:31:00",
-                    updatedAt = "2026-04-23 08:31:00"
+                    updatedAt = "2026-04-23 08:31:00",
+                    timePeriod = "清晨",
+                    symptomNote = "有点头晕",
+                    factorNote = "睡眠不足"
                 )
             ),
             readings = (1..7).map { index ->
@@ -78,10 +81,11 @@ class BackupFileWriterTest {
             },
             userProfile = listOf(BackupUserProfileItem("target_sys", "120")),
             meta = listOf(
-                BackupMetaItem("export_format_version", "3"),
+                BackupMetaItem("export_format_version", "6"),
                 BackupMetaItem("total_records", "1"),
                 BackupMetaItem("measurement_sessions_count", "1"),
-                BackupMetaItem("measurement_readings_count", "7")
+                BackupMetaItem("measurement_readings_count", "7"),
+                BackupMetaItem("timezone", "Asia/Taipei")
             ),
             diagnostics = BackupExportDiagnostics(
                 sessionCount = 1,
@@ -116,6 +120,9 @@ class BackupFileWriterTest {
             assertEquals("晨起", row.getCell(10).stringCellValue)
             assertEquals("[\"头晕\"]", row.getCell(11).stringCellValue)
             assertEquals("DISCARD_FIRST", row.getCell(15).stringCellValue)
+            assertEquals("清晨", row.getCell(16).stringCellValue)
+            assertEquals("有点头晕", row.getCell(17).stringCellValue)
+            assertEquals("睡眠不足", row.getCell(18).stringCellValue)
 
             val readingsSheet = workbook.getSheet("原始读数")
             assertEquals(7, readingsSheet.lastRowNum)
@@ -124,15 +131,44 @@ class BackupFileWriterTest {
 
             val metaSheet = workbook.getSheet("导出信息")
             assertEquals("export_format_version", metaSheet.getRow(1).getCell(0).stringCellValue)
-            assertEquals("3", metaSheet.getRow(1).getCell(1).stringCellValue)
+            assertEquals("6", metaSheet.getRow(1).getCell(1).stringCellValue)
             assertEquals("measurement_sessions_count", metaSheet.getRow(3).getCell(0).stringCellValue)
             assertEquals("1", metaSheet.getRow(3).getCell(1).stringCellValue)
             assertEquals("measurement_readings_count", metaSheet.getRow(4).getCell(0).stringCellValue)
             assertEquals("7", metaSheet.getRow(4).getCell(1).stringCellValue)
         }
     }
-}
 
-private fun org.apache.poi.ss.usermodel.Cell?.blankOrEmpty(): Boolean {
-    return this == null || stringCellValue.isEmpty()
+    @Test
+    fun readXlsx_preservesNewFieldsAndAcceptsOldVersionWithoutThem() {
+        val bytes = ByteArrayOutputStream().use { output ->
+            BackupFileWriter().writeXlsx(samplePayload(), output)
+            output.toByteArray()
+        }
+        val imported = BackupFileReader().readXlsx(ByteArrayInputStream(bytes)).measurements.single()
+        assertEquals("清晨", imported.timePeriod)
+        assertEquals("有点头晕", imported.symptomNote)
+        assertEquals("睡眠不足", imported.factorNote)
+        assertEquals(119, imported.backupAvgSystolic)
+        assertEquals("DISCARD_FIRST", imported.backupAverageStrategy)
+
+        val legacyBytes = XSSFWorkbook(ByteArrayInputStream(bytes)).use { workbook ->
+            workbook.getSheet("导出信息").getRow(1).getCell(1).setCellValue("5")
+            val sheet = workbook.getSheet("测量记录")
+            (16..18).forEach { index ->
+                sheet.getRow(0).removeCell(sheet.getRow(0).getCell(index))
+                sheet.getRow(1).removeCell(sheet.getRow(1).getCell(index))
+            }
+            ByteArrayOutputStream().use { output ->
+                workbook.write(output)
+                output.toByteArray()
+            }
+        }
+        val legacy = BackupFileReader().readXlsx(ByteArrayInputStream(legacyBytes)).measurements.single()
+        org.junit.Assert.assertNull(legacy.timePeriod)
+        org.junit.Assert.assertNull(legacy.symptomNote)
+        org.junit.Assert.assertNull(legacy.factorNote)
+        assertEquals(119, legacy.backupAvgSystolic)
+        assertEquals("晨起", legacy.scene)
+    }
 }
