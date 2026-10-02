@@ -7,7 +7,6 @@ on:
       - main
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -50,12 +49,7 @@ jobs:
           path: app/build/reports/tests/
 
   release:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'push' &&
-       github.ref == 'refs/heads/main' &&
-       contains(github.event.head_commit.message, '[publish-release]'))
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -79,9 +73,7 @@ jobs:
         run: |
           VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*versionName = "\([^"]*\)".*/\1/')
           test -n "${VERSION_NAME}"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            test "${GITHUB_REF_NAME}" = "v${VERSION_NAME}"
-          fi
+          test "${GITHUB_REF_NAME}" = "v${VERSION_NAME}"
           echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=v${VERSION_NAME}" >> "$GITHUB_ENV"
       - name: Restore release keystore
