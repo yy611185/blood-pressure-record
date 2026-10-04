@@ -75,6 +75,7 @@ class AppViewModelFactory(
                 TrendViewModel(
                     trendRepository = container.trendRepository,
                     settingsRepository = container.settingsRepository,
+                    savedStateHandle = savedStateHandle,
                     todayTicks = dayTicks()
                 ) as T
             }

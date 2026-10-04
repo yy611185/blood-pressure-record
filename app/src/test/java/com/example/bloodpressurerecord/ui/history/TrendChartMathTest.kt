@@ -7,7 +7,9 @@ import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.abs
+import kotlin.math.roundToLong
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -153,7 +155,7 @@ class TrendChartMathTest {
     }
 
     @Test
-    fun viewport_zoomIsMonotonicAndBoundedByMaxZoom() {
+    fun viewport_zoomIsMonotonicAndMatchesActualHourlyWindow() {
         val viewport = TrendTimeViewportState()
         val oneYear = 365L * 24L * 60L * 60L * 1_000L
         viewport.reset(
@@ -163,16 +165,17 @@ class TrendChartMathTest {
             defaultEnd = oneYear
         )
 
-        // 反复放大会单调收紧窗口，并最终被 MAX_ZOOM 拦住。
+        val minSpanRatio = TrendChartMath.minSpanRatio(TrendRange.ALL, oneYear, 300f)
         var previousZoom = viewport.zoom
         repeat(40) {
-            viewport.zoomBy(zoomChange = 5f, focusRatio = 0.5, minSpanRatio = 0.0000001)
+            viewport.zoomBy(zoomChange = 5f, focusRatio = 0.5, minSpanRatio = minSpanRatio)
             assertTrue("缩放应单调不降", viewport.zoom >= previousZoom - 0.001f)
             previousZoom = viewport.zoom
         }
 
-        assertTrue("缩放倍数必须有上限", viewport.zoom <= TrendChartMath.MAX_ZOOM)
-        assertEquals(TrendChartMath.MAX_ZOOM, viewport.zoom, 0.5f)
+        assertEquals(3_600_000L, viewport.endMillis() - viewport.startMillis())
+        assertEquals(8_760f, viewport.zoom, 0.5f)
+        assertEquals((1.0 / viewport.spanRatio).toFloat(), viewport.zoom, 0.001f)
         assertTrue(viewport.endMillis() > viewport.startMillis())
         assertTrue(viewport.startMillis() >= 0L)
         assertTrue(viewport.endMillis() <= oneYear)
@@ -715,6 +718,249 @@ class TrendChartMathTest {
             y = 100f,
             touchRadiusPx = 22f
         )?.id)
+    }
+
+    @Test
+    fun restoredViewportKeepsAbsoluteTimeAcrossDomainRefreshAndOnlyMovesWhenNeeded() {
+        val updates = mutableListOf<Pair<Long, Long>>()
+        val viewport = TrendTimeViewportState { start, end -> updates += start to end }
+        viewport.reset(0L, 10_000L, 0L, 10_000L, restoredViewport = 3_000L to 5_000L)
+        assertEquals(3_000L to 5_000L, viewport.startMillis() to viewport.endMillis())
+        assertEquals(listOf(3_000L to 5_000L), updates)
+
+        viewport.updateDomain(0L, 20_000L, 0L, 20_000L)
+        viewport.ensureVisible(4_000L)
+        assertEquals(3_000L to 5_000L, viewport.startMillis() to viewport.endMillis())
+        viewport.moveToLatest(8_000L)
+        assertEquals(6_000L to 8_000L, viewport.startMillis() to viewport.endMillis())
+    }
+
+    @Test
+    fun rangeMetadataKeepsAxisCompatibilityButHitTargetsOnlyVisibleLineNodes() {
+        val range = point(0L, systolic = 125, diastolic = 80, pulse = 75).copy(
+            aggregation = TrendAggregation.DAILY_RANGE,
+            systolicMin = 105, systolicMax = 190, diastolicMin = 45, diastolicMax = 110,
+            pulseMin = 50, pulseMax = 140
+        )
+        val axis = TrendChartMath.stableYAxis(TrendYAxis(60, 160, 10), listOf(range))
+        assertTrue(45 in axis.min..axis.max && 190 in axis.min..axis.max)
+        val pulseAxis = TrendChartMath.stablePulseYAxis(null, listOf(range))!!
+        assertTrue(50 in pulseAxis.min..pulseAxis.max && 140 in pulseAxis.min..pulseAxis.max)
+        val chart = projection(0L, 1_000L, axis)
+        assertFalse(chart.hitsNode(
+            range, chart.xOfTime(0L), chart.yOfValue(185), true, false, 22f
+        ))
+        assertTrue(chart.hitsNode(
+            range, chart.xOfTime(0L), chart.yOfValue(range.systolic), true, false, 22f
+        ))
+    }
+
+    @Test
+    fun samplingRetainsGapEdgesSelectedPointAndIndependentMetricExtremes() {
+        val day = 24L * 60L * 60L * 1_000L
+        val points = (0 until 200).map { index ->
+            point(
+                timestamp = index * 1_000L + if (index >= 100) 3L * day else 0L,
+                id = "node-$index", systolic = if (index == 190) 200 else 120,
+                diastolic = if (index == 185) 45 else 80,
+                pulse = if (index == 50) null else if (index == 180) 150 else 70
+            )
+        }
+        val sampled = TrendChartMath.sampleShared(points, 24, selectedId = "node-157")
+        assertTrue(sampled.map { it.id }.containsAll(listOf("node-99", "node-100", "node-157", "node-190", "node-185")))
+        val pulse = TrendChartMath.samplePulse(points, 24, selectedId = "node-157")
+        assertTrue(pulse.map { it.id }.containsAll(listOf("node-49", "node-51", "node-99", "node-100", "node-157", "node-180")))
+    }
+
+    @Test
+    fun originalSegmentsKeepContinuousLongHistoryConnectedAtEverySamplingBudget() {
+        val halfDay = 12L * 60L * 60L * 1_000L
+        val gap = 4L * halfDay
+        val continuous = (0 until 1_800).map { point(it * halfDay) }
+        val segments = TrendChartMath.bloodPressureSegmentIds(continuous, gap)
+        for (budget in listOf(60, 180, 540)) {
+            val sampled = TrendChartMath.sampleShared(continuous, budget)
+            assertTrue(sampled.zipWithNext().any { (a, b) -> b.timestamp - a.timestamp > gap })
+            assertTrue(sampled.zipWithNext().all { (a, b) -> segments[a.id] == segments[b.id] })
+        }
+
+        val missing = continuous.mapIndexed { index, point ->
+            if (index >= 900) point.copy(timestamp = point.timestamp + 3L * 24L * 60L * 60L * 1_000L)
+            else point
+        }
+        val missingSegments = TrendChartMath.bloodPressureSegmentIds(missing, gap)
+        for (budget in listOf(60, 180, 540)) {
+            val sampled = TrendChartMath.sampleShared(missing, budget)
+            val breaks = sampled.zipWithNext().filter { (a, b) -> missingSegments[a.id] != missingSegments[b.id] }
+            assertEquals(listOf(missing[899] to missing[900]), breaks)
+        }
+    }
+
+    @Test
+    fun samplingKeepsIndependentGlobalExtremesInLastBucketWithoutTailTruncation() {
+        val points = (0 until 120).map { index ->
+            point(index * 1_000L, id = "tail-$index", pulse = 70).let { point ->
+                when (index) {
+                    114 -> point.copy(systolic = 260, systolicMin = 260, systolicMax = 260)
+                    115 -> point.copy(systolic = 95, systolicMin = 95, systolicMax = 95,
+                        pulse = 180, pulseMin = 180, pulseMax = 180)
+                    116 -> point.copy(systolic = 220, systolicMin = 220, systolicMax = 220,
+                        diastolic = 190, diastolicMin = 190, diastolicMax = 190)
+                    117 -> point.copy(diastolic = 40, diastolicMin = 40, diastolicMax = 40,
+                        pulse = 40, pulseMin = 40, pulseMax = 40)
+                    else -> point
+                }
+            }
+        }
+        for (budget in listOf(24, 60, 100)) {
+            val sampled = TrendChartMath.sampleShared(points, budget)
+            assertEquals(points.first(), sampled.first())
+            assertEquals(points.last(), sampled.last())
+            assertTrue(sampled.map { it.id }.containsAll((114..117).map { "tail-$it" }))
+            assertTrue(sampled.size <= budget)
+            val pulse = TrendChartMath.samplePulse(points, budget)
+            assertTrue(pulse.map { it.id }.containsAll(listOf("tail-115", "tail-117")))
+        }
+    }
+
+    @Test
+    fun offscreenNeighborsKeepTrueTimeProjectionAndSameEdgeIntersection() {
+        val hour = 3_600_000L
+        val chart = projection(10L * hour, 20L * hour)
+        val width = chart.geometry.plotWidth
+        assertEquals(chart.geometry.left - width, chart.xOfTime(0L), 0.001f)
+        assertEquals(chart.geometry.right + width, chart.xOfTime(30L * hour), 0.001f)
+        assertEquals(-100f, TrendChartMath.xOfTime(0L, 0f, 100f, 10L * hour, 20L * hour), 0.001f)
+
+        // 0h 的 100 与 12h 的 160：10h 处的线段交点应一直为 150。
+        fun valueAtTenHours(chart: ChartProjection): Float {
+            val left = chart.xOfTime(0L)
+            val right = chart.xOfTime(12L * hour)
+            return 100f + (chart.xOfTime(10L * hour) - left) / (right - left) * 60f
+        }
+        assertEquals(150f, valueAtTenHours(chart), 0.001f)
+        assertEquals(150f, valueAtTenHours(projection(0L, 20L * hour)), 0.001f)
+    }
+
+    @Test
+    fun cumulativeDragAcceptsSlowHorizontalMotionAndYieldsVerticalMotion() {
+        var dx = 0f
+        repeat(4) {
+            dx += 2f
+            assertEquals(ChartDragIntent.WAIT, TrendChartMath.dragIntent(dx, 0f, 8f, true))
+        }
+        dx += 2f
+        assertEquals(ChartDragIntent.PAN, TrendChartMath.dragIntent(dx, 0f, 8f, true))
+        assertEquals(ChartDragIntent.PAN, TrendChartMath.dragIntent(40f, 3f, 8f, true))
+        assertEquals(ChartDragIntent.YIELD, TrendChartMath.dragIntent(2f, 10f, 8f, true))
+        assertEquals(ChartDragIntent.YIELD, TrendChartMath.dragIntent(dx, 0f, 8f, false))
+        // 来回抖动累计路程超过 slop，净位移未超限时仍等待方向。
+        assertEquals(ChartDragIntent.WAIT, TrendChartMath.dragIntent(6f, 1f, 8f, true))
+    }
+
+    @Test
+    fun repeatedButtonSelectionsCrossWindowsWhileManualPanKeepsItsOwnWindow() {
+        val viewport = TrendTimeViewportState()
+        viewport.reset(0L, 100_000L, 0L, 100_000L)
+        viewport.zoomBy(5f, 0.5, 0.01)
+        for (selectedTimestamp in listOf(70_000L, 90_000L, 10_000L, 30_000L)) {
+            viewport.ensureVisible(selectedTimestamp)
+            assertTrue(selectedTimestamp in viewport.startMillis()..viewport.endMillis())
+            assertEquals(20_000L, viewport.endMillis() - viewport.startMillis())
+        }
+        viewport.panBy(0.3)
+        val manualWindow = viewport.startMillis() to viewport.endMillis()
+        assertFalse(30_000L in manualWindow.first..manualWindow.second)
+        // 数据刷新或重绘没有选点命令，不会把旧选点拉回窗口。
+        viewport.updateDomain(0L, 100_000L, 0L, 100_000L)
+        assertEquals(manualWindow, viewport.startMillis() to viewport.endMillis())
+    }
+
+    @Test
+    fun overlappingHotspotsChooseClosestRealNodeAndDuplicateTimesUseStableId() {
+        val chart = projection(0L, 10_000L)
+        val early = point(1_000L, id = "a", pulse = 70)
+        val later = point(1_100L, id = "b", systolic = 124, pulse = 72)
+        assertEquals("b", TrendChartMath.hitTest(
+            chart, listOf(early, later), chart.xOfTime(later.timestamp), chart.yOfValue(later.systolic),
+            true, true, 22f
+        )?.id)
+        assertEquals("b", TrendChartMath.hitTestPulse(
+            chart, listOf(early, later), chart.xOfTime(later.timestamp), chart.yOfValue(later.pulse!!), 22f
+        )?.id)
+        val sameTime = listOf(early.copy(id = "z"), early.copy(id = "a"))
+        for (candidates in listOf(sameTime, sameTime.reversed())) {
+            assertEquals("a", TrendChartMath.hitTest(
+                chart, candidates, chart.xOfTime(early.timestamp), chart.yOfValue(early.systolic),
+                true, true, 22f
+            )?.id)
+            assertEquals("a", TrendChartMath.hitTestPulse(
+                chart, candidates, chart.xOfTime(early.timestamp), chart.yOfValue(early.pulse!!), 22f
+            )?.id)
+            assertEquals("a", TrendChartMath.nearestPoint(candidates, 1_001L)?.id)
+        }
+    }
+
+    @Test
+    fun selectedBloodPressureNodeIsOverlaidEvenWhenAbsentFromSampling() {
+        val points = (0 until 1_000).map { point(it * 1_000L, id = "selected-$it") }
+        val sampled = TrendChartMath.sampleShared(points, 60)
+        val selected = points.first { point -> sampled.none { it.id == point.id } }
+        val overlay = TrendChartMath.nodePoints(sampled, selected, false, 0L, 999_000L)
+        assertEquals(listOf(selected), overlay)
+        val nodes = TrendChartMath.nodePoints(sampled, selected, true, 0L, 999_000L)
+        assertEquals(selected, nodes.last())
+        assertEquals(1, nodes.count { it.id == selected.id })
+        assertFalse(sampled.contains(selected))
+        assertTrue(TrendChartMath.nodePoints(sampled, selected, false, 900_000L, 999_000L).isEmpty())
+    }
+
+    @Test
+    fun multiYearHistoryHasSameHourDetailLimitAcrossPixelDensitiesAndRanges() {
+        val domainSpan = 5L * 365L * 24L * 3_600_000L
+        for (range in TrendRange.entries) {
+            val smallScreenLimit = TrendChartMath.minSpanRatio(range, domainSpan, 300f)
+            assertEquals(smallScreenLimit, TrendChartMath.minSpanRatio(range, domainSpan, 900f), 0.0)
+            assertEquals(3_600_000L, (smallScreenLimit * domainSpan).roundToLong())
+            val viewport = TrendTimeViewportState()
+            viewport.reset(0L, domainSpan, 0L, domainSpan)
+            repeat(20) { viewport.zoomBy(5f, 0.5, smallScreenLimit) }
+            assertEquals(3_600_000L, viewport.endMillis() - viewport.startMillis())
+            assertEquals((domainSpan / 3_600_000L).toFloat(), viewport.zoom, 0.1f)
+        }
+    }
+
+    @Test
+    fun explicitTimeLabelsUseEachTickActualLocalTimestampAndHourZoomShowsTimeAutomatically() {
+        val zone = ZoneId.of("Asia/Taipei")
+        val start = LocalDate.of(2026, 9, 1).atTime(9, 17).atZone(zone).toInstant().toEpochMilli()
+        val end = LocalDate.of(2026, 9, 30).atTime(21, 42).atZone(zone).toInstant().toEpochMilli()
+        val ticks = TrendChartMath.timeTicks(start, end, zone, showTimeLabels = true)
+        assertEquals("09:17", ticks.first().secondary)
+        assertEquals("21:42", ticks.last().secondary)
+        assertTrue(ticks.all { tick ->
+            val actualTime = java.time.Instant.ofEpochMilli(tick.timestamp).atZone(zone)
+            tick.secondary == actualTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        })
+        val hourTicks = TrendChartMath.timeTicks(start, start + 3_600_000L, zone)
+        assertTrue(hourTicks.all { it.primary.matches(Regex("\\d{2}:\\d{2}")) })
+        assertTrue(hourTicks.all { it.secondary != null })
+    }
+
+    @Test
+    fun denseYAxisAddsUsefulTicksWhileRespectingPlotHeightAndScaledFonts() {
+        val axis = TrendYAxis(40, 160, 20)
+        val regular = TrendChartMath.yAxisTickValues(axis, 400f, 16f, 7f)
+        val dense = TrendChartMath.yAxisTickValues(axis, 400f, 16f, 7f, dense = true)
+        assertTrue(dense.size > regular.size)
+        for ((height, fontHeight) in listOf(120f to 16f, 200f to 32f, 400f to 48f)) {
+            val ticks = TrendChartMath.yAxisTickValues(axis, height, fontHeight, 7f, dense = true)
+            assertTrue(ticks.zipWithNext().all { (a, b) ->
+                (b - a).toFloat() / (axis.max - axis.min) * height >= fontHeight + 7f
+            })
+            assertEquals(axis.min, ticks.first())
+            assertEquals(axis.max, ticks.last())
+        }
     }
 
     private fun point(

@@ -90,8 +90,13 @@ data class BackupImportOptions(
     val importMeasurements: Boolean = true,
     val restoreUserProfile: Boolean = false,
     val restoreDisplaySettings: Boolean = false,
-    val restoreReminderSettings: Boolean = false
-)
+    val restoreReminderSettings: Boolean = false,
+    val restoreMedications: Boolean = false
+) {
+    val hasSelection: Boolean
+        get() = importMeasurements || restoreUserProfile || restoreDisplaySettings ||
+            restoreReminderSettings || restoreMedications
+}
 
 class BackupImportPreview internal constructor(
     val validRecordCount: Int,
@@ -116,6 +121,9 @@ class BackupImportPreview internal constructor(
     internal val medicationTimes: List<BackupMedicationTimeRow>,
     internal val medicationLogs: List<BackupMedicationLogRow>
 ) {
+    var volumeDescription: String? = null
+        internal set
+    val hasSettings: Boolean get() = userProfile.isNotEmpty()
     val errorCount: Int
         get() = errors.size
 }
@@ -140,7 +148,8 @@ class BackupImportService(
                 importMeasurements = true,
                 restoreUserProfile = true,
                 restoreDisplaySettings = true,
-                restoreReminderSettings = true
+                restoreReminderSettings = true,
+                restoreMedications = true
             )
         )
     }
@@ -179,12 +188,13 @@ class BackupImportService(
             skippedCount = skippedCount,
             readingCount = preparedRecords.sumOf { it.readings.size },
             errors = errors.toList(),
-            changesName = document.userProfile["name"].nonBlank() != currentProfile?.name,
-            changesAgeAndGender = document.userProfile["age"].toIntOrNullSafe() != currentProfile?.age ||
-                document.userProfile["sex"].nonBlank() != currentProfile?.gender,
-            changesTargetPressure = document.userProfile["target_sys"].toIntOrNullSafe() !=
-                currentProfile?.targetSystolic ||
-                document.userProfile["target_dia"].toIntOrNullSafe() != currentProfile?.targetDiastolic,
+            changesName = document.userProfile.isNotEmpty() && document.userProfile["name"].nonBlank() != currentProfile?.name,
+            changesAgeAndGender = document.userProfile.isNotEmpty() &&
+                (document.userProfile["age"].toIntOrNullSafe() != currentProfile?.age ||
+                document.userProfile["sex"].nonBlank() != currentProfile?.gender),
+            changesTargetPressure = document.userProfile.isNotEmpty() &&
+                (document.userProfile["target_sys"].toIntOrNullSafe() != currentProfile?.targetSystolic ||
+                document.userProfile["target_dia"].toIntOrNullSafe() != currentProfile?.targetDiastolic),
             changesDisplaySettings = displaySettingsDiffer(document.userProfile, currentSettings),
             changesReminderTimes = reminderTimesDiffer(document.userProfile, currentSettings),
             changesReminderEnabled = reminderEnabledDiffer(document.userProfile, currentSettings),
@@ -196,14 +206,22 @@ class BackupImportService(
             medications = document.medications,
             medicationTimes = document.medicationTimes,
             medicationLogs = document.medicationLogs
-        )
+        ).also { preview ->
+            val volume = document.meta["backup_volume_index"]
+            val total = document.meta["backup_volume_count"]
+            if (volume != null && total != null) {
+                preview.volumeDescription = "分卷备份第 $volume/$total 卷（共 ${document.meta["backup_total_records"].orEmpty()} 条记录）。" +
+                    "请逐卷恢复全部文件；资料、设置和用药数据仅在第一卷。"
+            }
+        }
     }
 
     suspend fun commitImport(
         preview: BackupImportPreview,
         options: BackupImportOptions
     ): BackupImportResult = withContext(Dispatchers.IO) {
-        val errors = preview.errors.toMutableList()
+        require(options.hasSelection) { "请至少选择一项导入内容" }
+        val errors = if (options.importMeasurements) preview.errors.toMutableList() else mutableListOf()
         val records = if (options.importMeasurements) preview.preparedRecords else emptyList()
         database.withTransaction {
             records.chunked(DATABASE_BATCH_SIZE).forEachIndexed { batchIndex, batch ->
@@ -229,7 +247,7 @@ class BackupImportService(
                     )
                 )
             }
-            importMedications(preview)
+            if (options.restoreMedications) importMedications(preview)
         }
 
         if (options.restoreDisplaySettings || options.restoreReminderSettings) {
@@ -252,12 +270,12 @@ class BackupImportService(
             insertedCount = if (options.importMeasurements) preview.insertedCount else 0,
             replacedCount = if (options.importMeasurements) preview.replacedCount else 0,
             correctedCount = if (options.importMeasurements) preview.correctedCount else 0,
-            skippedCount = preview.skippedCount,
+            skippedCount = if (options.importMeasurements) preview.skippedCount else 0,
             readingCount = if (options.importMeasurements) preview.readingCount else 0,
             errors = errors.toList(),
-            medicationCount = preview.medicationCount,
-            medicationTimeCount = preview.medicationTimeCount,
-            medicationLogCount = preview.medicationLogCount
+            medicationCount = if (options.restoreMedications) preview.medicationCount else 0,
+            medicationTimeCount = if (options.restoreMedications) preview.medicationTimeCount else 0,
+            medicationLogCount = if (options.restoreMedications) preview.medicationLogCount else 0
         )
     }
 

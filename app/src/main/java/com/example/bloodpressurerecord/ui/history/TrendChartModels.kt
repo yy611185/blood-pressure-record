@@ -27,8 +27,10 @@ data class TrendTimeTick(
     val secondary: String? = null
 )
 
+internal enum class ChartDragIntent { WAIT, PAN, YIELD }
+
 /**
- * 可视时间窗口，用相对数据域的归一化比例保存。
+ * 可视时间窗口，内部使用归一化比例计算，恢复与持久化使用绝对时间。
  *
  * 用 `[0,1]` 比例而不是绝对毫秒有三个好处：
  * - 缩放/平移只做 Double 乘法，不会在极端时间范围下丢精度或溢出；
@@ -38,11 +40,12 @@ data class TrendTimeTick(
  * 域 = [domainStartMillis, domainEndMillis]：7/30 天是自然周期窗口，
  * 「全部」是首条记录到当前时刻，因此夹取到域内就等价于「不拖出真实数据范围」。
  *
- * 注意：`zoom` 与 `spanRatio` 是两个独立变量。[minSpanRatio] 是像素可读性下限，
- * 缩放比例另有 [TrendChartMath.MAX_ZOOM] 上限，避免长按刻度被压到不可用。
+ * `zoom` 始终由实际窗口跨度计算；最小时间跨度与屏幕像素密度无关。
  */
 @Stable
-class TrendTimeViewportState {
+class TrendTimeViewportState(
+    private val onWindowChanged: (Long, Long) -> Unit = { _, _ -> }
+) {
     var startRatio by mutableDoubleStateOf(0.0)
         private set
 
@@ -80,14 +83,21 @@ class TrendTimeViewportState {
         get() = abs(startRatio - defaultStartRatio) < 1e-9 &&
             abs(endRatio - defaultEndRatio) < 1e-9
 
-    fun startMillis(): Long = millisAt(startRatio)
+    fun startMillis(): Long {
+        // 数据域更新即使比例不变，也必须触发面板重新计算绝对时间。
+        revision
+        return millisAt(startRatio)
+    }
 
-    fun endMillis(): Long = millisAt(endRatio)
+    fun endMillis(): Long {
+        revision
+        return millisAt(endRatio)
+    }
 
     /**
      * 让 [timestamp] 落在窗口中央，窗口宽度保持不变，并夹取回数据域内。
      *
-     * 供「上一条 / 下一条」「明细」这类**外部**选点使用（见 TrendChart 的居中副作用）：
+     * 供 ensureVisible 在「上一条 / 下一条」选中窗口外节点时使用：
      * 这类选点不经过触摸，用户看不到“点在哪里”，所以必须把节点带回可视区。
      * 时间比例与 [millisAt] 同一套换算，因此不会出现“居中了但画在窗口外”的偏差。
      */
@@ -102,16 +112,29 @@ class TrendTimeViewportState {
         setWindow(newStart, newStart + span)
     }
 
+    /** 仅在目标不可见时平移，不因重新布局或重新选中而居中。 */
+    fun ensureVisible(timestamp: Long) {
+        if (timestamp !in startMillis()..endMillis()) centerOnRatio(timestamp)
+    }
+
+    /** 最新实测节点落在右侧；跨度保持不变，夹取回数据域。 */
+    fun moveToLatest(timestamp: Long) {
+        val span = spanRatio.coerceAtMost(1.0)
+        val end = ((timestamp - domainStartMillis).toDouble() / domainSpan()).coerceIn(span, 1.0)
+        setWindow(end - span, end)
+    }
+
     fun domainStartMillis(): Long = domainStartMillis
 
     fun domainEndMillis(): Long = domainEndMillis
 
-    /** 设定数据域与默认视野，并立即跳转过去（范围切换 / 跨零点 / 双击复位）。 */
+    /** 初始化数据域与默认视野；已有绝对时间快照时恢复到快照。 */
     fun reset(
         domainStart: Long,
         domainEnd: Long,
         defaultStart: Long,
-        defaultEnd: Long
+        defaultEnd: Long,
+        restoredViewport: Pair<Long, Long>? = null
     ) {
         val safeDomainStart = domainStart
         val safeDomainEnd = domainEnd.coerceAtLeast(safeDomainStart + 1L)
@@ -123,10 +146,12 @@ class TrendTimeViewportState {
         val safeDefaultEnd = defaultEnd.coerceIn(safeDefaultStart + 1L, safeDomainEnd)
         defaultStartRatio = (safeDefaultStart - safeDomainStart) / domainSpan
         defaultEndRatio = (safeDefaultEnd - safeDomainStart) / domainSpan
-        startRatio = defaultStartRatio
-        endRatio = defaultEndRatio
-        zoom = (1.0 / spanRatio).toFloat().coerceIn(1f, TrendChartMath.MAX_ZOOM)
-        revision++
+        val restoredSpan = restoredViewport?.let { (it.second - it.first).coerceIn(1L, safeDomainEnd - safeDomainStart) }
+        val start = if (restoredSpan != null) {
+            restoredViewport!!.first.coerceIn(safeDomainStart, safeDomainEnd - restoredSpan)
+        } else safeDefaultStart
+        val end = if (restoredSpan != null) start + restoredSpan else safeDefaultEnd
+        setWindow((start - safeDomainStart) / domainSpan, (end - safeDomainStart) / domainSpan, force = true)
     }
 
     /**
@@ -139,14 +164,8 @@ class TrendTimeViewportState {
         defaultStart: Long,
         defaultEnd: Long
     ) {
-        val wasAtDefault = isAtDefault
         val oldStart = startMillis()
         val oldEnd = endMillis()
-        if (wasAtDefault) {
-            reset(domainStart, domainEnd, defaultStart, defaultEnd)
-            return
-        }
-
         val safeDomainStart = domainStart
         val safeDomainEnd = domainEnd.coerceAtLeast(safeDomainStart + 1L)
         val domainSpan = safeDomainEnd - safeDomainStart
@@ -161,15 +180,12 @@ class TrendTimeViewportState {
         defaultEndRatio = (safeDefaultEnd - safeDomainStart).toDouble() / domainSpan
         val newStartRatio = (newStart - safeDomainStart).toDouble() / domainSpan
         val newEndRatio = (newStart + oldSpan - safeDomainStart).toDouble() / domainSpan
-        setWindow(newStartRatio, newEndRatio)
+        setWindow(newStartRatio, newEndRatio, force = newStart != oldStart || newStart + oldSpan != oldEnd)
     }
 
     /** 回到 [reset] 设定的默认视野与位置。 */
     fun resetToDefault() {
-        startRatio = defaultStartRatio
-        endRatio = defaultEndRatio
-        zoom = (1.0 / spanRatio).toFloat().coerceIn(1f, TrendChartMath.MAX_ZOOM)
-        revision++
+        setWindow(defaultStartRatio, defaultEndRatio, force = true)
     }
 
     /**
@@ -212,14 +228,17 @@ class TrendTimeViewportState {
 
     private fun domainSpan(): Long = (domainEndMillis - domainStartMillis).coerceAtLeast(1L)
 
-    private fun setWindow(start: Double, end: Double) {
+    private fun setWindow(start: Double, end: Double, force: Boolean = false) {
         val span = (end - start).coerceIn(1e-9, 1.0)
         val newStart = start.coerceIn(0.0, (1.0 - span).coerceAtLeast(0.0))
         val changed = newStart != startRatio || (newStart + span) != endRatio
         startRatio = newStart
         endRatio = newStart + span
-        zoom = (1.0 / span).toFloat().coerceIn(1f, TrendChartMath.MAX_ZOOM)
-        if (changed) revision++
+        zoom = (1.0 / span).toFloat()
+        if (changed || force) {
+            revision++
+            onWindowChanged(startMillis(), endMillis())
+        }
     }
 }
 
@@ -239,8 +258,7 @@ data class ChartProjection(
         get() = ((domainEnd - domainStart) * (endRatio - startRatio)).roundToLong().coerceAtLeast(1L)
 
     fun xOfTime(timestamp: Long): Float {
-        val ratio = ((timestamp - viewportStartMillis).toDouble() / viewportSpanMillis.toDouble())
-            .coerceIn(-0.05, 1.05)
+        val ratio = (timestamp - viewportStartMillis).toDouble() / viewportSpanMillis.toDouble()
         return geometry.left + (ratio * (geometry.right - geometry.left)).toFloat()
     }
 
@@ -335,36 +353,24 @@ object TrendChartMath {
     /** Y 轴自适应时的数值稳定带：变化不超过该值就沿用旧轴，避免拖动时逐帧抖动。 */
     private const val Y_AXIS_STABLE_MMHG = 20
 
-    /** 缩放下限的像素目标：可视窗口再窄也至少覆盖约 16dp 的刻度间隔。 */
-    private const val MIN_PIXELS_PER_TICK_DP = 16f
-
-    /** 缩放上限：可视窗口再宽也至少覆盖约 120dp 的时间跨度。 */
-    private const val MIN_ZOOM_SPAN_DP = 120f
-
-    const val MAX_ZOOM = 400f
-
     /** 放大到该倍数以上，单指横向拖动才开始平移时间轴。 */
     const val PAN_ZOOM_THRESHOLD = 1.02f
 
-    /**
-     * 可视窗口的像素可读性下限：[plotWidthPx] 越窄，允许缩放到的最小时间跨度越小；
-     * 但始终再夹一层「当前范围对应的最小可读跨度」，避免 7 天被放大到几秒钟。
-     */
-    fun minSpanRatio(range: TrendRange, domainSpanMillis: Long, plotWidthPx: Float): Double {
-        if (domainSpanMillis <= 0L || plotWidthPx <= 0f) return 0.02
-        val pixelsPerMillis = plotWidthPx / domainSpanMillis.toDouble()
-        val byPixels = MIN_PIXELS_PER_TICK_DP / pixelsPerMillis
-        val byRange = minViewportSpan(range).toDouble()
-        val byAbsolute = MIN_ZOOM_SPAN_DP / pixelsPerMillis
-        val minSpan = maxOf(byPixels, byRange, byAbsolute)
-        return (minSpan / domainSpanMillis.toDouble()).coerceIn(1e-6, 1.0)
+    /** 方向锁定使用按下后的累计二维位移；进入平移后才消费逐帧增量。 */
+    internal fun dragIntent(dx: Float, dy: Float, touchSlop: Float, canPan: Boolean): ChartDragIntent {
+        if (kotlin.math.hypot(dx, dy) <= touchSlop) return ChartDragIntent.WAIT
+        return if (canPan && abs(dx) > abs(dy)) ChartDragIntent.PAN else ChartDragIntent.YIELD
     }
 
-    fun minViewportSpan(range: TrendRange): Long = when (range) {
-        TrendRange.DAYS_7 -> HOUR_MILLIS
-        TrendRange.DAYS_30 -> 6L * HOUR_MILLIS
-        TrendRange.ALL -> 7L * DAY_MILLIS
+    /** 所有历史范围均可查看一小时细节，不把最小时间窗口绑定到总历史或像素宽度。 */
+    @Suppress("UNUSED_PARAMETER")
+    fun minSpanRatio(range: TrendRange, domainSpanMillis: Long, plotWidthPx: Float): Double {
+        if (domainSpanMillis <= 0L) return 1.0
+        return (minViewportSpan(range).toDouble() / domainSpanMillis).coerceAtMost(1.0)
     }
+
+    @Suppress("UNUSED_PARAMETER")
+    fun minViewportSpan(range: TrendRange): Long = HOUR_MILLIS
 
     /** 双击 / 初次进入时的最小可辨识窗口，避免单点或极短样本被拉到一条竖线。 */
     fun minDefaultViewportSpan(range: TrendRange): Long = when (range) {
@@ -432,10 +438,11 @@ object TrendChartMath {
     fun visiblePoints(
         points: List<TrendPoint>,
         startInclusive: Long,
-        endInclusive: Long
+        endInclusive: Long,
+        alreadySorted: Boolean = false
     ): List<TrendPoint> {
         if (points.isEmpty()) return emptyList()
-        val sortedPoints = if (points.zipWithNext().all { (a, b) ->
+        val sortedPoints = if (alreadySorted || points.zipWithNext().all { (a, b) ->
                 a.timestamp <= b.timestamp
             }
         ) {
@@ -454,11 +461,15 @@ object TrendChartMath {
     fun nearestPoint(points: List<TrendPoint>, timestamp: Long): TrendPoint? {
         if (points.isEmpty()) return null
         val insertion = points.lowerBound(timestamp)
-        if (insertion <= 0) return points.first()
-        if (insertion >= points.size) return points.last()
-        val before = points[insertion - 1]
-        val after = points[insertion]
-        return if (timestamp - before.timestamp <= after.timestamp - timestamp) before else after
+        val nearestTimestamp = when {
+            insertion <= 0 -> points.first().timestamp
+            insertion >= points.size -> points.last().timestamp
+            timestamp - points[insertion - 1].timestamp <= points[insertion].timestamp - timestamp ->
+                points[insertion - 1].timestamp
+            else -> points[insertion].timestamp
+        }
+        return points.subList(points.lowerBound(nearestTimestamp), points.upperBound(nearestTimestamp))
+            .minBy { it.id }
     }
 
     /** 触点优先命中节点热区；没有命中时退化到「按 X 最近的可见点」。 */
@@ -472,20 +483,11 @@ object TrendChartMath {
         touchRadiusPx: Float
     ): TrendPoint? {
         if (visible.isEmpty()) return null
-        visible.forEach { point ->
-            if (projection.hitsNode(point, x, y, showSystolic, showDiastolic, touchRadiusPx)) {
-                return point
-            }
-        }
-        var best: TrendPoint? = null
-        var bestDistance = touchRadiusPx
-        visible.forEach { point ->
-            val distance = projection.nearestDistance(point, x, y, showSystolic, showDiastolic)
-            if (distance <= bestDistance) {
-                bestDistance = distance
-                best = point
-            }
-        }
+        val best = visible.asSequence()
+            .filter { projection.hitsNode(it, x, y, showSystolic, showDiastolic, touchRadiusPx) }
+            .minWithOrNull(compareBy<TrendPoint> {
+                projection.nearestDistance(it, x, y, showSystolic, showDiastolic)
+            }.thenBy { it.timestamp }.thenBy { it.id })
         return best ?: nearestPoint(visible, projection.timeAtX(x))
     }
 
@@ -498,18 +500,17 @@ object TrendChartMath {
         touchRadiusPx: Float
     ): TrendPoint? {
         val nearestByTime = nearestPoint(visible, projection.timeAtX(x))
-        if (nearestByTime?.pulse == null) return nearestByTime
-        visible.forEach { point ->
-            val pulse = point.pulse ?: return@forEach
-            if (abs(x - projection.xOfTime(point.timestamp)) <= touchRadiusPx &&
-                abs(y - projection.yOfValue(pulse)) <= touchRadiusPx
-            ) return point
-        }
-        return nearestByTime
+        val best = visible.asSequence().filter { point ->
+            point.pulse != null && abs(x - projection.xOfTime(point.timestamp)) <= touchRadiusPx &&
+                abs(y - projection.yOfValue(point.pulse)) <= touchRadiusPx
+        }.minWithOrNull(compareBy<TrendPoint> {
+            kotlin.math.hypot(x - projection.xOfTime(it.timestamp), y - projection.yOfValue(it.pulse!!))
+        }.thenBy { it.timestamp }.thenBy { it.id })
+        return best ?: nearestByTime
     }
 
     /** 每个像素桶保留脉搏极值。缺值不进采样，而由原始序列的段号阻止跨缺值连线。 */
-    fun samplePulse(points: List<TrendPoint>, maxPoints: Int): List<TrendPoint> {
+    fun samplePulse(points: List<TrendPoint>, maxPoints: Int, selectedId: String? = null): List<TrendPoint> {
         val present = points.filter { it.pulse != null }
         if (present.size <= maxPoints || maxPoints < 4) return present
         val bucketCount = (maxPoints / 4).coerceAtLeast(1)
@@ -522,13 +523,35 @@ object TrendChartMath {
             if (valid.isNotEmpty()) {
                 selected += valid.first()
                 selected += valid.last()
-                selected += valid.minBy { points[it].pulse!! }
-                selected += valid.maxBy { points[it].pulse!! }
+                selected += valid.minBy { points[it].pulseMin!! }
+                selected += valid.maxBy { points[it].pulseMax!! }
             }
             start = end
         }
-        // 每桶最多四点，桶数不超过 maxPoints / 4，因此首尾与所有桶极值都能保留。
+        // 缺测边界和选中点独立保留，不能为了数量预算错误跨段连线。
+        points.forEachIndexed { index, point ->
+            if (point.pulse == null) {
+                if (index > 0 && points[index - 1].pulse != null) selected += index - 1
+                if (index < points.lastIndex && points[index + 1].pulse != null) selected += index + 1
+            } else {
+                if (point.id == selectedId) selected += index
+                if (index > 0 && points[index - 1].pulse != null &&
+                    point.timestamp - points[index - 1].timestamp > 2L * DAY_MILLIS) {
+                    selected += index - 1
+                    selected += index
+                }
+            }
+        }
         return selected.sorted().map(points::get)
+    }
+
+    /** 原始血压序列先确定缺测段，采样产生的新时间间隔不会制造缺测。 */
+    fun bloodPressureSegmentIds(points: List<TrendPoint>, gapMillis: Long): Map<String, Int> {
+        var segment = 0
+        return points.mapIndexed { index, point ->
+            if (index > 0 && point.timestamp - points[index - 1].timestamp > gapMillis) segment++
+            point.id to segment
+        }.toMap()
     }
 
     /** null 与超过两天的缺测都另起一段；降采样后仍可据此断开折线。 */
@@ -550,7 +573,7 @@ object TrendChartMath {
     }
 
     fun stablePulseYAxis(previous: TrendYAxis?, visible: List<TrendPoint>): TrendYAxis? {
-        val values = visible.mapNotNull { it.pulse }
+        val values = visible.flatMap { point -> listOfNotNull(point.pulseMin, point.pulseMax) }
         if (values.isEmpty()) return previous
         val min = values.min()
         val max = values.max()
@@ -580,35 +603,53 @@ object TrendChartMath {
      * 首尾点一定保留，因此曲线形状与极值位置不变。视窗内点数小于
      * [maxPoints] 时原样返回，不做任何裁剪。
      */
-    fun sampleShared(points: List<TrendPoint>, maxPoints: Int): List<TrendPoint> {
+    fun sampleShared(
+        points: List<TrendPoint>,
+        maxPoints: Int,
+        selectedId: String? = null
+    ): List<TrendPoint> {
         if (points.size <= maxPoints || maxPoints < 8) return points
-        val bucketCount = (maxPoints / 4).coerceAtLeast(2)
+        // 每桶首尾及 SYS/DIA 极值共六点；额外保留缺测断线的两侧和选中点。
+        // 必须保留的边界可能超过预算，不能截断后半区极值以满足数量上限。
+        val bucketCount = (maxPoints / 6).coerceAtLeast(1)
         val bucketSize = ceil(points.size / bucketCount.toDouble()).toInt().coerceAtLeast(1)
         val selected = linkedSetOf<Int>()
-        selected += 0
-        selected += points.lastIndex
-        var start = 0
-        while (start < points.size) {
+        for (start in points.indices step bucketSize) {
             val end = (start + bucketSize).coerceAtMost(points.size)
             val indices = start until end
-            selected += indices.minByOrNull { points[it].systolic } ?: start
-            selected += indices.maxByOrNull { points[it].systolic } ?: start
-            selected += indices.minByOrNull { points[it].diastolic } ?: start
-            selected += indices.maxByOrNull { points[it].diastolic } ?: start
-            start = end
+            selected += start
+            selected += end - 1
+            selected += indices.minBy { points[it].systolicMin }
+            selected += indices.maxBy { points[it].systolicMax }
+            selected += indices.minBy { points[it].diastolicMin }
+            selected += indices.maxBy { points[it].diastolicMax }
         }
-        val ordered = selected.sorted()
-        if (ordered.size <= maxPoints) return ordered.map(points::get)
-        val kept = buildList {
-            add(ordered.first())
-            addAll(ordered.subList(1, ordered.lastIndex).take(maxPoints - 2))
-            add(ordered.last())
+        points.forEachIndexed { index, point ->
+            if (point.id == selectedId) selected += index
+            if (index > 0 && point.timestamp - points[index - 1].timestamp > 2L * DAY_MILLIS) {
+                selected += index - 1
+                selected += index
+            }
         }
-        return kept.distinct().sorted().map(points::get)
+        return selected.sorted().map(points::get)
     }
 
     fun maxTickCount(plotWidthDp: Int): Int {
         return (plotWidthDp / 80).coerceIn(3, 7)
+    }
+
+    /** 选中节点最后独立覆盖绘制，不依赖采样是否包含它，也不改变折线数据。 */
+    fun nodePoints(
+        renderPoints: List<TrendPoint>,
+        selected: TrendPoint?,
+        showAllNodes: Boolean,
+        viewportStart: Long,
+        viewportEnd: Long
+    ): List<TrendPoint> = buildList {
+        if (showAllNodes) addAll(renderPoints.filter {
+            it.id != selected?.id && it.timestamp in viewportStart..viewportEnd
+        })
+        selected?.takeIf { it.timestamp in viewportStart..viewportEnd }?.let(::add)
     }
 
     fun nonOverlappingTickIndices(
@@ -662,7 +703,7 @@ object TrendChartMath {
 
     fun xOfTime(timestamp: Long, left: Float, right: Float, start: Long, end: Long): Float {
         val span = (end - start).coerceAtLeast(1L)
-        val ratio = ((timestamp - start).toDouble() / span.toDouble()).coerceIn(-0.05, 1.05)
+        val ratio = (timestamp - start).toDouble() / span.toDouble()
         return left + (ratio * (right - left)).toFloat()
     }
 
@@ -683,11 +724,13 @@ object TrendChartMath {
         if (visible.isEmpty()) return previous
         val values = buildList {
             visible.forEach { point ->
-                add(point.systolic.coerceIn(
+                add(point.systolicMin.coerceIn(
                     TrendSeriesCalculator.CHART_SAFE_MIN,
                     TrendSeriesCalculator.CHART_SAFE_MAX
                 ))
-                add(point.diastolic.coerceIn(20, 200))
+                add(point.systolicMax.coerceIn(TrendSeriesCalculator.CHART_SAFE_MIN, TrendSeriesCalculator.CHART_SAFE_MAX))
+                add(point.diastolicMin.coerceIn(20, 200))
+                add(point.diastolicMax.coerceIn(20, 200))
             }
             add(TrendSeriesCalculator.REFERENCE_DIASTOLIC)
             add(TrendSeriesCalculator.REFERENCE_SYSTOLIC)
@@ -739,22 +782,53 @@ object TrendChartMath {
         }
     }
 
+    /** 网格密度受实际绘图区高度与已测量字体约束，放大字体时仍保持标签间距。 */
+    fun yAxisTickValues(
+        axis: TrendYAxis,
+        plotHeightPx: Float,
+        labelHeightPx: Float,
+        minimumGapPx: Float,
+        dense: Boolean = false
+    ): List<Int> {
+        val span = (axis.max - axis.min).coerceAtLeast(1)
+        val labelSpacing = (labelHeightPx + minimumGapPx).coerceAtLeast(1f)
+        val maxIntervals = floor(plotHeightPx / labelSpacing).toInt().coerceAtLeast(1)
+        val requiredStep = maxOf(if (dense) 5 else axis.tickStep, ceil(span.toDouble() / maxIntervals).toInt())
+        val step = listOf(5, 10, 20, 25, 50, 100, 200, 500)
+            .firstOrNull { it >= requiredStep } ?: requiredStep
+        val ticks = (axis.min..axis.max step step).toMutableList()
+        if (ticks.last() != axis.max) {
+            val finalGapPx = (axis.max - ticks.last()).toFloat() / span * plotHeightPx
+            if (finalGapPx < labelSpacing && ticks.size > 1) ticks.removeAt(ticks.lastIndex)
+            if (plotHeightPx >= labelSpacing) ticks += axis.max
+        }
+        return ticks
+    }
+
     fun timeTicks(
         startMillis: Long,
         endMillis: Long,
         zoneId: ZoneId,
-        maxTicks: Int = 7
+        maxTicks: Int = 7,
+        showTimeLabels: Boolean = false
     ): List<TrendTimeTick> {
         if (endMillis <= startMillis) return emptyList()
         val safeMaxTicks = maxTicks.coerceIn(2, 7)
         val start = Instant.ofEpochMilli(startMillis).atZone(zoneId)
         val end = Instant.ofEpochMilli(endMillis).atZone(zoneId)
         val spanDays = ChronoUnit.HOURS.between(start, end).coerceAtLeast(1) / 24.0
-        return when {
+        val ticks = when {
             spanDays <= 2.0 -> hourlyTicks(start, end, safeMaxTicks)
             spanDays <= 45.0 -> dailyTicks(start, end, safeMaxTicks)
             spanDays <= 730.0 -> monthlyTicks(start, end, safeMaxTicks)
             else -> yearlyTicks(start, end, safeMaxTicks)
+        }
+        if (!showTimeLabels || spanDays <= 2.0) return ticks
+        val dateFormat = DateTimeFormatter.ofPattern(if (start.year == end.year) "MM-dd" else "yy-MM-dd")
+        val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
+        return ticks.map { tick ->
+            val time = Instant.ofEpochMilli(tick.timestamp).atZone(zoneId)
+            tick.copy(primary = time.format(dateFormat), secondary = time.format(timeFormat))
         }
     }
 

@@ -1,0 +1,52 @@
+INSTRUMENTATION_STATUS: class=com.example.bloodpressurerecord.ui.history.TrendFullscreenLayoutTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=3
+INSTRUMENTATION_STATUS: stream=
+com.example.bloodpressurerecord.ui.history.TrendFullscreenLayoutTest:
+INSTRUMENTATION_STATUS: test=landscapeDarkLargeTextKeepsChartAndReadoutVisible
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.bloodpressurerecord.ui.history.TrendFullscreenLayoutTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=3
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=landscapeDarkLargeTextKeepsChartAndReadoutVisible
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.bloodpressurerecord.ui.history.TrendFullscreenLayoutTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=3
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=landscapeChartDominatesAndReadoutStaysAtTopRight
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.bloodpressurerecord.ui.history.TrendFullscreenLayoutTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=3
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=landscapeChartDominatesAndReadoutStaysAtTopRight
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.bloodpressurerecord.data.repository.backup.BackupExportServiceAndroidTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=3
+INSTRUMENTATION_STATUS: stream=
+com.example.bloodpressurerecord.data.repository.backup.BackupExportServiceAndroidTest:
+INSTRUMENTATION_STATUS: test=overFiveThousandSessionsExportAndRestoreAllVolumesWithOriginalIdsAndGroups
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.bloodpressurerecord.data.repository.backup.BackupExportServiceAndroidTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=3
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=overFiveThousandSessionsExportAndRestoreAllVolumesWithOriginalIdsAndGroups
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+
+Time: 82.753
+
+OK (3 tests)
+
+
+INSTRUMENTATION_CODE: -1

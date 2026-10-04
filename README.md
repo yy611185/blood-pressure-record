@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册、不联网、不复杂。数据只存在你的手机里。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.1.2-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.2.1-orange)
 
 ---
 
@@ -31,7 +31,7 @@
 | 📝 一次记多组 | 一次测量可录入多组收缩压/舒张压/脉搏，自动计算全部有效组的平均值，输入后可直接保存 |
 | 🏷 自动分级 | 按《中国高血压防治指南》成人诊室标准分级：正常 / 正常高值 / 1–3 级 + 偏低提示 |
 | 📅 历史日历 | 按月查看、详情、编辑、删除、**撤销** |
-| 📈 趋势图 | 7/30 天/全部按每次测量展示，支持缩放、参考线、当天明细和期间/早间/晚间平均 |
+| 📈 趋势图 | 7/30 天/全部显示每次测量双折线，提供横屏全屏、具体时间刻度、联动十字线、缩放、明细追溯和期间/早间/晚间平均 |
 | 💊 服药提醒 | 晨/晚提醒 + 每日打卡 + 可选写入系统日历（需授权） |
 | 📲 桌面小部件 | 不打开 App 也能看到最新血压与今日进度 |
 | 💾 Excel 导入导出 | v6 完整备份测量、补充情况、设置和用药数据，兼容读取 v2–v5 |
@@ -41,8 +41,9 @@
 - 导出文件包含使用说明、测量记录、全部原始读数、用户资料、药品、每日服药时间、打卡历史和导出信息。
 - 文件交给用户选择的 Android 文件位置或文件提供方；应用不会自行上传服务器。
 - 即使暂无测量记录，也可导出用户资料与设置。
+- 超过 5000 条测量时，按完整记录自动分卷，依次保存各卷 .xlsx 或 .bpx；资料、设置与用药数据放在首卷，恢复时逐卷导入。
 - 可选择明文 Excel 或口令加密的 .bpx；两者都可能包含姓名、年龄、血压记录、症状、备注、提醒和用药数据，请妥善保存。
-- 导入会先生成预览和统计信息，确认后才写入；可分别选择测量记录、用户资料、显示设置和提醒设置。
+- 导入会先生成预览和统计信息，确认后才写入；可分别选择测量记录、用户资料、显示设置、提醒设置和用药数据。
 - 导入会拒绝明显的未来测量时间、重复记录 id、损坏或超过大小/解压安全上限的 xlsx；被跳过的记录不会写入。
 
 ## 四、你的数据安全（请放心）
@@ -79,7 +80,7 @@
 | Kotlin | 开发语言 | 官方首选，空安全 |
 | Jetpack Compose + Material 3 | UI | 声明式 UI，主题/无障碍友好，适配三键导航与手势区 |
 | MVVM + Repository | 架构 | 数据层与 UI 解耦，便于测试 |
-| Room (v7) | 本地数据库 | 编译期 SQL 校验 + 迁移框架；**明文存储**（依赖系统 FBE 加密，详见隐私节） |
+| Room (v9) | 本地数据库 | 编译期 SQL 校验 + 迁移框架；**明文存储**（依赖系统 FBE 加密，详见隐私节） |
 | DataStore | 设置存储 | 替代 SharedPreferences，Flow 响应式 |
 | Coroutines + Flow | 异步 | 主线程安全，数据库查询响应式 |
 | Apache POI (5.5.x) | Excel 导入导出 | 保留原始读数结构、多 Sheet 说明页；v3 格式向后兼容 v2 |
@@ -89,9 +90,11 @@
 
 ### 环境要求
 
-- Android Studio **Koala 或更高**（compileSdk 35 需要）
+- Android Studio Meerkat | 2024.3.1 Patch 1 或更高版本
 - JDK 17
-- Android SDK 35，Gradle 8.7
+- Android SDK Platform 36、Build Tools 36.0.0 或更高版本
+- Android Gradle Plugin 8.10.1，Gradle 8.11.1
+- `minSdk = 26`，`compileSdk/targetSdk = 36`
 
 ### 构建
 
@@ -127,7 +130,7 @@ export BP_RELEASE_KEY_PASSWORD=...
 ```text
 app/src/main/java/com/example/bloodpressurerecord/
 ├── data/
-│   ├── db/              # Room：entity / dao / AppDatabase(v7)
+│   ├── db/              # Room：entity / dao / AppDatabase(v9)
 │   ├── datastore/       # 设置与偏好
 │   ├── repository/      # 仓储层
 │   │   └── backup/      # Excel 导入/导出/文件读取
@@ -150,17 +153,15 @@ app/src/main/java/com/example/bloodpressurerecord/
 - 健康数据在本地**明文存储**（Room，依赖 Android 全盘加密）；导出可选**明文 Excel** 或**口令加密的 .bpx 容器**
 - 换机只能靠手动 Excel 迁移，无自动同步
 - 血压分级采用中国指南标准，其他国家/地区标准可能不同
-- Android Studio Meerkat | 2024.3.1 Patch 1 或更高版本
-- JDK 17
-- Android SDK Platform 36、Build Tools 36.0.0 或更高版本
-- Android Gradle Plugin 8.10.1
-- Gradle 8.11.1
-- `minSdk = 26`，`compileSdk/targetSdk = 36`
 
 ## 八、版本历史
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 2.2.1 | 2026-10-03 | 横屏三点菜单紧邻时分选项，操作集中于左侧工具栏 |
+| 2.2.0 | 2026-10-03 | 横屏主图与紧凑读数、趋势交互修复、用药导入范围与分卷备份 |
+| 2.1.3 | 2026-10-01 | 昼夜平均血压与模块折叠，优化长页面浏览 |
+| 2.1.2 | 2026-10-01 | 精简记录流程，自动识别时段，统一有效组平均与趋势统计 |
 | 2.1.1 | 2026-09-28 | 新增与血压图同步的独立脉搏趋势图，完善缺失脉搏显示 |
 | 2.0.3 | 2026-09-26 | 修复趋势图短时间范围崩溃、视野与手势问题，改善大字号读数栏 |
 | 2.0.2 | 2026-09-26 | 多组读数纵向录入，简化输入框与提示 |
@@ -182,7 +183,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ---
 
-*最后更新：2026-09 · 版本 2.1.1 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
+*最后更新：2026-10 · 版本 2.2.1 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
 
 - `BP_RELEASE_STORE_FILE`：签名库路径
 - `BP_RELEASE_STORE_PASSWORD`：签名库密码
@@ -228,6 +229,10 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 2.2.1 | 2026-10-03 | 横屏三点菜单紧邻时分选项，操作集中于左侧工具栏 |
+| 2.2.0 | 2026-10-03 | 横屏主图与紧凑读数、趋势交互修复、用药导入范围与分卷备份 |
+| 2.1.3 | 2026-10-01 | 昼夜平均血压与模块折叠，优化长页面信息层级 |
+| 2.1.2 | 2026-10-01 | 精简记录流程，自动时段、统一平均及代表值趋势 |
 | 2.1.1 | 2026-09-28 | 独立脉搏趋势图，与血压图同步缩放平移、选点和恢复；缺值不补造 |
 | 2.0.3 | 2026-09-26 | 趋势图崩溃、视野与手势修复，小屏大字号和深色模式适配 |
 | 2.0.2 | 2026-09-26 | 多组读数纵向录入，简化输入框与提示 |

@@ -3,9 +3,9 @@ package com.example.bloodpressurerecord.ui.history
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -33,25 +33,23 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.domain.model.DayNightAverage
@@ -63,14 +61,11 @@ import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.displayLabel
 import com.example.bloodpressurerecord.ui.common.AppBackButton
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
-import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import com.example.bloodpressurerecord.ui.common.ExpandableSection
-import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
-import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -81,22 +76,31 @@ import kotlin.math.roundToInt
 fun TrendScreen(
     viewModel: TrendViewModel,
     onBack: (() -> Unit)? = null,
-    onAddMeasurement: () -> Unit = {}
+    onAddMeasurement: () -> Unit = {},
+    onFullscreenChanged: (Boolean) -> Unit = {},
+    onOpenRecord: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // 选中读数提升到页面层：范围切换时重置，不受图表重组影响。
-    var selectedPointId by remember(uiState.range) { mutableStateOf<String?>(null) }
-    // 「恢复」按钮与图表双击复位共用的控制器：缩放、平移、视窗、选中一次归零。
-    val chartController = remember(uiState.range) { TrendChartController() }
+    val chartController = viewModel.chartController
     // 上一条 / 下一条在当前图表的 Session 代表值节点之间移动。
     // 不能按日期 ±1 天推算——有些日期根本没有记录。
     val displayPoints = uiState.series.points
-    val selectedPoint = displayPoints.firstOrNull { it.id == selectedPointId }
+    val selectedPoint = displayPoints.firstOrNull { it.id == uiState.selectedPointId }
+
+    LaunchedEffect(uiState.fullscreen) { onFullscreenChanged(uiState.fullscreen) }
+    DisposableEffect(Unit) { onDispose { onFullscreenChanged(false) } }
+    TrendFullscreenOrientation(uiState.fullscreen)
+
+    if (uiState.fullscreen) {
+        TrendFullscreenScreen(uiState, viewModel, onOpenRecord)
+        return
+    }
 
     uiState.dayDetails?.let { details ->
         TrendDayDetailsSheet(
             details = details,
-            onDismiss = viewModel::dismissDayDetails
+            onDismiss = viewModel::dismissDayDetails,
+            onOpenRecord = onOpenRecord
         )
     }
 
@@ -123,18 +127,16 @@ fun TrendScreen(
             Text(
                 text = "血压趋势",
                 style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(start = if (onBack != null) 4.dp else 0.dp)
+                modifier = Modifier.weight(1f).padding(start = if (onBack != null) 4.dp else 0.dp)
             )
+            TextButton(onClick = { viewModel.setFullscreen(true) }) { Text("全屏") }
         }
 
         SegmentedControl(
             items = TrendRange.entries,
             selected = uiState.range,
             label = { it.label },
-            onSelected = { range ->
-                selectedPointId = null
-                viewModel.setRange(range)
-            }
+            onSelected = viewModel::setRange
         )
 
         if (series.points.isEmpty()) {
@@ -165,12 +167,16 @@ fun TrendScreen(
                 targetDiastolic = uiState.targetDiastolic,
                 chartController = chartController,
                 onMetricChange = viewModel::setMetric,
-                onPointSelected = { point -> selectedPointId = point?.id },
-                onViewDayRecords = viewModel::openPointDetails
+                onPointSelected = viewModel::selectPoint,
+                onViewDayRecords = viewModel::openPointDetails,
+                onPrevious = viewModel::selectPrevious,
+                onNext = viewModel::selectNext,
+                onReset = viewModel::resetChart,
+                onLatest = viewModel::moveToLatest
             )
         }
 
-        ExpandableSection(
+        if (uiState.showPulse) ExpandableSection(
             title = "脉搏趋势",
             summary = series.averagePulse?.let { "最近平均 $it 次/分" } ?: "暂无数据"
         ) {
@@ -178,7 +184,7 @@ fun TrendScreen(
                 series = series,
                 selectedPoint = selectedPoint,
                 chartController = chartController,
-                onPointSelected = { point -> selectedPointId = point?.id }
+                onPointSelected = viewModel::selectPoint
             )
         }
 
@@ -520,7 +526,11 @@ private fun TrendCard(
     chartController: TrendChartController,
     onMetricChange: (TrendMetricType) -> Unit,
     onPointSelected: (TrendPoint?) -> Unit,
-    onViewDayRecords: (TrendPoint) -> Unit
+    onViewDayRecords: (TrendPoint) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onReset: () -> Unit,
+    onLatest: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -541,7 +551,10 @@ private fun TrendCard(
                 selectedPoint = selectedPoint,
                 onPointSelected = onPointSelected,
                 onViewDayRecords = onViewDayRecords,
-                onResetChart = chartController::reset
+                onResetChart = onReset,
+                onPrevious = onPrevious,
+                onNext = onNext,
+                onLatest = onLatest
             )
             // 指标切换移动到图表正上方；「双曲线」改名为「双指标」。
             SegmentedControl(
@@ -613,7 +626,7 @@ private fun PulseTrendCard(
  * 顶部数据栏：显示当前选中的记录（长按数据检查 / 点击节点 / 上一条 / 下一条）。
  *
  * 未选中时退回当前范围最近一次 Session（[points] 的最后一个点）。
- * 操作区固定四枚按钮：
+ * 操作区提供节点移动、明细、恢复与回到最新：
  * - 上一条 / 下一条：在 [points] 上移动，不按日期 ±1 天推算；
  * - 明细：打开**当前显示点**所属日期的原始测量明细（真实数据库记录）；
  * - 恢复：图表回到该范围首次打开时的默认状态（与双击复位同一套重置逻辑）。
@@ -625,158 +638,81 @@ internal fun TrendSelectionReadout(
     selectedPoint: TrendPoint?,
     onPointSelected: (TrendPoint?) -> Unit,
     onViewDayRecords: (TrendPoint) -> Unit,
-    onResetChart: () -> Unit
+    onResetChart: () -> Unit,
+    onPrevious: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
+    onLatest: (() -> Unit)? = null
 ) {
     if (points.isEmpty()) return
     val currentSelection = points.firstOrNull { it.id == selectedPoint?.id }
     val displayed = currentSelection ?: points.last()
-    val isSelected = currentSelection != null
-    // 极端情况下选中点可能已经不在新序列里，索引兜底为最后一点，避免越界。
     val index = points.indexOfFirst { it.id == displayed.id }.takeIf { it >= 0 } ?: points.lastIndex
-    val canGoPrevious = index > 0
-    val canGoNext = index in 0 until points.lastIndex
-    val background = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
+    val readoutDescription = remember(displayed, currentSelection, index, points.size) {
+        buildReadoutDescription(displayed, currentSelection != null, index, points.size) +
+            if (displayed.containsHighRiskReading) "含高风险读数。" else ""
     }
-    val readoutDescription = remember(displayed, isSelected, index, points.size) {
-        buildReadoutDescription(displayed, isSelected, index, points.size)
-    }
-    val supportingText = remember(displayed) { buildSelectionSupportingText(displayed) }
-
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(background, RoundedCornerShape(18.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .semantics(mergeDescendants = true) {
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        // 无彩色大卡片和重复说明；日期始终保留准确时分。
+        Column(
+            modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
                 contentDescription = readoutDescription
             },
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val stacked = maxWidth / LocalDensity.current.fontScale < 260.dp
-            val readings: @Composable (Modifier) -> Unit = { modifier ->
-                Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = buildReadoutTitle(displayed, isSelected),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "${displayed.systolic}/${displayed.diastolic} mmHg",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = NumberFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        displayed.pulse?.let { "脉搏 $it 次/分" } ?: "脉搏 —",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-            val statuses: @Composable () -> Unit = {
-                val chips: @Composable () -> Unit = {
-                    StatusChip(
-                        text = CategoryPresentation.label(displayed.category),
-                        isAbnormal = !displayed.category.equals("NORMAL", true),
-                        status = bloodPressureVisualStatus(displayed.category, false)
-                    )
-                    if (displayed.containsHighRiskReading) {
-                        StatusChip(
-                            "高风险",
-                            true,
-                            status = bloodPressureVisualStatus(displayed.category, true)
-                        )
-                    }
-                }
-                if (stacked) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) { chips() }
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) { chips() }
-                }
-            }
-            if (stacked) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    readings(Modifier.fillMaxWidth())
-                    statuses()
-                }
-            } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    readings(Modifier.weight(1f))
-                    statuses()
-                }
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = formatReadoutFull(displayed.timestamp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "${displayed.systolic}/${displayed.diastolic} mmHg",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = NumberFontFamily,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    displayed.pulse?.let { "脉搏 $it 次/分" } ?: "脉搏 —",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (displayed.containsHighRiskReading) Text(
+                    "高风险", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
-        Text(
-            text = supportingText,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        // 按实际文字宽度选择四列、两列或单列，保留系统字体缩放。
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val density = LocalDensity.current
-            val textMeasurer = rememberTextMeasurer()
-            val actionStyle = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp)
-            val labelWidth = with(density) {
-                textMeasurer.measure("上一条", actionStyle, softWrap = false).size.width.toDp()
-            }
-            val minActionWidth = maxOf(48.dp, labelWidth + 8.dp)
-            val columns = when {
-                maxWidth >= minActionWidth * 4 + 12.dp -> 4
-                maxWidth >= minActionWidth * 2 + 4.dp -> 2
-                else -> 1
-            }
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                maxItemsInEachRow = columns,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                ReadoutAction(
-                    text = "上一条",
-                    onClick = { onPointSelected(points[index - 1]) },
-                    enabled = canGoPrevious,
-                    modifier = Modifier.weight(1f)
-                )
-                ReadoutAction(
-                    text = "下一条",
-                    onClick = { onPointSelected(points[index + 1]) },
-                    enabled = canGoNext,
-                    modifier = Modifier.weight(1f)
-                )
-                ReadoutAction(
-                    text = "明细",
-                    onClick = { onViewDayRecords(displayed) },
-                    modifier = Modifier.weight(1f)
-                )
-                ReadoutAction(
-                    text = "恢复",
-                    onClick = onResetChart,
-                    modifier = Modifier.weight(1f)
-                )
-            }
+        // 字体放大或小屏时水平滚动，恢复与其他操作始终在同一行。
+        Row(
+            modifier = Modifier.fillMaxWidth().testTag("trendReadoutActions")
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            ReadoutAction(
+                text = "上一条",
+                onClick = { onPrevious?.invoke() ?: onPointSelected(points[index - 1]) },
+                enabled = index > 0
+            )
+            ReadoutAction(
+                text = "下一条",
+                onClick = { onNext?.invoke() ?: onPointSelected(points[index + 1]) },
+                enabled = index in 0 until points.lastIndex
+            )
+            ReadoutAction("明细", { onViewDayRecords(displayed) })
+            if (onLatest != null) ReadoutAction("最新", onLatest)
+            ReadoutAction("恢复", onResetChart)
         }
     }
 }
 
-/**
- * 操作区按钮由父布局按文字宽度重排，触控高度至少 48dp。
- */
+/** 同行可滚动操作，触控高度至少 48dp，文字不换行。 */
 @Composable
 private fun ReadoutAction(
     text: String,
@@ -788,56 +724,17 @@ private fun ReadoutAction(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier.heightIn(min = 48.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            fontSize = 13.sp
-        )
+        Text(text, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
     }
 }
-
-private fun buildSelectionSupportingText(point: TrendPoint): String {
-    return when (point.aggregation) {
-        TrendAggregation.DAILY -> "当日 ${point.recordCount} 次平均"
-        TrendAggregation.RAW -> "本次记录代表值"
-    }
-}
-
-private fun buildReadoutTitle(point: TrendPoint, isSelected: Boolean): String {
-    val prefix = if (isSelected) "已选中" else "最近一次"
-    return when (point.aggregation) {
-        TrendAggregation.DAILY ->
-            "$prefix · ${formatReadoutDay(point.timestamp)} · ${point.recordCount} 次平均"
-        TrendAggregation.RAW ->
-            "$prefix · ${formatReadoutFull(point.timestamp)}"
-    }
-}
-
-private fun buildReadoutDescription(
-    point: TrendPoint,
-    isSelected: Boolean,
-    index: Int,
-    total: Int
-): String {
-    val position = if (index >= 0) "第 ${index + 1} 个，共 $total 个数据点" else "共 $total 个数据点"
+private fun buildReadoutDescription(point: TrendPoint, isSelected: Boolean, index: Int, total: Int): String {
     val pulse = point.pulse?.let { "脉搏 $it 次每分" } ?: "脉搏未记录"
-    return when (point.aggregation) {
-        TrendAggregation.DAILY ->
-            "${if (isSelected) "已选中的每日平均" else "最近的每日平均"}，" +
-                "${formatFullDate(point.timestamp)}，当日 ${point.recordCount} 次测量，平均收缩压 ${point.systolic}，" +
-                "平均舒张压 ${point.diastolic}，$pulse，$position。"
-        TrendAggregation.RAW ->
-            "${if (isSelected) "已选中的数据点" else "最近一次测量"}，" +
-                "${formatReadoutFull(point.timestamp)}，收缩压 ${point.systolic}，舒张压 ${point.diastolic}，" +
-                "$pulse，$position。"
-    }
+    return "${if (isSelected) "已选中的数据点" else "最近一次测量"}，" +
+        "${formatReadoutFull(point.timestamp)}，收缩压 ${point.systolic}，舒张压 ${point.diastolic}，" +
+        "$pulse，第 ${index + 1} 个，共 $total 个数据点。"
 }
-
-private fun formatReadoutDay(measuredAt: Long): String =
-    Instant.ofEpochMilli(measuredAt).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("yyyy年M月d日"))
 
 private fun formatReadoutFull(measuredAt: Long): String =
     Instant.ofEpochMilli(measuredAt).atZone(ZoneId.systemDefault())
@@ -904,60 +801,47 @@ private fun <T> SegmentedControl(
     }
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TrendDayDetailsSheet(
+internal fun TrendDayDetailsSheet(
     details: TrendDayDetails,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenRecord: (String) -> Unit = {}
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                "${formatFullDate(details.point.timestamp)} 测量明细",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                buildDayDetailsSubtitle(details),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            when {
-                details.loading -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
-
-                details.error != null -> {
-                    Text(details.error, color = MaterialTheme.colorScheme.error)
-                }
-
-                else -> {
-                    LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                        items(details.records, key = TrendRecord::id) { record ->
-                            TrendDayRecordRow(record)
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        }
-                    }
-                }
-            }
+            Text(details.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            TrendDayDetailsContent(details, onOpenRecord = { id -> onDismiss(); onOpenRecord(id) })
         }
     }
 }
 
+@Composable
+internal fun TrendDayDetailsContent(details: TrendDayDetails, onOpenRecord: (String) -> Unit) {
+    Text(
+        buildDayDetailsSubtitle(details), style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    when {
+        details.loading -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        details.error != null -> Text(details.error, color = MaterialTheme.colorScheme.error)
+        else -> LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            items(details.records, key = TrendRecord::id) { record ->
+                TrendDayRecordRow(
+                    record, selected = record.id == details.selectedRecordId,
+                    onClick = { onOpenRecord(record.id) }
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+}
 /**
  * 当日明细的副标题：加载完成后用真实记录数与该日平均，
  * 避免「7/30 天单次测量节点」显示成「当日 1 次」而掩盖同一天的其他记录。
@@ -969,20 +853,26 @@ private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
     if (records.isEmpty()) return "当天没有原始记录"
     val systolic = records.map { it.systolic }.average().roundToInt()
     val diastolic = records.map { it.diastolic }.average().roundToInt()
-    return "当日 ${records.size} 次，平均 $systolic/$diastolic mmHg"
+    val prefix = if (details.point.aggregation == TrendAggregation.DAILY_RANGE) "参与统计" else "当日"
+    return "$prefix ${records.size} 次，平均 $systolic/$diastolic mmHg · 点击查看原记录"
 }
 
 @Composable
-private fun TrendDayRecordRow(record: TrendRecord) {
+private fun TrendDayRecordRow(record: TrendRecord, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(formatSessionTime(record.measuredAt), fontWeight = FontWeight.SemiBold)
+            Text(
+                (if (selected) "已选中 · " else "") + formatSessionTime(record.measuredAt),
+                fontWeight = FontWeight.SemiBold
+            )
             Text(
                 if (record.containsHighRiskReading) "含高风险读数" else record.category.toChineseCategory(),
                 style = MaterialTheme.typography.bodySmall,

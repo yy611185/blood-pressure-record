@@ -112,6 +112,10 @@ object TrendSeriesCalculator {
                 // 不再被旧的 260 上限吞掉。
                 add(point.systolic.coerceIn(CHART_SAFE_MIN, CHART_SAFE_MAX))
                 add(point.diastolic.coerceIn(DIASTOLIC_SAFE_MIN, DIASTOLIC_SAFE_MAX))
+                add(point.systolicMin.coerceIn(CHART_SAFE_MIN, CHART_SAFE_MAX))
+                add(point.systolicMax.coerceIn(CHART_SAFE_MIN, CHART_SAFE_MAX))
+                add(point.diastolicMin.coerceIn(DIASTOLIC_SAFE_MIN, DIASTOLIC_SAFE_MAX))
+                add(point.diastolicMax.coerceIn(DIASTOLIC_SAFE_MIN, DIASTOLIC_SAFE_MAX))
             }
             // 参考阈值也参与默认视野，避免常见血压区间看不到 90 / 140 的参考线。
             add(REFERENCE_DIASTOLIC)

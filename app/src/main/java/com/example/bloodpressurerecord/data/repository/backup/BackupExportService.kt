@@ -34,7 +34,18 @@ class BackupExportService(
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-    suspend fun buildPayload(appName: String, appVersion: String): BackupExportPayload = withContext(Dispatchers.IO) {
+    suspend fun buildPayload(appName: String, appVersion: String): BackupExportPayload {
+        val payload = buildSnapshot(appName, appVersion)
+        require(payload.measurements.size <= BackupImportLimits.MAX_RECORDS) {
+            "记录共 ${payload.measurements.size} 条，请使用数据管理页面的分卷导出。"
+        }
+        return payload
+    }
+
+    suspend fun buildExportPlan(appName: String, appVersion: String): BackupExportPlan =
+        BackupExportPlan.fromPayload(buildSnapshot(appName, appVersion))
+
+    private suspend fun buildSnapshot(appName: String, appVersion: String): BackupExportPayload = withContext(Dispatchers.IO) {
         val sessions = sessionDao.getAllSessionsWithReadings().sortedBy { it.session.measuredAt }
         val legacyMeasurements = measurementDao.getAll()
         val legacyRecordRows = readLegacyRecordRows()
@@ -43,9 +54,6 @@ class BackupExportService(
             legacyMeasurements = legacyMeasurements,
             legacyRecordRows = legacyRecordRows
         )
-        require(measurementRows.size <= BackupImportLimits.MAX_RECORDS) {
-            "记录共 ${measurementRows.size} 条，超过单个可恢复备份的 ${BackupImportLimits.MAX_RECORDS} 条上限，请先按时间范围拆分。"
-        }
         val medicationsWithTimes = medicationDao?.getMedicationsWithTimes().orEmpty()
         val medicationRows = medicationsWithTimes.map { item ->
             BackupMedicationRow(

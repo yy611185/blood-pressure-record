@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
@@ -63,20 +64,14 @@ class TrendReadoutAccessibilityTest {
         renderReadout(width = 288.dp, fontScale = 1f, dark = false)
         captureIfRequested("trend-readout-normal")
         assertTextFitsAndActionsAreReachable()
-        val previous = action("上一条").fetchSemanticsNode().boundsInRoot
-        val reset = action("恢复").fetchSemanticsNode().boundsInRoot
-        assertEquals(previous.top, reset.top, 1f)
     }
 
     @Test
-    fun narrowLargeFontReflowsActionsAndPreservesAllText() {
+    fun narrowLargeFontScrollsActionsOnOneLineAndPreservesAllText() {
         // 320dp screen minus page margins (40dp) and chart padding (32dp).
         renderReadout(width = 248.dp, fontScale = 2f, dark = true)
         captureIfRequested("trend-readout-small-large-dark")
         assertTextFitsAndActionsAreReachable()
-        val previous = action("上一条").fetchSemanticsNode().boundsInRoot
-        val details = action("明细").fetchSemanticsNode().boundsInRoot
-        assertTrue(details.top >= previous.bottom)
     }
 
     @Test
@@ -117,7 +112,8 @@ class TrendReadoutAccessibilityTest {
                             selectedPoint = points[1],
                             onPointSelected = { selectedId = it?.id },
                             onViewDayRecords = { detailId = it.id },
-                            onResetChart = { resetCount++ }
+                            onResetChart = { resetCount++ },
+                            onLatest = { latestCount++ }
                         )
                     }
                 }
@@ -128,12 +124,15 @@ class TrendReadoutAccessibilityTest {
     private var selectedId: String? = null
     private var detailId: String? = null
     private var resetCount = 0
+    private var latestCount = 0
 
     private fun action(text: String) = composeRule.onNode(hasText(text) and hasClickAction())
 
     private fun assertTextFitsAndActionsAreReachable() {
-        listOf("上一条", "下一条", "明细", "恢复").forEach {
-            action(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        val actionTop = action("上一条").performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        listOf("上一条", "下一条", "明细", "最新", "恢复").forEach {
+            val node = action(it).performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+            assertEquals("Actions must stay on one line", actionTop, node.fetchSemanticsNode().boundsInRoot.top, 1f)
         }
         val textNodes = composeRule.onAllNodes(
             SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
@@ -161,14 +160,16 @@ class TrendReadoutAccessibilityTest {
                 }
             }
         }
-        action("上一条").performClick()
+        action("上一条").performScrollTo().performClick()
         assertEquals(points[0].id, selectedId)
-        action("下一条").performClick()
+        action("下一条").performScrollTo().performClick()
         assertEquals(points[2].id, selectedId)
-        action("明细").performClick()
+        action("明细").performScrollTo().performClick()
         assertEquals(points[1].id, detailId)
-        action("恢复").performClick()
+        action("恢复").performScrollTo().performClick()
         assertEquals(1, resetCount)
+        action("最新").performScrollTo().performClick()
+        assertEquals(1, latestCount)
     }
 
     private fun captureIfRequested(name: String) {

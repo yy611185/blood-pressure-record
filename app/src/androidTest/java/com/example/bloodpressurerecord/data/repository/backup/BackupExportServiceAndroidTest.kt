@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.data.repository.backup
 
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.db.AppDatabase
@@ -13,6 +14,7 @@ import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.test.runTest
+import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.flow.first
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.junit.After
@@ -546,6 +548,40 @@ class BackupExportServiceAndroidTest {
         }
     }
 
+    @Test
+    fun overFiveThousandSessionsExportAndRestoreAllVolumesWithOriginalIdsAndGroups() = runTest(timeout = 3.minutes) {
+        seedBulkSessions(5_001)
+        val dao = database.measurementSessionDao()
+        val source = dao.getAllSessionsWithReadings().associateBy { it.session.id }
+        val store = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val plan = BackupExportService(dao, database.measurementDao(), database.userProfileDao(), store)
+            .buildExportPlan("test", "test")
+        assertEquals(listOf(5_000, 1), plan.volumes.map { it.measurements.size })
+        dao.deleteAllReadings()
+        dao.deleteAllSessions()
+        val service = BackupImportService(database, store)
+        plan.volumes.forEach { payload ->
+            val plain = ByteArrayOutputStream().use { output ->
+                BackupFileWriter().writeXlsx(payload, output)
+                output.toByteArray()
+            }
+            val password = "roundtrip-volumes".toCharArray()
+            val bytes = BackupCrypto.encrypt(plain, password)
+            val preview = service.previewXlsx(ByteArrayInputStream(bytes), password)
+            assertNotNull(preview.volumeDescription)
+            service.commitImport(preview, BackupImportOptions())
+        }
+        val restored = dao.getAllSessionsWithReadings().associateBy { it.session.id }
+        assertEquals(source.keys, restored.keys)
+        source.forEach { (id, original) ->
+            assertEquals(original.session.measuredAt, restored.getValue(id).session.measuredAt)
+            assertEquals(original.session.avgSystolic, restored.getValue(id).session.avgSystolic)
+            assertEquals(original.session.averageStrategy, restored.getValue(id).session.averageStrategy)
+            assertEquals(original.readings.sortedBy { it.orderIndex }.map { Triple(it.systolic, it.diastolic, it.pulse) },
+                restored.getValue(id).readings.sortedBy { it.orderIndex }.map { Triple(it.systolic, it.diastolic, it.pulse) })
+        }
+    }
+
     private suspend fun exportSingleSession(
         sessionId: String,
         values: List<Triple<Int, Int, Int>>,
@@ -602,50 +638,57 @@ class BackupExportServiceAndroidTest {
     }
 
     private suspend fun buildLargeBackup(count: Int): ByteArray {
-        val dao = database.measurementSessionDao()
-        (0 until count).chunked(250).forEach { indexes ->
-            dao.insertSessions(
-                indexes.map { index ->
-                    MeasurementSessionEntity(
-                        id = "bulk-$index",
-                        measuredAt = 1_700_000_000_000L + index * 60_000L,
-                        scene = "批量测试",
-                        note = "record-$index",
-                        symptomsJson = null,
-                        avgSystolic = 121,
-                        avgDiastolic = 81,
-                        avgPulse = 71,
-                        category = "NORMAL",
-                        containsHighRiskReading = false,
-                        createdAt = 1_700_000_000_000L + index * 60_000L,
-                        updatedAt = 1_700_000_000_000L + index * 60_000L
-                    )
-                }
-            )
-            dao.insertReadings(
-                indexes.flatMap { index ->
-                    listOf(
-                        MeasurementReadingEntity(
-                            id = "bulk-$index-1",
-                            sessionId = "bulk-$index",
-                            orderIndex = 1,
-                            systolic = 120,
-                            diastolic = 80,
-                            pulse = 70
-                        ),
-                        MeasurementReadingEntity(
-                            id = "bulk-$index-2",
-                            sessionId = "bulk-$index",
-                            orderIndex = 2,
-                            systolic = 122,
-                            diastolic = 82,
-                            pulse = 72
-                        )
-                    )
-                }
-            )
-        }
+        seedBulkSessions(count)
         return exportCurrentDatabase()
+    }
+
+    private suspend fun seedBulkSessions(count: Int) {
+        val dao = database.measurementSessionDao()
+        // 大批量真实 I/O 种子共用事务，避免每批单独提交带来的设备开销。
+        database.withTransaction {
+            (0 until count).chunked(250).forEach { indexes ->
+                dao.insertSessions(
+                    indexes.map { index ->
+                        MeasurementSessionEntity(
+                            id = "bulk-$index",
+                            measuredAt = 1_700_000_000_000L + index * 60_000L,
+                            scene = "批量测试",
+                            note = "record-$index",
+                            symptomsJson = null,
+                            avgSystolic = 121,
+                            avgDiastolic = 81,
+                            avgPulse = 71,
+                            category = "NORMAL",
+                            containsHighRiskReading = false,
+                            createdAt = 1_700_000_000_000L + index * 60_000L,
+                            updatedAt = 1_700_000_000_000L + index * 60_000L
+                        )
+                    }
+                )
+                dao.insertReadings(
+                    indexes.flatMap { index ->
+                        listOf(
+                            MeasurementReadingEntity(
+                                id = "bulk-$index-1",
+                                sessionId = "bulk-$index",
+                                orderIndex = 1,
+                                systolic = 120,
+                                diastolic = 80,
+                                pulse = 70
+                            ),
+                            MeasurementReadingEntity(
+                                id = "bulk-$index-2",
+                                sessionId = "bulk-$index",
+                                orderIndex = 2,
+                                systolic = 122,
+                                diastolic = 82,
+                                pulse = 72
+                            )
+                        )
+                    }
+                )
+            }
+        }
     }
 
     private suspend fun exportCurrentDatabase(): ByteArray {

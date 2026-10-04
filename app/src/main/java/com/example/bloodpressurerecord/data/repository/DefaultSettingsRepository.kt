@@ -8,6 +8,8 @@ import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
 import com.example.bloodpressurerecord.data.db.dao.UserProfileDao
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
 import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPayload
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportService
 import com.example.bloodpressurerecord.data.repository.backup.BackupFileWriter
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
@@ -222,38 +224,7 @@ class DefaultSettingsRepository(
                 appVersion = currentAppVersion()
             )
 
-            // 先在内存中生成 xlsx，再按需加密后一次性写出，避免把明文临时落盘。
-            val xlsxBytes = ByteArrayOutputStream().use { buffer ->
-                val writer = BackupFileWriter()
-                val template = runCatching {
-                    context.assets.open(BackupFileWriter.TEMPLATE_ASSET_NAME)
-                }.getOrNull()
-
-                if (template != null) {
-                    template.use { input ->
-                        writer.writeXlsx(payload, buffer, input)
-                    }
-                } else {
-                    writer.writeXlsx(payload, buffer)
-                }
-                buffer.toByteArray()
-            }
-
-            val exportBytes = if (passphrase != null) {
-                BackupCrypto.encrypt(xlsxBytes, passphrase)
-            } else {
-                xlsxBytes
-            }
-            require(exportBytes.size <= com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits.MAX_FILE_BYTES) {
-                "生成的备份超过 10 MB，无法保证可恢复；请减少范围后分批导出。"
-            }
-            val outputStream = context.contentResolver.openOutputStream(uri)
-                ?: error("无法写入所选文件，请重新选择保存位置")
-
-            outputStream.use { stream ->
-                stream.write(exportBytes)
-                stream.flush()
-            }
+            writeBackupPayload(uri, payload, passphrase)
             appSettingsStore.setLastSuccessfulExportAt(System.currentTimeMillis())
             if (passphrase != null) {
                 "加密备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n" +
@@ -266,6 +237,70 @@ class DefaultSettingsRepository(
                     "时间点 ${payload.medicationTimes.size} 个、服药打卡 ${payload.medicationLogs.size} 条。" +
                     "\n文件已交给你选择的保存位置。"
             }
+        }
+    }
+
+    override suspend fun prepareBackupExport(): Result<BackupExportPlan> = runCatching {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                BackupExportService(
+                    sessionDao = measurementSessionDao,
+                    measurementDao = measurementDao,
+                    userProfileDao = userProfileDao,
+                    appSettingsStore = appSettingsStore,
+                    medicationDao = database.medicationDao()
+                ).buildExportPlan("家庭血压记录", currentAppVersion())
+            }
+        }
+    }
+
+    override suspend fun exportBackupVolumeToUri(
+        plan: BackupExportPlan,
+        volumeIndex: Int,
+        uri: Uri,
+        passphrase: CharArray?
+    ): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
+            writeBackupPayload(uri, plan.volumes[volumeIndex], passphrase)
+            if (plan.markVolumeSaved(volumeIndex)) {
+                appSettingsStore.setLastSuccessfulExportAt(System.currentTimeMillis())
+            }
+        }
+    }
+
+    private fun writeBackupPayload(uri: Uri, payload: BackupExportPayload, passphrase: CharArray?) {
+        require(payload.measurements.size <= com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits.MAX_RECORDS)
+        // 先在内存中生成 xlsx，再按需加密后一次性写出，避免把明文临时落盘。
+        val xlsxBytes = ByteArrayOutputStream().use { buffer ->
+            val writer = BackupFileWriter()
+            val template = runCatching {
+                context.assets.open(BackupFileWriter.TEMPLATE_ASSET_NAME)
+            }.getOrNull()
+
+            if (template != null) {
+                template.use { input ->
+                    writer.writeXlsx(payload, buffer, input)
+                }
+            } else {
+                writer.writeXlsx(payload, buffer)
+            }
+            buffer.toByteArray()
+        }
+
+        val exportBytes = if (passphrase != null) {
+            BackupCrypto.encrypt(xlsxBytes, passphrase)
+        } else {
+            xlsxBytes
+        }
+        require(exportBytes.size <= com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits.MAX_FILE_BYTES) {
+            "生成的备份超过 10 MB，无法保证可恢复；请减少范围后分批导出。"
+        }
+        val outputStream = context.contentResolver.openOutputStream(uri)
+            ?: error("无法写入所选文件，请重新选择保存位置")
+
+        outputStream.use { stream ->
+            stream.write(exportBytes)
+            stream.flush()
         }
     }
 
@@ -285,7 +320,8 @@ class DefaultSettingsRepository(
                 importMeasurements = true,
                 restoreUserProfile = true,
                 restoreDisplaySettings = true,
-                restoreReminderSettings = true
+                restoreReminderSettings = true,
+                restoreMedications = true
             )
         ).getOrThrow()
     }
@@ -320,8 +356,10 @@ class DefaultSettingsRepository(
                 runCatching { rescheduleReminders() }
                     .onFailure { followUpWarnings += "血压提醒待重试" }
             }
-            runCatching { medicationResync?.invoke() }
-                .onFailure { followUpWarnings += "服药提醒与日历待重试" }
+            if (options.restoreMedications) {
+                runCatching { medicationResync?.invoke() }
+                    .onFailure { followUpWarnings += "服药提醒与日历待重试" }
+            }
             runCatching { onDataChanged?.invoke() }
                 .onFailure { followUpWarnings += "桌面小部件待刷新" }
             buildString {

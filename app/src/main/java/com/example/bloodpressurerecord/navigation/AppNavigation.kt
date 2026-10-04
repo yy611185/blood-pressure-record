@@ -16,6 +16,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -73,6 +76,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     val current = navController.currentBackStackEntryAsState().value?.destination?.route
     val application = LocalContext.current.applicationContext as BloodPressureApplication
     val factory = remember(application) { AppViewModelFactory(application) }
+    var trendFullscreen by remember { mutableStateOf(false) }
     val tabs = remember(showTrendChart) {
         listOfNotNull(
             AppDestination.Measure,
@@ -81,7 +85,8 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
             AppDestination.Settings
         )
     }
-    val showBottomBar = current in TopLevelRoutes
+    val showBottomBar = current in TopLevelRoutes &&
+        !(current == AppDestination.Trend.route && trendFullscreen)
 
     LaunchedEffect(showTrendChart, current) {
         if (!showTrendChart && current == AppDestination.Trend.route) {
@@ -216,7 +221,9 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     com.example.bloodpressurerecord.ui.history.TrendScreen(
                         viewModel = vm,
                         onBack = null,
-                        onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) }
+                        onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
+                        onFullscreenChanged = { trendFullscreen = it },
+                        onOpenRecord = { id -> navController.navigate(AppDestination.HistoryDetail.route(id)) }
                     )
                 }
                 composable(AppDestination.HistoryDetail.route) { backStack ->

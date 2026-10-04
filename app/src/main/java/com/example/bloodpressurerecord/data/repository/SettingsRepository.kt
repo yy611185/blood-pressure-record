@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.data.repository
 
 import com.example.bloodpressurerecord.data.datastore.AppSettings
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import android.net.Uri
@@ -71,6 +72,16 @@ interface SettingsRepository {
         fileNameHint: String,
         passphrase: CharArray? = null
     ): Result<String>
+
+    suspend fun prepareBackupExport(): Result<BackupExportPlan> =
+        Result.failure(UnsupportedOperationException("当前设置仓库不支持分卷备份"))
+
+    suspend fun exportBackupVolumeToUri(
+        plan: BackupExportPlan,
+        volumeIndex: Int,
+        uri: Uri,
+        passphrase: CharArray? = null
+    ): Result<Unit> = Result.failure(UnsupportedOperationException("当前设置仓库不支持分卷备份"))
 
     suspend fun importBackupXlsxFromUri(uri: Uri, passphrase: CharArray? = null): Result<String>
 

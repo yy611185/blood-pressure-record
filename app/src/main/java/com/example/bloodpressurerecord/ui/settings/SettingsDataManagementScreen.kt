@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,10 +58,6 @@ fun SettingsDataManagementScreen(
     onBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var pendingExportFileName by remember { mutableStateOf(defaultBackupFileName()) }
-    var pendingEncryptedExportFileName by remember {
-        mutableStateOf(defaultEncryptedBackupFileName())
-    }
     var exportPassphrase by remember { mutableStateOf("") }
     var exportPassphraseConfirm by remember { mutableStateOf("") }
     var importPassphrase by remember { mutableStateOf("") }
@@ -71,24 +68,18 @@ fun SettingsDataManagementScreen(
         )
     ) { uri ->
         if (uri != null) {
-            viewModel.exportBackupXlsxToUri(uri, pendingExportFileName)
+            viewModel.exportCurrentVolume(uri)
         } else {
-            viewModel.dismissBackupExport()
+            viewModel.onExportLocationCancelled()
         }
     }
     val encryptedExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri != null) {
-            viewModel.exportEncryptedBackupToUri(
-                uri,
-                pendingEncryptedExportFileName,
-                exportPassphrase.toCharArray()
-            )
-            exportPassphrase = ""
-            exportPassphraseConfirm = ""
+            viewModel.exportCurrentVolume(uri)
         } else {
-            viewModel.dismissEncryptedBackupExport()
+            viewModel.onExportLocationCancelled()
         }
     }
     val backupImportLauncher = rememberLauncherForActivityResult(
@@ -121,8 +112,7 @@ fun SettingsDataManagementScreen(
                 Row {
                     TextButton(
                         onClick = {
-                            pendingExportFileName = defaultBackupFileName()
-                            backupExportLauncher.launch(pendingExportFileName)
+                            viewModel.prepareBackupExport(defaultBackupFileName().removeSuffix(".xlsx"))
                         }
                     ) {
                         Text("明文导出")
@@ -176,13 +166,42 @@ fun SettingsDataManagementScreen(
                 TextButton(
                     enabled = passphraseValid && !uiState.isDataActionRunning,
                     onClick = {
-                        pendingEncryptedExportFileName = defaultEncryptedBackupFileName()
-                        encryptedExportLauncher.launch(pendingEncryptedExportFileName)
+                        viewModel.prepareBackupExport(
+                            defaultEncryptedBackupFileName().removeSuffix(".${BackupCrypto.FILE_EXTENSION}"),
+                            exportPassphrase.toCharArray()
+                        )
+                        exportPassphrase = ""
+                        exportPassphraseConfirm = ""
                     }
                 ) { Text("选择保存位置") }
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissEncryptedBackupExport) { Text("取消") }
+            }
+        )
+    }
+
+    if (uiState.showSaveExportVolume) {
+        AlertDialog(
+            onDismissRequest = viewModel::pauseBackupExport,
+            title = { Text("保存第 ${uiState.exportVolumeIndex + 1}/${uiState.exportVolumeCount} 卷") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("共 ${uiState.exportTotalRecords} 条测量，每卷最多 5000 条；本卷 ${uiState.exportVolumeRecords} 条。每次测量和原始组会完整保留。")
+                    Text(if (uiState.exportVolumeIndex == 0) "第一卷还包含用户资料、设置和全部用药数据。" else "本卷仅含测量记录；资料、设置和用药数据在第一卷。")
+                    Text("请依次保存全部 ${uiState.exportVolumeCount} 卷，恢复时逐卷导入。" +
+                        if (uiState.exportEncrypted) "全部卷使用同一口令。" else "文件为明文 Excel。")
+                    Text(uiState.exportFileName, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (uiState.exportEncrypted) encryptedExportLauncher.launch(uiState.exportFileName)
+                    else backupExportLauncher.launch(uiState.exportFileName)
+                }) { Text("选择本卷保存位置") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::pauseBackupExport) { Text("稍后继续") }
             }
         )
     }
@@ -230,7 +249,7 @@ fun SettingsDataManagementScreen(
             onDismissRequest = viewModel::dismissBackupImport,
             title = { Text("导入 Excel 备份") },
             text = {
-                Text("先选择文件生成预览；预览阶段不会写入本机数据。确认后可选择导入记录、用户资料、显示设置和提醒设置。")
+                Text("先选择文件生成预览；预览阶段不会写入本机数据。确认后可选择导入记录、用户资料、显示设置、提醒设置和用药数据。分卷备份请逐卷导入全部文件。")
             },
             confirmButton = {
                 TextButton(
@@ -255,7 +274,11 @@ fun SettingsDataManagementScreen(
             onDismissRequest = viewModel::dismissBackupImport,
             title = { Text("确认导入范围") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    preview.volumeDescription?.let { Text(it) }
                     Text(
                         "可用记录 ${preview.validRecordCount} 条，新增 ${preview.insertedCount} 条，" +
                             "覆盖 ${preview.replacedCount} 条，自动修正 ${preview.correctedCount} 条，" +
@@ -297,22 +320,33 @@ fun SettingsDataManagementScreen(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
+                            checked = uiState.restoreMedicationsSelected,
+                            onCheckedChange = viewModel::setRestoreMedicationsSelected,
+                            enabled = preview.medicationCount > 0
+                        )
+                        Text("恢复用药数据（药品、时间点及打卡）")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
                             checked = uiState.restoreUserProfileSelected,
-                            onCheckedChange = viewModel::setRestoreUserProfileSelected
+                            onCheckedChange = viewModel::setRestoreUserProfileSelected,
+                            enabled = preview.hasSettings
                         )
                         Text("恢复用户资料" + if (preview.changesName || preview.changesAgeAndGender || preview.changesTargetPressure) "（有变化）" else "")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = uiState.restoreDisplaySettingsSelected,
-                            onCheckedChange = viewModel::setRestoreDisplaySettingsSelected
+                            onCheckedChange = viewModel::setRestoreDisplaySettingsSelected,
+                            enabled = preview.hasSettings
                         )
                         Text("恢复显示设置" + if (preview.changesDisplaySettings) "（有变化）" else "")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = uiState.restoreReminderSettingsSelected,
-                            onCheckedChange = viewModel::setRestoreReminderSettingsSelected
+                            onCheckedChange = viewModel::setRestoreReminderSettingsSelected,
+                            enabled = preview.hasSettings
                         )
                         Text(
                             "恢复提醒设置" +
@@ -323,7 +357,7 @@ fun SettingsDataManagementScreen(
             },
             confirmButton = {
                 TextButton(
-                    enabled = !uiState.isDataActionRunning,
+                    enabled = !uiState.isDataActionRunning && uiState.hasImportSelection,
                     onClick = viewModel::commitBackupImport
                 ) { Text("确认导入") }
             },
@@ -407,6 +441,7 @@ fun SettingsDataManagementScreen(
             }
 
             Text("导出与备份", style = MaterialTheme.typography.titleMedium)
+            Text("超过 5000 条记录会自动分卷，明文和加密备份均可逐卷保存与恢复。", style = MaterialTheme.typography.bodySmall)
             AppPrimaryButton(
                 text = if (uiState.isDataActionRunning) "正在处理..." else "导出为 Excel (.xlsx)",
                 icon = Icons.Outlined.SaveAlt,
@@ -419,7 +454,7 @@ fun SettingsDataManagementScreen(
             )
 
             AppSecondaryButton(
-                text = "加密备份 (.bpx)",
+                text = if (uiState.exportVolumeCount > 0) "继续保存备份（第 ${uiState.exportVolumeIndex + 1} 卷）" else "加密备份 (.bpx)",
                 onClick = {
                     if (!uiState.isDataActionRunning) viewModel.requestEncryptedBackupExport()
                 },
