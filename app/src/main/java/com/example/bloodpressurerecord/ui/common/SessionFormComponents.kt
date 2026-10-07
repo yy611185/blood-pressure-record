@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.ui.common
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +55,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
@@ -229,7 +232,8 @@ fun MeasurementReadingCard(
     onSystolicChange: (String) -> Unit,
     onDiastolicChange: (String) -> Unit,
     onPulseChange: (String) -> Unit,
-    onRemove: () -> Unit = {}
+    onRemove: () -> Unit = {},
+    enabled: Boolean = true
 ) {
     val systolic = reading.systolic.toIntOrNull()
     val diastolic = reading.diastolic.toIntOrNull()
@@ -247,7 +251,7 @@ fun MeasurementReadingCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 if (removable) {
-                    IconButton(onClick = onRemove) {
+                    IconButton(onClick = onRemove, enabled = enabled) {
                         Icon(Icons.Default.DeleteOutline, contentDescription = "删除第${index + 1}组读数")
                     }
                 }
@@ -267,6 +271,7 @@ fun MeasurementReadingCard(
                         accessibleLabel = "第 ${index + 1} 组收缩压（高压）",
                         imeAction = ImeAction.Next,
                         numberSize = numberSize,
+                        enabled = enabled,
                         modifier = fieldModifier
                     )
                 }
@@ -280,6 +285,7 @@ fun MeasurementReadingCard(
                         imeAction = ImeAction.Next,
                         isError = relationError,
                         numberSize = numberSize,
+                        enabled = enabled,
                         modifier = fieldModifier
                     )
                 }
@@ -292,6 +298,7 @@ fun MeasurementReadingCard(
                         accessibleLabel = "第 ${index + 1} 组脉搏（选填）",
                         imeAction = ImeAction.Done,
                         numberSize = numberSize,
+                        enabled = enabled,
                         modifier = fieldModifier
                     )
                 }
@@ -361,7 +368,8 @@ private fun CompactNumberField(
     imeAction: ImeAction,
     numberSize: TextUnit,
     modifier: Modifier = Modifier,
-    isError: Boolean = false
+    isError: Boolean = false,
+    enabled: Boolean = true
 ) {
     val colors = MaterialTheme.colorScheme
     Column(
@@ -378,6 +386,7 @@ private fun CompactNumberField(
         )
         OutlinedTextField(
             value = value,
+            enabled = enabled,
             onValueChange = { next ->
                 if (next.all(Char::isDigit) && next.length <= 3) onValueChange(next)
             },
@@ -497,7 +506,31 @@ fun InlineSessionAction(
             onClick = onSave,
             enabled = canSave && !isSaving,
             modifier = Modifier.fillMaxWidth().height(AppDimensions.saveButtonHeight)
-        )
+        ) {
+            AnimatedContent(
+                targetState = isSaving,
+                transitionSpec = { AppMotion.microFadeThrough() },
+                label = "sessionSaveContent"
+            ) { saving ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
+                ) {
+                    if (saving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    Text(
+                        if (saving) "正在保存…" else buttonText,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }
 

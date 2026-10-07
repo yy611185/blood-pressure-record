@@ -1,5 +1,10 @@
 package com.example.bloodpressurerecord.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
@@ -49,7 +54,11 @@ import com.example.bloodpressurerecord.ui.common.RoundIconBadge
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.home.Buddy
+
+private val restoreSystemEnter = fadeIn(AppMotion.floatFast) + expandVertically(AppMotion.sizeFast)
+private val restoreSystemExit = fadeOut(AppMotion.floatFast) + shrinkVertically(AppMotion.sizeFast)
 
 @Composable
 fun SettingsScreen(
@@ -134,7 +143,11 @@ fun SettingsScreen(
                         Icons.Outlined.DarkMode, darkEnabled) {
                         viewModel.setAppearanceMode(if (it) "dark" else "light")
                     }
-                    if (state.appearanceMode != "system") {
+                    AnimatedVisibility(
+                        visible = state.appearanceMode != "system",
+                        enter = restoreSystemEnter,
+                        exit = restoreSystemExit
+                    ) {
                         TextButton(onClick = { viewModel.setAppearanceMode("system") },
                             modifier = Modifier.fillMaxWidth()) { Text("恢复跟随系统") }
                     }

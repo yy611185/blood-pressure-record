@@ -1,11 +1,17 @@
 package com.example.bloodpressurerecord.ui.common
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,11 +33,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
@@ -43,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.BloodPressureVisualStatus
 import com.example.bloodpressurerecord.ui.theme.WarmNeutral300
@@ -56,7 +66,8 @@ fun AppPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    content: (@Composable RowScope.() -> Unit)? = null
 ) {
     Button(
         onClick = onClick,
@@ -72,11 +83,15 @@ fun AppPrimaryButton(
         elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp),
         contentPadding = PaddingValues(horizontal = AppSpacing.xLarge, vertical = 12.dp)
     ) {
-        if (icon != null) {
-            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(22.dp))
-            Spacer(modifier = Modifier.width(AppSpacing.small))
+        if (content != null) {
+            content()
+        } else {
+            if (icon != null) {
+                Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(22.dp))
+                Spacer(modifier = Modifier.width(AppSpacing.small))
+            }
+            Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
-        Text(text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -126,11 +141,31 @@ fun DataCard(
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
+    val clickModifier = if (onClick != null) {
+        val interactionSource = remember { MutableInteractionSource() }
+        val pressed by interactionSource.collectIsPressedAsState()
+        val pressScale = animateFloatAsState(
+            targetValue = if (pressed) 0.985f else 1f,
+            animationSpec = AppMotion.floatPress,
+            label = "Data card press"
+        )
+        // Keep the pointer node outside the visual layer so the touch area stays unchanged.
+        Modifier.clickable(
+            interactionSource = interactionSource,
+            indication = LocalIndication.current,
+            onClick = onClick
+        ).graphicsLayer {
+            scaleX = pressScale.value
+            scaleY = pressScale.value
+        }
+    } else {
+        Modifier
+    }
     // 原稿 26dp 圆角、奶白卡片与轻微投影。
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+            .then(clickModifier),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -185,7 +220,8 @@ fun AppTopBar(
     title: String,
     onBack: (() -> Unit)? = null,
     hideOnScroll: HideOnScrollState? = null,
-    actions: @Composable () -> Unit = {}
+    actions: @Composable () -> Unit = {},
+    titleContent: (@Composable () -> Unit)? = null
 ) {
     // 滚动隐藏：按 offsetPx 收缩自身布局高度并上移内容，
     // 下方页面内容随之自然上移，露出更多可视区域。
@@ -226,7 +262,9 @@ fun AppTopBar(
             Spacer(modifier = Modifier.width(AppSpacing.large))
         }
 
-        Text(
+        if (titleContent != null) {
+            Box(Modifier.weight(1f)) { titleContent() }
+        } else Text(
             text = title,
             // 一级页面沿用原稿约 30sp；子页使用较紧凑标题。
             style = if (onBack != null) {
@@ -268,12 +306,22 @@ fun SegmentedPillGroup(
     ) {
         options.forEachIndexed { index, option ->
             val selected = index == selectedIndex
+            val backgroundColor by animateColorAsState(
+                targetValue = if (selected) colors.primaryContainer else Color.Transparent,
+                animationSpec = AppMotion.colorFast,
+                label = "Segment background"
+            )
+            val textColor by animateColorAsState(
+                targetValue = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
+                animationSpec = AppMotion.colorFast,
+                label = "Segment text"
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = AppDimensions.minimumTouchTarget)
                     .clip(MaterialTheme.shapes.large)
-                    .background(if (selected) colors.primaryContainer else Color.Transparent)
+                    .background(backgroundColor)
                     .selectable(selected = selected, role = Role.RadioButton) { onSelect(index) }
                     .padding(horizontal = horizontalPadding),
                 contentAlignment = Alignment.Center
@@ -282,7 +330,7 @@ fun SegmentedPillGroup(
                     text = option,
                     fontSize = 16.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
+                    color = textColor,
                     maxLines = 1
                 )
             }

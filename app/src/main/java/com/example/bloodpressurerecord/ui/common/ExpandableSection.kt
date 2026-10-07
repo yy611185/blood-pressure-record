@@ -1,7 +1,7 @@
 package com.example.bloodpressurerecord.ui.common
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 
 /** Keeps the content composed so folding a chart does not reset its interaction state. */
 @Composable
@@ -44,11 +45,16 @@ fun ExpandableSection(
     content: @Composable ColumnScope.() -> Unit
 ) {
     var expanded by rememberSaveable(stateKey) { mutableStateOf(initiallyExpanded) }
+    val arrowRotation = animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = AppMotion.floatFast,
+        label = "Section arrow"
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(durationMillis = 180))
+            .animateContentSize(animationSpec = AppMotion.sizeNormal)
             .clipToBounds()
     ) {
         Row(
@@ -83,9 +89,9 @@ fun ExpandableSection(
                 }
             }
             Icon(
-                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                imageVector = Icons.Default.ExpandMore,
                 contentDescription = null,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(24.dp).graphicsLayer { rotationZ = arrowRotation.value },
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +62,7 @@ import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.displayLabel
 import com.example.bloodpressurerecord.ui.common.AppBackButton
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
@@ -762,6 +764,24 @@ private fun <T> SegmentedControl(
     ) {
         items.forEach { item ->
             val isSelected = item == selected
+            val background by animateColorAsState(
+                targetValue = when {
+                    isSelected && accent -> MaterialTheme.colorScheme.primaryContainer
+                    isSelected -> MaterialTheme.colorScheme.surface
+                    else -> Color.Transparent
+                },
+                animationSpec = AppMotion.colorFast,
+                label = "trendSegmentBackground"
+            )
+            val textColor by animateColorAsState(
+                targetValue = when {
+                    isSelected && accent -> MaterialTheme.colorScheme.onPrimaryContainer
+                    isSelected -> MaterialTheme.colorScheme.onSurface
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                animationSpec = AppMotion.colorFast,
+                label = "trendSegmentText"
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -772,11 +792,7 @@ private fun <T> SegmentedControl(
                         clip = false
                     )
                     .background(
-                        when {
-                            isSelected && accent -> MaterialTheme.colorScheme.primaryContainer
-                            isSelected -> MaterialTheme.colorScheme.surface
-                            else -> Color.Transparent
-                        },
+                        background,
                         MaterialTheme.shapes.large
                     )
                     .semantics {
@@ -789,11 +805,7 @@ private fun <T> SegmentedControl(
                 Text(
                     text = label(item),
                     style = MaterialTheme.typography.labelMedium,
-                    color = when {
-                        isSelected && accent -> MaterialTheme.colorScheme.onPrimaryContainer
-                        isSelected -> MaterialTheme.colorScheme.onSurface
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    color = textColor,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
@@ -859,10 +871,15 @@ private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
 
 @Composable
 private fun TrendDayRecordRow(record: TrendRecord, selected: Boolean, onClick: () -> Unit) {
+    val background by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        animationSpec = AppMotion.colorMicro,
+        label = "trendDayRecordBackground"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .background(background)
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,

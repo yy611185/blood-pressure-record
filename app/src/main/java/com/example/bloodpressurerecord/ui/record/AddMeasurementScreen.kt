@@ -1,6 +1,15 @@
 package com.example.bloodpressurerecord.ui.record
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -33,6 +42,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,9 +55,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.InlineSessionAction
@@ -53,13 +72,23 @@ import com.example.bloodpressurerecord.ui.common.SessionCompletedDialog
 import com.example.bloodpressurerecord.ui.common.SessionSupplementFields
 import com.example.bloodpressurerecord.ui.common.SessionAverageCard
 import com.example.bloodpressurerecord.ui.common.MeasurementReadingCard
+import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
 import com.example.bloodpressurerecord.ui.common.UnsavedChangesDialog
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
+import kotlinx.coroutines.flow.first
+
+private val ReadingGroupEnter = fadeIn(AppMotion.floatNormal) + expandVertically(AppMotion.sizeNormal)
+private val ReadingGroupExit = fadeOut(AppMotion.floatNormal) + shrinkVertically(AppMotion.sizeNormal)
+private val AverageEnter = fadeIn(AppMotion.floatFast)
+private val AverageExit = fadeOut(AppMotion.floatFast)
+private val HighRiskEnter = fadeIn(AppMotion.floatFast) + expandVertically(AppMotion.sizeFast)
+private val HighRiskExit = fadeOut(AppMotion.floatFast) + shrinkVertically(AppMotion.sizeFast)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +100,16 @@ fun AddMeasurementScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showExitDialog by remember { mutableStateOf(false) }
     var showSupplement by rememberSaveable { mutableStateOf(false) }
+    // Presentation identities survive form-page transitions; drafts remain entirely in the ViewModel.
+    val extraReadingMotion = remember(viewModel) { ExtraReadingMotionState(state.extraReadings) }
+    extraReadingMotion.reconcile(state.extraReadings)
+    val averagePresentation = remember { AveragePresentation() }
+    if (state.avgSystolic != null && state.avgDiastolic != null) {
+        averagePresentation.reading = Triple(state.avgSystolic, state.avgDiastolic, state.averagedGroupCount)
+    }
+    val displayedAverage = averagePresentation.reading
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(showSupplement) { focusManager.clearFocus() }
     val requestBack = {
         when {
             state.saved -> { viewModel.closeSavedSession(); onSaved() }
@@ -151,7 +190,20 @@ fun AddMeasurementScreen(
                 AppTopBar(
                     title = if (showSupplement) "补充情况" else "记一次血压",
                     onBack = requestBack,
-                    hideOnScroll = topBarScroll
+                    hideOnScroll = topBarScroll,
+                    titleContent = {
+                        AnimatedContent(
+                            targetState = showSupplement,
+                            transitionSpec = { AppMotion.formFadeThrough() },
+                            label = "sessionFormTitle"
+                        ) { supplement ->
+                            Text(
+                                if (supplement) "补充情况" else "记一次血压",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
                 )
             }
         }
@@ -168,72 +220,123 @@ fun AddMeasurementScreen(
                 .padding(bottom = AppDimensions.pageBottomGap),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
-            if (!showSupplement) {
-                Text("测量时间", style = MaterialTheme.typography.titleMedium)
-                MeasurementDateTimePicker(
-                    measuredAtText = state.measuredAtText,
-                    onMeasuredAtChange = viewModel::updateMeasuredAtText
-                )
-                val readings = listOf(state.reading1, state.reading2) + state.extraReadings
+            AnimatedContent(
+                targetState = showSupplement,
+                transitionSpec = { AppMotion.formFadeThrough() },
+                label = "sessionFormPage"
+            ) { supplement ->
                 Column(
+                    modifier = if (supplement == showSupplement) Modifier else Modifier
+                        .clearAndSetSemantics {}
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                                }
+                            }
+                        },
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
                 ) {
-                    readings.forEachIndexed { index, reading ->
-                        MeasurementReadingCard(
-                            index = index,
-                            reading = reading,
-                            removable = index >= 2,
-                            onSystolicChange = {
-                                when (index) {
-                                    0 -> viewModel.updateReading1Systolic(it)
-                                    1 -> viewModel.updateReading2Systolic(it)
-                                    else -> viewModel.updateExtraReadingSystolic(index - 2, it)
+                    if (!supplement) {
+                        Text("测量时间", style = MaterialTheme.typography.titleMedium)
+                        MeasurementDateTimePicker(
+                            measuredAtText = state.measuredAtText,
+                            onMeasuredAtChange = { if (!showSupplement) viewModel.updateMeasuredAtText(it) }
+                        )
+                        val readings = listOf(state.reading1, state.reading2)
+                        Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.large)) {
+                                readings.forEachIndexed { index, reading ->
+                                    MeasurementReadingCard(
+                                        index = index,
+                                        reading = reading,
+                                        removable = false,
+                                        onSystolicChange = {
+                                            if (!showSupplement) {
+                                                when (index) {
+                                                    0 -> viewModel.updateReading1Systolic(it)
+                                                    1 -> viewModel.updateReading2Systolic(it)
+                                                }
+                                            }
+                                        },
+                                        onDiastolicChange = {
+                                            if (!showSupplement) {
+                                                when (index) {
+                                                    0 -> viewModel.updateReading1Diastolic(it)
+                                                    1 -> viewModel.updateReading2Diastolic(it)
+                                                }
+                                            }
+                                        },
+                                        onPulseChange = {
+                                            if (!showSupplement) {
+                                                when (index) {
+                                                    0 -> viewModel.updateReading1Pulse(it)
+                                                    1 -> viewModel.updateReading2Pulse(it)
+                                                }
+                                            }
+                                        }
+                                    )
                                 }
-                            },
-                            onDiastolicChange = {
-                                when (index) {
-                                    0 -> viewModel.updateReading1Diastolic(it)
-                                    1 -> viewModel.updateReading2Diastolic(it)
-                                    else -> viewModel.updateExtraReadingDiastolic(index - 2, it)
+                            }
+                            extraReadingMotion.entries.forEach { entry ->
+                                key(entry.id) {
+                                    AnimatedExtraReadingCard(
+                                        entry = entry,
+                                        reading = entry.reading,
+                                        index = entry.displayIndex,
+                                        active = !showSupplement && extraReadingMotion.activeIndex(entry) != null,
+                                        motion = extraReadingMotion,
+                                        viewModel = viewModel
+                                    )
                                 }
-                            },
-                            onPulseChange = {
-                                when (index) {
-                                    0 -> viewModel.updateReading1Pulse(it)
-                                    1 -> viewModel.updateReading2Pulse(it)
-                                    else -> viewModel.updateExtraReadingPulse(index - 2, it)
+                            }
+                        }
+                        Column {
+                            DashedAddGroupButton(
+                                enabled = !showSupplement && readings.size + state.extraReadings.size < MeasurementInputRules.MAX_READING_COUNT,
+                                onClick = { if (!showSupplement) viewModel.addNextReadingGroup() }
+                            )
+
+                            val averageOffsetPx = with(LocalDensity.current) { 8.dp.toPx() }
+                            AnimatedVisibility(
+                                visible = state.avgSystolic != null && state.avgDiastolic != null,
+                                enter = AverageEnter,
+                                exit = AverageExit
+                            ) {
+                                val averageOffset by transition.animateFloat(
+                                    transitionSpec = { AppMotion.floatFast },
+                                    label = "sessionAverageOffset"
+                                ) { phase -> if (phase == EnterExitState.Visible) 0f else averageOffsetPx }
+                                Box(Modifier.padding(top = AppSpacing.large).graphicsLayer { translationY = averageOffset }) {
+                                    displayedAverage?.let { (systolic, diastolic, count) ->
+                                        SessionAverageCard(systolic, diastolic, count)
+                                    }
                                 }
-                            },
-                            onRemove = { viewModel.removeExtraReading(index - 2) }
+                            }
+                            AnimatedVisibility(
+                                visible = state.containsHighRiskReading,
+                                enter = HighRiskEnter,
+                                exit = HighRiskExit
+                            ) {
+                                Surface(modifier = Modifier.padding(top = AppSpacing.large),
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.errorContainer) {
+                                    Text("有读数达到高风险范围。请休息后复测，身体不适请及时就医。",
+                                        modifier = Modifier.padding(14.dp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onErrorContainer)
+                                }
+                            }
+                        }
+                    } else {
+                        SessionSupplementFields(
+                            symptomNote = state.symptomNote,
+                            factorNote = state.factorNote,
+                            onSymptomNoteChange = { if (showSupplement) viewModel.updateSymptomNote(it) },
+                            onFactorNoteChange = { if (showSupplement) viewModel.updateFactorNote(it) }
                         )
                     }
                 }
-                DashedAddGroupButton(
-                    enabled = readings.size < MeasurementInputRules.MAX_READING_COUNT,
-                    onClick = viewModel::addNextReadingGroup
-                )
-
-                if (state.avgSystolic != null && state.avgDiastolic != null) {
-                    SessionAverageCard(state.avgSystolic, state.avgDiastolic, state.averagedGroupCount)
-                }
-                if (state.containsHighRiskReading) {
-                    Surface(shape = RoundedCornerShape(18.dp),
-                        color = MaterialTheme.colorScheme.errorContainer) {
-                        Text("有读数达到高风险范围。请休息后复测，身体不适请及时就医。",
-                            modifier = Modifier.padding(14.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer)
-                    }
-                }
-            }
-
-            if (showSupplement) {
-                SessionSupplementFields(
-                    symptomNote = state.symptomNote,
-                    factorNote = state.factorNote,
-                    onSymptomNoteChange = viewModel::updateSymptomNote,
-                    onFactorNoteChange = viewModel::updateFactorNote
-                )
             }
             InlineSessionAction(
                 canSave = state.canSave && !state.saved,
@@ -258,6 +361,115 @@ fun AddMeasurementScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
+        }
+    }
+}
+
+/** UI-only snapshots keep outgoing values out of the business state and its draft writer. */
+private class AveragePresentation {
+    var reading: Triple<Int?, Int?, Int>? = null
+}
+
+private class ExtraReadingPresentation(
+    val id: Long,
+    var reading: SessionReadingInputUi,
+    var displayIndex: Int,
+    initiallyVisible: Boolean
+) {
+    val visibility = MutableTransitionState(initiallyVisible).apply { targetState = true }
+}
+
+/**
+ * The ViewModel intentionally stores a plain indexed list. Keep stable UI keys locally, and
+ * remove from that indexed list immediately while a non-interactive snapshot finishes its exit.
+ */
+private class ExtraReadingMotionState(initialReadings: List<SessionReadingInputUi>) {
+    private var nextId = 0L
+    private var lastReadings = initialReadings
+    private val activeEntries = initialReadings.mapIndexed { index, reading ->
+        ExtraReadingPresentation(nextId++, reading, index + 2, initiallyVisible = true)
+    }.toMutableList()
+    val entries = mutableStateListOf<ExtraReadingPresentation>().apply { addAll(activeEntries) }
+
+    fun reconcile(readings: List<SessionReadingInputUi>) {
+        if (readings === lastReadings) return
+        // Explicit removal has already removed the corresponding key. A reset can only trim
+        // the tail; no business state is ever inferred from these presentation snapshots.
+        while (activeEntries.size > readings.size) {
+            activeEntries.removeAt(activeEntries.lastIndex).visibility.targetState = false
+        }
+        while (activeEntries.size < readings.size) {
+            val index = activeEntries.size
+            val entry = ExtraReadingPresentation(nextId++, readings[index], index + 2, initiallyVisible = false)
+            activeEntries.add(entry)
+            entries.add(entry)
+        }
+        activeEntries.forEachIndexed { index, entry ->
+            entry.reading = readings[index]
+            entry.displayIndex = index + 2
+        }
+        lastReadings = readings
+    }
+
+    fun activeIndex(entry: ExtraReadingPresentation): Int? =
+        activeEntries.indexOf(entry).takeIf { it >= 0 }
+
+    fun retire(entry: ExtraReadingPresentation, latestReadings: List<SessionReadingInputUi>): Int? {
+        val index = activeIndex(entry) ?: return null
+        entry.reading = latestReadings.getOrNull(index) ?: entry.reading
+        entry.displayIndex = index + 2
+        activeEntries.removeAt(index)
+        entry.visibility.targetState = false
+        return index
+    }
+
+    fun forget(entry: ExtraReadingPresentation) {
+        if (activeIndex(entry) == null) entries.remove(entry)
+    }
+}
+
+@Composable
+private fun AnimatedExtraReadingCard(
+    entry: ExtraReadingPresentation,
+    reading: SessionReadingInputUi,
+    index: Int,
+    active: Boolean,
+    motion: ExtraReadingMotionState,
+    viewModel: HomeViewModel
+) {
+    LaunchedEffect(entry) {
+        snapshotFlow { entry.visibility.isIdle && !entry.visibility.currentState && !entry.visibility.targetState }
+            .first { it }
+        motion.forget(entry)
+    }
+    AnimatedVisibility(
+        visibleState = entry.visibility,
+        enter = ReadingGroupEnter,
+        exit = ReadingGroupExit
+    ) {
+        Box(
+            Modifier.padding(top = AppSpacing.large)
+                .then(if (active) Modifier else Modifier.clearAndSetSemantics {})
+        ) {
+            MeasurementReadingCard(
+                index = index,
+                reading = reading,
+                removable = true,
+                enabled = active,
+                onSystolicChange = { value ->
+                    if (active) motion.activeIndex(entry)?.let { viewModel.updateExtraReadingSystolic(it, value) }
+                },
+                onDiastolicChange = { value ->
+                    if (active) motion.activeIndex(entry)?.let { viewModel.updateExtraReadingDiastolic(it, value) }
+                },
+                onPulseChange = { value ->
+                    if (active) motion.activeIndex(entry)?.let { viewModel.updateExtraReadingPulse(it, value) }
+                },
+                onRemove = {
+                    if (active) motion.retire(entry, viewModel.uiState.value.extraReadings)
+                        ?.let(viewModel::removeExtraReading)
+                }
+            )
         }
     }
 }

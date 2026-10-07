@@ -1,5 +1,10 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -49,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -57,6 +63,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -80,6 +88,7 @@ import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import com.example.bloodpressurerecord.ui.theme.Sage200
@@ -101,6 +110,8 @@ import java.time.YearMonth
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+private val calendarSelectionHalf = tween<Float>(AppMotion.Fast / 2, easing = FastOutSlowInEasing)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -503,12 +514,18 @@ private fun CalendarMonth(
                 }
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "${month.year}年${month.monthValue}月",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontFamily = NumberFontFamily,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    AnimatedContent(
+                        targetState = month,
+                        transitionSpec = { AppMotion.fadeThrough() },
+                        label = "calendarMonthTitle"
+                    ) { displayedMonth ->
+                        Text(
+                            "${displayedMonth.year}年${displayedMonth.monthValue}月",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontFamily = NumberFontFamily,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
                     Text(
                         if (targetDays == null) "${monthRecordCount} 次测量" else "${monthRecordCount} 次测量 · ${targetDays} 天达标",
                         style = MaterialTheme.typography.labelSmall,
@@ -560,16 +577,18 @@ private fun CalendarMonth(
                         val onCellDoubleClick = remember(date) {
                             { currentOnDateDoubleClick(date) }
                         }
-                        CalendarDay(
-                            date = date,
-                            summary = summaries[date],
-                            selected = selectedDate == date,
-                            today = today == date,
-                            currentDate = today,
-                            onClick = onCellClick,
-                            onDoubleClick = onCellDoubleClick,
-                            modifier = Modifier.weight(1f)
-                        )
+                        key(date) {
+                            CalendarDay(
+                                date = date,
+                                summary = summaries[date],
+                                selected = selectedDate == date,
+                                today = today == date,
+                                currentDate = today,
+                                onClick = onCellClick,
+                                onDoubleClick = onCellDoubleClick,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -611,7 +630,28 @@ internal fun CalendarDay(
         }
     }
     val grade = historyGradeColors(summary?.category, summary?.containsHighRisk == true)
-    val background = if (summary != null) grade.first else Color.Transparent
+    val gradeBackground = if (summary != null) grade.first else Color.Transparent
+    val background by animateColorAsState(
+        targetValue = when {
+            selected && summary != null -> lerp(gradeBackground, MaterialTheme.colorScheme.primaryContainer, .06f)
+            selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .12f)
+            else -> gradeBackground
+        },
+        animationSpec = AppMotion.colorFast,
+        label = "calendarDayBackground"
+    )
+    val selectionScale = remember(date) { Animatable(1f) }
+    var previouslySelected by remember(date) { mutableStateOf(selected) }
+    LaunchedEffect(date, selected) {
+        val justSelected = selected && !previouslySelected
+        previouslySelected = selected
+        // Only a new selection pulses. Restored state and month composition stay still.
+        selectionScale.snapTo(1f)
+        if (justSelected) {
+            selectionScale.animateTo(1.035f, calendarSelectionHalf)
+            selectionScale.animateTo(1f, calendarSelectionHalf)
+        }
+    }
     val contentColor = if (summary != null) grade.second else MaterialTheme.colorScheme.onSurfaceVariant
     var cellModifier = modifier
         .heightIn(min = AppDimensions.calendarDayMinHeight)
@@ -631,6 +671,10 @@ internal fun CalendarDay(
     Box(cellModifier, contentAlignment = Alignment.Center) {
         var circleModifier = Modifier
             .size(AppDimensions.calendarDaySize)
+            .graphicsLayer {
+                scaleX = selectionScale.value
+                scaleY = selectionScale.value
+            }
             .clip(RoundedCornerShape(13.dp))
             .background(background)
         if (today) {

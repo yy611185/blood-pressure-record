@@ -1,5 +1,11 @@
 package com.example.bloodpressurerecord.ui.home
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,6 +57,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +73,7 @@ import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import java.time.Instant
 import java.time.LocalDate
@@ -114,10 +122,25 @@ fun DashboardScreen(
     ) {
         GreetingHeader(state)
         Spacer(Modifier.height(18.dp))
-        when {
-            state.loading -> EmptyHero("正在读取最近记录…", null, state.showBuddy)
-            state.latest == null -> EmptyHero("你好呀，我是小压！测完血压记下来，我会陪着你～", onAddMeasurement, state.showBuddy)
-            else -> ReadingHero(state)
+        AnimatedContent(
+            targetState = state,
+            contentKey = { heroState ->
+                when {
+                    heroState.loading -> 0
+                    heroState.latest == null -> 1
+                    else -> 2
+                }
+            },
+            transitionSpec = {
+                (fadeIn(AppMotion.floatNormal) togetherWith fadeOut(AppMotion.floatNormal)).using(null)
+            },
+            label = "Dashboard hero"
+        ) { heroState ->
+            when {
+                heroState.loading -> EmptyHero("正在读取最近记录…", null, heroState.showBuddy)
+                heroState.latest == null -> EmptyHero("你好呀，我是小压！测完血压记下来，我会陪着你～", onAddMeasurement, heroState.showBuddy)
+                else -> ReadingHero(heroState)
+            }
         }
         SectionHeader("今天的测量", "早晚各一次最好")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -225,7 +248,13 @@ private fun ReadingHero(state: DashboardUiState) {
                     .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp))
                     .background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                Text(messages[messageIndex], style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                AnimatedContent(
+                    targetState = messages[messageIndex],
+                    transitionSpec = { AppMotion.fadeThrough() },
+                    label = "Buddy message"
+                ) { message ->
+                    Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -362,6 +391,21 @@ private fun EmptyMedication(onOpenSettings: () -> Unit) {
 @Composable
 private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val checkBackground by animateColorAsState(
+        targetValue = if (slot.taken) colors.secondaryContainer else colors.surfaceContainerHighest,
+        animationSpec = AppMotion.colorNormal,
+        label = "Medication background"
+    )
+    val checkAlpha = animateFloatAsState(
+        targetValue = if (slot.taken) 1f else 0f,
+        animationSpec = AppMotion.floatNormal,
+        label = "Medication check alpha"
+    )
+    val checkScale = animateFloatAsState(
+        targetValue = if (slot.taken) 1f else 0.8f,
+        animationSpec = AppMotion.floatNormal,
+        label = "Medication check scale"
+    )
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(colors.surface)
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -375,14 +419,29 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
                 color = colors.onSurfaceVariant, maxLines = 1)
         }
         Box(Modifier.size(68.dp, 48.dp).clip(RoundedCornerShape(15.dp))
-            .background(if (slot.taken) colors.secondaryContainer else colors.surfaceContainerHighest)
+            .background(checkBackground)
             .clickable(enabled = !pending, onClick = onToggle)
             .semantics { contentDescription = if (slot.taken) "${slot.name}，已服用，点击取消" else "${slot.name}，点击打卡" },
             contentAlignment = Alignment.Center) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (slot.taken) Icon(Icons.Outlined.Check, null, Modifier.size(16.dp), tint = colors.onSecondaryContainer)
-                Text(if (slot.taken) "吃了" else "打卡", style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.ExtraBold, color = if (slot.taken) colors.onSecondaryContainer else colors.onSurfaceVariant)
+            AnimatedContent(
+                targetState = slot.taken,
+                transitionSpec = { AppMotion.fadeThrough() },
+                contentAlignment = Alignment.Center,
+                label = "Medication label"
+            ) { taken ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (taken) Icon(
+                        Icons.Outlined.Check, null,
+                        Modifier.size(16.dp).graphicsLayer {
+                            alpha = checkAlpha.value
+                            scaleX = checkScale.value
+                            scaleY = checkScale.value
+                        },
+                        tint = colors.onSecondaryContainer
+                    )
+                    Text(if (taken) "吃了" else "打卡", style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.ExtraBold, color = if (taken) colors.onSecondaryContainer else colors.onSurfaceVariant)
+                }
             }
         }
     }

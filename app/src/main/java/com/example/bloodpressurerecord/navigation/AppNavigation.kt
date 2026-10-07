@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -32,6 +33,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.bloodpressurerecord.AppViewModelFactory
 import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.ui.common.AppBottomDock
+import com.example.bloodpressurerecord.ui.common.rememberDockScrollState
 import com.example.bloodpressurerecord.ui.history.EditSessionScreen
 import com.example.bloodpressurerecord.ui.history.EditSessionViewModel
 import com.example.bloodpressurerecord.ui.history.HistoryDetailViewModel
@@ -87,6 +89,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     }
     val showBottomBar = current in TopLevelRoutes &&
         !(current == AppDestination.Trend.route && trendFullscreen)
+    val dockScrollState = rememberDockScrollState(current)
 
     LaunchedEffect(showTrendChart, current) {
         if (!showTrendChart && current == AppDestination.Trend.route) {
@@ -107,7 +110,9 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
             NavHost(
                 navController = navController,
                 startDestination = AppDestination.Measure.route,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(
+                    if (showBottomBar) Modifier.nestedScroll(dockScrollState.nestedScrollConnection) else Modifier
+                ),
                 // 平级 Tab：轻量淡入淡出（无位移，避免两页同时做滑动合成掉帧）。
                 // 父子层级：容器宽度滑动 + 减速曲线；Navigation 2.8 下 pop 转场
                 // 自动接入 Android 13+ 预测式返回手势的进度。
@@ -309,6 +314,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 AppBottomDock(
                     tabs = tabs,
                     currentRoute = current,
+                    compact = dockScrollState.isCompact,
                     onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
                     onSelect = { destination ->
                         navController.navigate(destination.route) {
