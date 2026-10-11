@@ -103,6 +103,7 @@ jobs:
           echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/release.jks"
           test -s "${RUNNER_TEMP}/release.jks" || { echo "::error::Decoded keystore is empty; ANDROID_KEYSTORE_BASE64 may be invalid."; exit 1; }
       - name: Build and verify signed Release
+        shell: bash
         env:
           BP_RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
           BP_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -121,7 +122,8 @@ jobs:
             "app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk" \
             | tee app/build/outputs/release-verification.txt
           # Public certificate fingerprint verified against the v2.2.2 Release APK.
-          grep -qi 'Signer #1 certificate SHA-256 digest: 46dfcbf4da054df8a8aca30e0df4df323161cbe4363a9eac7683a9da87d44012' \
+          grep -qx 'Number of signers: 1' app/build/outputs/release-verification.txt
+          grep -qi 'certificate SHA-256 digest: 46dfcbf4da054df8a8aca30e0df4df323161cbe4363a9eac7683a9da87d44012' \
             app/build/outputs/release-verification.txt
           "$(dirname "${APKSIGNER}")/aapt" dump badging \
             "app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk" \
