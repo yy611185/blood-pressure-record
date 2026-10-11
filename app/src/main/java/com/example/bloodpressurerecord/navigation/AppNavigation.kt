@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -25,6 +28,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -55,6 +62,10 @@ import com.example.bloodpressurerecord.ui.settings.SettingsAppGuideScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoReleaseNotesScreen
 import java.time.LocalDate
+import com.example.bloodpressurerecord.BuildConfig
+import com.example.bloodpressurerecord.update.UpdateViewModel
+import com.example.bloodpressurerecord.update.UpdateDialog
+import com.example.bloodpressurerecord.update.rememberUpdatePlatformActions
 
 private val TopLevelRoutes = setOf(
     AppDestination.Measure.route,
@@ -79,6 +90,50 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     val application = LocalContext.current.applicationContext as BloodPressureApplication
     val factory = remember(application) { AppViewModelFactory(application) }
     var trendFullscreen by remember { mutableStateOf(false) }
+    val updateVm: UpdateViewModel = viewModel(factory = factory)
+    val updateState by updateVm.uiState.collectAsStateWithLifecycle()
+    val dataActionBusy by application.appContainer.updatePromptGate.busy.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var updateForeground by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    val safeUpdateRoute = current in setOf(
+        AppDestination.Measure.route,
+        AppDestination.History.route,
+        AppDestination.Trend.route,
+        AppDestination.SettingsInfo.route,
+        AppDestination.SettingsInfoReleaseNotes.route
+    ) && !trendFullscreen
+    val updatePromptAllowed = updateForeground && safeUpdateRoute && !dataActionBusy
+    val snackbar = remember { SnackbarHostState() }
+    val updateActions = rememberUpdatePlatformActions(
+        updateVm, application.appContainer.updateInstaller, updatePromptAllowed, snackbar
+    )
+
+    DisposableEffect(lifecycleOwner, updateVm) {
+        updateVm.onForegroundChanged(updateForeground)
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    updateForeground = true
+                    updateVm.onForegroundChanged(true)
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    updateForeground = false
+                    updateVm.setPromptAllowed(false)
+                    updateVm.onForegroundChanged(false)
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            updateVm.setPromptAllowed(false)
+            updateVm.onForegroundChanged(false)
+        }
+    }
+    LaunchedEffect(updatePromptAllowed) { updateVm.setPromptAllowed(updatePromptAllowed) }
     val tabs = remember(showTrendChart) {
         listOfNotNull(
             AppDestination.Measure,
@@ -102,6 +157,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbar) },
         // 系统栏 inset 全部交给页面自己处理（见 ui/common/AppInsets.kt）：
         // 根布局只做容器，避免出现「innerPadding + 页面 navigationBarsPadding」的重复叠加。
         contentWindowInsets = WindowInsets(0.dp)
@@ -298,7 +354,10 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     SettingsInfoScreen(
                         onBack = { navController.popBackStack() },
                         onOpenAppGuide = { navController.navigate(AppDestination.SettingsInfoAppGuide.route) },
-                        onOpenReleaseNotes = { navController.navigate(AppDestination.SettingsInfoReleaseNotes.route) }
+                        onOpenReleaseNotes = { navController.navigate(AppDestination.SettingsInfoReleaseNotes.route) },
+                        updateViewModel = updateVm,
+                        onInstallUpdate = updateActions.install,
+                        onOpenReleases = updateActions.openReleases
                     )
                 }
                 composable(AppDestination.SettingsInfoAppGuide.route) {
@@ -327,5 +386,20 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 )
             }
         }
+    }
+
+    if (updateState.dialogVisible && updatePromptAllowed) {
+        UpdateDialog(
+            state = updateState,
+            currentVersion = BuildConfig.VERSION_NAME,
+            onDownload = updateVm::download,
+            onRetry = updateVm::retryDownload,
+            onCancel = updateVm::cancelDownload,
+            onInstall = updateActions.install,
+            onSnooze = updateVm::snooze,
+            onSkip = updateVm::skip,
+            onDismiss = updateVm::dismissDialog,
+            onOpenReleases = updateActions.openReleases
+        )
     }
 }

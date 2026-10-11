@@ -21,6 +21,9 @@ import com.example.bloodpressurerecord.ui.home.BpZoneTargetDraft
 import com.example.bloodpressurerecord.ui.home.BpZoneTargetEditorUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import com.example.bloodpressurerecord.update.UpdatePromptGate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,7 +86,8 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val repository: SettingsRepository,
     private val medicationRepository: MedicationRepository? = null,
-    private val zoneConfigRepository: BpZoneConfigRepository? = null
+    private val zoneConfigRepository: BpZoneConfigRepository? = null,
+    private val updatePromptGate: UpdatePromptGate? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -101,6 +105,19 @@ class SettingsViewModel(
     private var pendingExportPlan: BackupExportPlan? = null
     private var pendingExportPassphrase: CharArray? = null
     private var pendingExportBaseName: String = ""
+
+    /** 门控随实际任务结束释放，离开数据管理页面也不会提前解除。 */
+    private fun launchDataAction(block: suspend CoroutineScope.() -> Unit) {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val release = updatePromptGate?.hold()
+            try {
+                block()
+            } finally {
+                _uiState.update { it.copy(isDataActionRunning = false) }
+                release?.invoke()
+            }
+        }
+    }
 
     override fun onCleared() {
         pendingExportPassphrase?.fill('\u0000')
@@ -550,7 +567,7 @@ class SettingsViewModel(
     }
 
     private fun runExport(uri: Uri, fileNameHint: String, passphrase: CharArray?) {
-        viewModelScope.launch {
+        launchDataAction {
             _uiState.update {
                 it.copy(
                     showBackupExportConfirm = false,
@@ -589,7 +606,7 @@ class SettingsViewModel(
         pendingExportPassphrase = passphrase
         pendingExportBaseName = baseName
         _uiState.update { it.copy(showBackupExportConfirm = false, showExportPassphraseDialog = false, isDataActionRunning = true) }
-        viewModelScope.launch {
+        launchDataAction {
             repository.prepareBackupExport().onSuccess { plan ->
                 pendingExportPlan = plan
                 _uiState.update {
@@ -621,7 +638,7 @@ class SettingsViewModel(
         if (_uiState.value.isDataActionRunning) return
         val index = _uiState.value.exportVolumeIndex
         _uiState.update { it.copy(showSaveExportVolume = false, isDataActionRunning = true) }
-        viewModelScope.launch {
+        launchDataAction {
             repository.exportBackupVolumeToUri(plan, index, uri, pendingExportPassphrase)
                 .onSuccess {
                     if (index == plan.volumes.lastIndex) {
@@ -679,7 +696,7 @@ class SettingsViewModel(
     }
 
     fun previewBackupXlsxFromUri(uri: Uri, passphrase: CharArray? = null) {
-        viewModelScope.launch {
+        launchDataAction {
             _uiState.update {
                 it.copy(
                     showBackupImportConfirm = false,
@@ -781,7 +798,7 @@ class SettingsViewModel(
         val state = _uiState.value
         val preview = state.backupImportPreview ?: return
         if (!state.hasImportSelection || state.isDataActionRunning) return
-        viewModelScope.launch {
+        launchDataAction {
             _uiState.update {
                 it.copy(isDataActionRunning = true, message = "正在提交导入，请稍候...")
             }
@@ -819,7 +836,7 @@ class SettingsViewModel(
     }
 
     fun confirmClearAll() {
-        viewModelScope.launch {
+        launchDataAction {
             _uiState.update { it.copy(isDataActionRunning = true, message = "正在清空本地数据...") }
             repository.clearAllData()
                 .onSuccess { result ->

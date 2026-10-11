@@ -64,6 +64,9 @@ import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import java.time.LocalTime
+import com.example.bloodpressurerecord.BuildConfig
+import com.example.bloodpressurerecord.update.UpdateViewModel
+import com.example.bloodpressurerecord.update.UpdateSettingsContent
 
 @Composable
 fun SettingsProfileScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
@@ -508,9 +511,26 @@ fun SettingsDisplayScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 fun SettingsInfoScreen(
     onBack: () -> Unit,
     onOpenAppGuide: () -> Unit,
-    onOpenReleaseNotes: () -> Unit
+    onOpenReleaseNotes: () -> Unit,
+    updateViewModel: UpdateViewModel,
+    onInstallUpdate: () -> Unit,
+    onOpenReleases: (String) -> Unit
 ) {
+    val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
     SettingsSubPageShell("应用说明与更新说明", onBack) {
+        UpdateSettingsContent(
+            state = updateState,
+            currentVersion = BuildConfig.VERSION_NAME,
+            onCheck = updateViewModel::checkManually,
+            onAutoCheckChanged = updateViewModel::setAutoCheckEnabled,
+            onAutoDownloadChanged = updateViewModel::setAutoDownloadEnabled,
+            onWifiOnlyChanged = updateViewModel::setWifiOnly,
+            onDownload = updateViewModel::download,
+            onRetry = updateViewModel::retryDownload,
+            onCancel = updateViewModel::cancelDownload,
+            onInstall = onInstallUpdate,
+            onOpenReleases = onOpenReleases
+        )
         SettingListItem(
             title = "应用说明",
             subtitle = "查看当前可实现功能、测量建议和免责声明",

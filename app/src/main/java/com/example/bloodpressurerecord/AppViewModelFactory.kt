@@ -13,6 +13,7 @@ import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import kotlinx.coroutines.flow.map
+import com.example.bloodpressurerecord.update.UpdateViewModel
 
 class AppViewModelFactory(
     private val application: Application
@@ -69,7 +70,8 @@ class AppViewModelFactory(
                 SettingsViewModel(
                     repository = container.settingsRepository,
                     medicationRepository = container.medicationRepository,
-                    zoneConfigRepository = container.bpZoneConfigRepository
+                    zoneConfigRepository = container.bpZoneConfigRepository,
+                    updatePromptGate = container.updatePromptGate
                 ) as T
             }
 
@@ -79,6 +81,14 @@ class AppViewModelFactory(
                     settingsRepository = container.settingsRepository,
                     savedStateHandle = savedStateHandle,
                     todayTicks = dayTicks()
+                ) as T
+            }
+
+            UpdateViewModel::class.java -> {
+                UpdateViewModel(
+                    repository = container.updateRepository,
+                    preferences = container.updatePreferences,
+                    downloadManager = container.updateDownloadManager
                 ) as T
             }
 
