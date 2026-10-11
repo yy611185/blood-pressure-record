@@ -10,7 +10,7 @@ enum class TrendAggregation {
     /** 每个 Measurement Session 的已保存代表值一个节点，适用于所有周期。 */
     RAW,
 
-    /** 兼容旧图表的每日平均语义。 */
+    /** 本地自然日内，每个 Session 已保存代表值等权参与一次平均。 */
     DAILY,
 
     /** 自然日内 Session 代表值的最小值、最大值与平均值。 */

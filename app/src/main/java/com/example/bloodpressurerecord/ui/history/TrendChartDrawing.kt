@@ -276,21 +276,28 @@ internal fun DrawScope.drawPointNode(
     color: Color,
     backgroundColor: Color,
     ringColor: Color,
-    selected: Boolean
+    selected: Boolean,
+    highRisk: Boolean = false,
+    highRiskColor: Color = ringColor
 ) {
     if (!selected) {
-        drawCircle(color = color, radius = 3.2f, center = Offset(x, y))
+        if (highRisk) {
+            drawCircle(color = backgroundColor, radius = 3.dp.toPx(), center = Offset(x, y))
+            drawCircle(color = highRiskColor, radius = 3.dp.toPx(), center = Offset(x, y),
+                style = Stroke(width = 1.dp.toPx()))
+        }
+        drawCircle(color = color, radius = 1.dp.toPx(), center = Offset(x, y))
         return
     }
     // 选中点：外圈光晕 + 实心节点 + 主题色描边，明显区别于普通点。
-    drawCircle(color = ringColor.copy(alpha = 0.18f), radius = 11f, center = Offset(x, y))
-    drawCircle(color = backgroundColor, radius = 6.4f, center = Offset(x, y))
-    drawCircle(color = color, radius = 4.6f, center = Offset(x, y))
+    drawCircle(color = ringColor.copy(alpha = 0.18f), radius = 7.dp.toPx(), center = Offset(x, y))
+    drawCircle(color = backgroundColor, radius = 4.4.dp.toPx(), center = Offset(x, y))
+    drawCircle(color = color, radius = 3.dp.toPx(), center = Offset(x, y))
     drawCircle(
         color = ringColor,
-        radius = 6.4f,
+        radius = 4.4.dp.toPx(),
         center = Offset(x, y),
-        style = Stroke(width = 2f)
+        style = Stroke(width = 1.2.dp.toPx())
     )
 }
 
@@ -308,7 +315,7 @@ internal fun valueColor(
 }
 
 
-private const val SERIES_LINE_WIDTH_DP = 2f
+private const val SERIES_LINE_WIDTH_DP = 1.7f
 private const val THRESHOLD_LINE_WIDTH_DP = 1.2f
 private const val THRESHOLD_DASH_DP = 6f
 private const val THRESHOLD_GAP_DP = 5f
@@ -329,7 +336,7 @@ internal fun DrawScope.drawCrosshair(
         palette.selectionRing.copy(alpha = 0.6f),
         Offset(x, geometry.top), Offset(x, geometry.bottom), strokeWidth = 1.dp.toPx()
     )
-    val rangeMean = if (point.aggregation == TrendAggregation.DAILY_RANGE) "均" else ""
+    val rangeMean = if (point.aggregation != TrendAggregation.RAW) "均" else ""
     fun valueLine(value: Int, label: String, color: Color, atRight: Boolean) {
         val y = scaler.yOfValue(value)
         drawLine(

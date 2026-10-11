@@ -6,6 +6,8 @@ import com.example.bloodpressurerecord.data.repository.backup.BackupImportOption
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import android.net.Uri
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 
 data class UserProfile(
     val name: String? = null,
@@ -36,6 +38,10 @@ data class ClearAllDataResult(
 
 interface SettingsRepository {
     fun observeSettings(): Flow<SettingsBundle>
+
+    fun observeTrendAggregationPreference(): Flow<TrendAggregation?> = flowOf(null)
+
+    suspend fun setTrendAggregationPreference(aggregation: TrendAggregation) = Unit
 
     suspend fun setLargeTextEnabled(enabled: Boolean)
 

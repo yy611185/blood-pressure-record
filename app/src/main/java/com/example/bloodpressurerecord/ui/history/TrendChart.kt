@@ -199,9 +199,9 @@ fun SessionTimeSeriesDualLineChart(
     }
     // Y 轴随可视数据自适应：初始取该范围自身的轴，之后只由「可视点 + 上一帧轴」
     // 决定（带滞回，避免拖动时逐帧抖动），始终不裁切可视数据。
-    // 用 range 作 key，范围切换时回到该范围的初始轴。
-    var yAxis by remember(series.range) { mutableStateOf(series.yAxis) }
-    LaunchedEffect(visiblePoints, targetSystolic, targetDiastolic) {
+    // 时间窗口继续共享，但范围或粒度改变时必须重建对应的初始数值轴。
+    var yAxis by remember(series.range, series.aggregation) { mutableStateOf(series.yAxis) }
+    LaunchedEffect(visiblePoints, series.aggregation, targetSystolic, targetDiastolic) {
         if (visiblePoints.isNotEmpty()) {
             yAxis = TrendChartMath.stableYAxis(
                 yAxis,
@@ -231,20 +231,21 @@ fun SessionTimeSeriesDualLineChart(
         } else {
             0f
         }
-        TrendChartMath.maxTickCount((plotWidthPx / density.density).roundToInt())
+        TrendChartMath.maxTickCount((plotWidthPx / (density.density * density.fontScale)).roundToInt())
     }
-    val axisTicks = remember(viewportStart, viewportEnd, maxTicks, zoneId, showTimeLabels) {
+    val axisTicks = remember(viewportStart, viewportEnd, maxTicks, zoneId, showTimeLabels, series.aggregation) {
         TrendChartMath.timeTicks(
             startMillis = viewportStart,
             endMillis = viewportEnd,
             zoneId = zoneId,
             maxTicks = maxTicks,
-            showTimeLabels = showTimeLabels
+            showTimeLabels = showTimeLabels,
+            aggregation = series.aggregation
         )
     }
     // 日期与时间作为一个完整文本块测量，行高、底部留白和横向避让使用同一尺寸。
     val axisLabelStyle = TextStyle(color = palette.axis, fontSize = 12.sp, lineHeight = 16.sp)
-    val axisLabelLayouts = remember(axisTicks, axisLabelStyle) {
+    val axisLabelLayouts = remember(axisTicks, axisLabelStyle, density) {
         axisTicks.map { tick ->
             textMeasurer.measure(
                 text = listOfNotNull(tick.primary, tick.secondary).joinToString("\n"),
@@ -366,14 +367,15 @@ fun SessionTimeSeriesDualLineChart(
                         drawCrosshair(point, scaler, palette, textMeasurer, showSystolic, showDiastolic)
                     }
 
-                    // 节点密度自适应：数据密时默认只保留选中/吸附节点，放大后逐步显示；
-                    // 判定用真实可视点距，且不删除任何数据点（折线仍由全部点构成）。
+                    // 普通圆点随密度减少；高风险提示与选中节点独立保留。
                     val nodeSpacing = currentGeometry.plotWidth /
                         viewportPoints.size.coerceAtLeast(1)
                     val showAllNodes = viewportPoints.size <= MAX_NODE_POINTS &&
-                        nodeSpacing >= MIN_NODE_SPACING_PX
+                        nodeSpacing >= MIN_NODE_SPACING_DP.dp.toPx()
                     TrendChartMath.nodePoints(
-                        renderPoints, selectedPoint, showAllNodes, viewportStart, viewportEnd
+                        renderPoints, selectedPoint, showAllNodes, viewportStart, viewportEnd,
+                        minimumTimeSpacingMillis = ((viewportEnd - viewportStart) *
+                            MIN_NODE_SPACING_DP.dp.toPx() / currentGeometry.plotWidth).toLong()
                     ).forEach { point ->
                         val isPointSelected = selectedPoint?.id == point.id
                         val x = scaler.xOfTime(point.timestamp)
@@ -389,7 +391,9 @@ fun SessionTimeSeriesDualLineChart(
                                 ),
                                 backgroundColor = palette.nodeBackground,
                                 ringColor = palette.selectionRing,
-                                selected = isPointSelected
+                                selected = isPointSelected,
+                                highRisk = point.containsHighRiskReading,
+                                highRiskColor = palette.outlier
                             )
                         }
                         if (showDiastolic) {
@@ -404,7 +408,9 @@ fun SessionTimeSeriesDualLineChart(
                                 ),
                                 backgroundColor = palette.nodeBackground,
                                 ringColor = palette.selectionRing,
-                                selected = isPointSelected
+                                selected = isPointSelected,
+                                highRisk = point.containsHighRiskReading,
+                                highRiskColor = palette.outlier
                             )
                         }
                     }
@@ -462,9 +468,11 @@ fun SessionTimeSeriesPulseChart(
     val viewportPoints = remember(visiblePoints, viewportStart, viewportEnd) {
         visiblePoints.filter { it.timestamp in viewportStart..viewportEnd }
     }
-    var yAxis by remember(series.range) { mutableStateOf<TrendYAxis?>(null) }
-    LaunchedEffect(viewportPoints) {
-        yAxis = TrendChartMath.stablePulseYAxis(yAxis, viewportPoints)
+    var yAxis by remember(series.range, series.aggregation) {
+        mutableStateOf(TrendChartMath.stablePulseYAxis(null, points))
+    }
+    LaunchedEffect(visiblePoints, series.aggregation) {
+        yAxis = TrendChartMath.stablePulseYAxis(yAxis, visiblePoints)
     }
     val activeYAxis = yAxis ?: TrendChartMath.pulseYAxis(
         points.firstNotNullOf { it.pulse }, points.firstNotNullOf { it.pulse }
@@ -484,13 +492,13 @@ fun SessionTimeSeriesPulseChart(
         val plotWidthPx = if (canvasSize.width > 0) {
             (canvasSize.width - 52f * density.density).coerceAtLeast(40f)
         } else 0f
-        TrendChartMath.maxTickCount((plotWidthPx / density.density).roundToInt())
+        TrendChartMath.maxTickCount((plotWidthPx / (density.density * density.fontScale)).roundToInt())
     }
-    val axisTicks = remember(viewportStart, viewportEnd, maxTicks, zoneId, showTimeLabels) {
-        TrendChartMath.timeTicks(viewportStart, viewportEnd, zoneId, maxTicks, showTimeLabels)
+    val axisTicks = remember(viewportStart, viewportEnd, maxTicks, zoneId, showTimeLabels, series.aggregation) {
+        TrendChartMath.timeTicks(viewportStart, viewportEnd, zoneId, maxTicks, showTimeLabels, series.aggregation)
     }
     val axisLabelStyle = TextStyle(color = palette.axis, fontSize = 12.sp, lineHeight = 16.sp)
-    val axisLabelLayouts = remember(axisTicks, axisLabelStyle) {
+    val axisLabelLayouts = remember(axisTicks, axisLabelStyle, density) {
         axisTicks.map { tick ->
             textMeasurer.measure(
                 text = listOfNotNull(tick.primary, tick.secondary).joinToString("\n"),
@@ -519,7 +527,7 @@ fun SessionTimeSeriesPulseChart(
         with(density) { NODE_TOUCH_RADIUS.dp.toPx() }
     }
     val description = remember(series) {
-        "脉搏趋势图，${series.range.title}，${series.points.count { it.pulse != null }} 个脉搏数据点，双指缩放，放大后横向拖动，长按查看数据，双击恢复"
+        "脉搏趋势图，${series.range.title}，${series.aggregation.displayLabel()}，${series.points.count { it.pulse != null }} 个脉搏数据点，双指缩放，放大后横向拖动，长按查看数据，双击恢复"
     }
 
     Box(
@@ -574,9 +582,11 @@ fun SessionTimeSeriesPulseChart(
                 }
 
                 val showAllNodes = viewportPoints.size <= MAX_NODE_POINTS &&
-                    currentGeometry.plotWidth / viewportPoints.size.coerceAtLeast(1) >= MIN_NODE_SPACING_PX
+                    currentGeometry.plotWidth / viewportPoints.size.coerceAtLeast(1) >= MIN_NODE_SPACING_DP.dp.toPx()
                 TrendChartMath.nodePoints(
-                    renderPoints, selectedPoint, showAllNodes, viewportStart, viewportEnd
+                    renderPoints, selectedPoint, showAllNodes, viewportStart, viewportEnd,
+                    minimumTimeSpacingMillis = ((viewportEnd - viewportStart) *
+                        MIN_NODE_SPACING_DP.dp.toPx() / currentGeometry.plotWidth).toLong()
                 ).filter { it.pulse != null }.forEach { point ->
                     drawPointNode(
                         x = scaler.xOfTime(point.timestamp),
@@ -584,7 +594,9 @@ fun SessionTimeSeriesPulseChart(
                         color = palette.systolic,
                         backgroundColor = palette.nodeBackground,
                         ringColor = palette.selectionRing,
-                        selected = point.id == selectedPoint?.id
+                        selected = point.id == selectedPoint?.id,
+                        highRisk = point.containsHighRiskReading,
+                        highRiskColor = palette.outlier
                     )
                 }
             }
@@ -601,7 +613,8 @@ fun SessionTimeSeriesPulseChart(
 
 private fun buildHint(series: TrendSeries): String {
     val granularity = series.aggregation.displayLabel()
-    return "双指缩放，放大后单指拖动，双击复位；长按滑动逐点查看 · $granularity"
+    return "双指缩放，放大后单指拖动，双击复位；长按滑动逐点查看 · $granularity" +
+        if (series.points.any { it.containsHighRiskReading }) " · 圆环表示含高风险记录" else ""
 }
 
 private fun buildChartDescription(
@@ -655,6 +668,6 @@ private const val NODE_TOUCH_RADIUS = 22
 
 private const val MIN_DRAW_POINTS = 60
 private const val MAX_DRAW_POINTS = 900
-private const val MIN_NODE_SPACING_PX = 14f
+private const val MIN_NODE_SPACING_DP = 10f
 private const val MAX_NODE_POINTS = 80
 private const val GAP_MILLIS = 2L * 24L * 60L * 60L * 1000L

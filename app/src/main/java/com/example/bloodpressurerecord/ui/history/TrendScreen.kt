@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -140,6 +141,10 @@ fun TrendScreen(
             label = { it.label },
             onSelected = viewModel::setRange
         )
+        TrendAggregationControl(
+            selected = uiState.aggregation,
+            onSelected = viewModel::setAggregation
+        )
 
         if (series.points.isEmpty()) {
             TrendEmptySection(range = uiState.range, onAddMeasurement = onAddMeasurement)
@@ -219,7 +224,7 @@ private fun TrendCompactSummary(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    series.range.title,
+                    "${series.range.title} · ${series.aggregation.displayLabel()}",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
@@ -540,12 +545,7 @@ private fun TrendCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // 页面标题：周期 + 数据粒度，和实际聚合方式同源。
-            Text(
-                text = "${series.range.title} · ${series.aggregation.displayLabel()}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            // 周期与粒度已由顶部摘要显示，图表直接从当前读数开始。
             // 顶部数据栏：长按数据检查 / 点击节点时显示当前选中记录，
             // 并承载「上一条 / 下一条 / 明细 / 恢复」四个操作。
             TrendSelectionReadout(
@@ -657,7 +657,7 @@ internal fun TrendSelectionReadout(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        // 无彩色大卡片和重复说明；日期始终保留准确时分。
+        // 每日平均属于自然日统计，不把内部绘图时间显示成真实测量时分。
         Column(
             modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
                 contentDescription = readoutDescription
@@ -665,7 +665,7 @@ internal fun TrendSelectionReadout(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
-                text = formatReadoutFull(displayed.timestamp),
+                text = formatTrendPointDate(displayed),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -675,17 +675,21 @@ internal fun TrendSelectionReadout(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    "${displayed.systolic}/${displayed.diastolic} mmHg",
+                    "${if (displayed.aggregation == TrendAggregation.RAW) "" else "平均 "}${displayed.systolic}/${displayed.diastolic} mmHg",
                     style = MaterialTheme.typography.titleMedium,
                     fontFamily = NumberFontFamily,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    displayed.pulse?.let { "脉搏 $it 次/分" } ?: "脉搏 —",
+                    trendPointPulseText(displayed),
                     style = MaterialTheme.typography.bodyMedium
                 )
+                if (displayed.aggregation != TrendAggregation.RAW) Text(
+                    "${displayed.recordCount} 次测量", style = MaterialTheme.typography.bodyMedium
+                )
                 if (displayed.containsHighRiskReading) Text(
-                    "高风险", style = MaterialTheme.typography.labelMedium,
+                    if (displayed.aggregation == TrendAggregation.RAW) "含高风险读数" else "当天含高风险记录",
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.error
                 )
             }
@@ -732,15 +736,40 @@ private fun ReadoutAction(
     }
 }
 private fun buildReadoutDescription(point: TrendPoint, isSelected: Boolean, index: Int, total: Int): String {
-    val pulse = point.pulse?.let { "脉搏 $it 次每分" } ?: "脉搏未记录"
-    return "${if (isSelected) "已选中的数据点" else "最近一次测量"}，" +
-        "${formatReadoutFull(point.timestamp)}，收缩压 ${point.systolic}，舒张压 ${point.diastolic}，" +
-        "$pulse，第 ${index + 1} 个，共 $total 个数据点。"
+    val daily = point.aggregation != TrendAggregation.RAW
+    val context = if (isSelected) "已选中的数据点" else if (daily) "最近记录日" else "最近一次测量"
+    return "$context，${formatTrendPointDate(point)}，${if (daily) "当日平均" else ""}" +
+        "收缩压 ${point.systolic}，舒张压 ${point.diastolic}，${trendPointPulseText(point)}，" +
+        (if (daily) "${point.recordCount} 次测量，" else "") +
+        "第 ${index + 1} 个，共 $total 个数据点。"
 }
 
-private fun formatReadoutFull(measuredAt: Long): String =
-    Instant.ofEpochMilli(measuredAt).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+internal fun formatTrendPointDate(point: TrendPoint): String =
+    Instant.ofEpochMilli(point.timestamp).atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern(
+            if (point.aggregation == TrendAggregation.RAW) "yyyy-MM-dd HH:mm" else "yyyy-MM-dd"
+        ))
+
+internal fun trendPointPulseText(point: TrendPoint): String {
+    val label = if (point.aggregation == TrendAggregation.RAW) "脉搏" else "平均脉搏"
+    return point.pulse?.let { "$label $it 次/分" } ?: "$label —"
+}
+
+@Composable
+internal fun TrendAggregationControl(
+    selected: TrendAggregation,
+    onSelected: (TrendAggregation) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    SegmentedControl(
+        items = listOf(TrendAggregation.RAW, TrendAggregation.DAILY),
+        selected = selected,
+        label = { it.displayLabel() },
+        onSelected = onSelected,
+        accent = true,
+        modifier = modifier
+    )
+}
 
 @Composable
 private fun <T> SegmentedControl(
@@ -748,12 +777,13 @@ private fun <T> SegmentedControl(
     selected: T,
     label: (T) -> String,
     onSelected: (T) -> Unit,
-    accent: Boolean = false
+    accent: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     // 暖阳设计：选中态统一用暖色 primaryContainer（不再出现深色块），
     // 未选中的指标分段保留 surface + 轻投影的悬浮感。
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -806,6 +836,8 @@ private fun <T> SegmentedControl(
                     text = label(item),
                     style = MaterialTheme.typography.labelMedium,
                     color = textColor,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
             }
@@ -865,7 +897,7 @@ private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
     if (records.isEmpty()) return "当天没有原始记录"
     val systolic = records.map { it.systolic }.average().roundToInt()
     val diastolic = records.map { it.diastolic }.average().roundToInt()
-    val prefix = if (details.point.aggregation == TrendAggregation.DAILY_RANGE) "参与统计" else "当日"
+    val prefix = if (details.point.aggregation != TrendAggregation.RAW) "参与统计" else "当日"
     return "$prefix ${records.size} 次，平均 $systolic/$diastolic mmHg · 点击查看原记录"
 }
 

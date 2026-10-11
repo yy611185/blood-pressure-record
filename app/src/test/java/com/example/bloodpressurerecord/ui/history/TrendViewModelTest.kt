@@ -18,6 +18,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -25,6 +27,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -166,7 +169,7 @@ class TrendViewModelTest {
     }
 
     @Test
-    fun `旧每日平均状态也回退原始测量且副图选择单独保存`() = runTest {
+    fun `每日平均状态保留且副图选择单独保存`() = runTest {
         val handle = SavedStateHandle(mapOf(
             "trend.aggregation" to TrendAggregation.DAILY.name,
             "trend.showPulse" to true,
@@ -174,13 +177,208 @@ class TrendViewModelTest {
             "trend.showTimeLabels" to true
         ))
         val vm = TrendViewModel(FakeTrendRepository(), FakeSettingsRepository(), savedStateHandle = handle)
-        assertEquals(TrendAggregation.RAW, vm.uiState.value.aggregation)
-        assertEquals(TrendAggregation.RAW.name, handle.get<String>("trend.aggregation"))
+        assertEquals(TrendAggregation.DAILY, vm.uiState.value.aggregation)
+        assertEquals(TrendAggregation.DAILY.name, handle.get<String>("trend.aggregation"))
         assertEquals(true, vm.uiState.value.fullscreenShowPulse)
         assertEquals(true, vm.uiState.value.showTimeLabels)
         vm.setFullscreenShowPulse(false)
         assertEquals(false, handle.get<Boolean>("trend.fullscreenShowPulse"))
         assertEquals(true, handle.get<Boolean>("trend.showPulse"))
+    }
+
+    @Test
+    fun `六种范围粒度组合复用Session统计且主动偏好跨页面保留`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val now = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val previous = today.minusDays(1).atTime(8, 0).atZone(zone).toInstant().toEpochMilli()
+        val repo = FakeTrendRepository().apply {
+            records.value = listOf(
+                record("a", previous).copy(systolic = 120, pulse = 60),
+                record("b", previous + 1000).copy(systolic = 150),
+                record("c", now - 1000).copy(systolic = 120, pulse = 80)
+            )
+        }
+        val settings = FakeSettingsRepository()
+        val vm = TrendViewModel(repo, settings, { now }, zone,
+            UnconfinedTestDispatcher(testScheduler), flowOf(today))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.DAILY, vm.uiState.value.aggregation)
+        vm.setRange(TrendRange.DAYS_7)
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.RAW, vm.uiState.value.aggregation)
+        vm.setRange(TrendRange.ALL)
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.DAILY, vm.uiState.value.aggregation)
+
+        // 主动点击当前默认 DAILY 也应持久化，而非仍随范围改变。
+        vm.setAggregation(TrendAggregation.DAILY)
+        vm.setRange(TrendRange.DAYS_7)
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.DAILY, vm.uiState.value.aggregation)
+        assertEquals(TrendAggregation.DAILY, settings.aggregationPreference.value)
+        val reentered = TrendViewModel(repo, settings, { now }, zone,
+            UnconfinedTestDispatcher(testScheduler), flowOf(today))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { reentered.uiState.collect {} }
+        advanceUntilIdle()
+        reentered.setRange(TrendRange.DAYS_7)
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.DAILY, reentered.uiState.value.aggregation)
+
+        for (aggregation in listOf(TrendAggregation.RAW, TrendAggregation.DAILY)) {
+            vm.setAggregation(aggregation)
+            for (range in TrendRange.entries) {
+                vm.setRange(range)
+                advanceUntilIdle()
+                val state = vm.uiState.value
+                assertEquals(range, state.range)
+                assertEquals(aggregation, state.aggregation)
+                assertEquals(aggregation, state.series.aggregation)
+                assertEquals(if (aggregation == TrendAggregation.RAW) 3 else 2, state.series.points.size)
+                assertEquals(130, state.series.averageSystolic)
+                assertEquals(70, state.series.averagePulse)
+                assertEquals(130 to 82, state.insights.periodAverage)
+                if (aggregation == TrendAggregation.DAILY) {
+                    assertEquals(135, state.series.points.first().systolic)
+                    assertEquals(60, state.series.points.first().pulse)
+                    assertEquals(2, state.series.points.first().recordCount)
+                    assertEquals(1, state.series.points.first().pulseRecordCount)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `迟到的持久偏好不覆盖主动选择且旋转恢复优先`() = runTest {
+        val settings = FakeSettingsRepository().apply {
+            aggregationPreference.value = TrendAggregation.DAILY
+            preferenceGate = CompletableDeferred()
+        }
+        val handle = SavedStateHandle()
+        val vm = TrendViewModel(FakeTrendRepository(), settings,
+            computeContext = UnconfinedTestDispatcher(testScheduler), savedStateHandle = handle)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        // 先让仓库捕获旧 DAILY 值并阻塞首读，再在读完前主动选择 RAW。
+        advanceUntilIdle()
+        vm.setAggregation(TrendAggregation.RAW)
+        settings.preferenceGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.RAW, vm.uiState.value.aggregation)
+        assertEquals(TrendAggregation.RAW, settings.aggregationPreference.value)
+        // 模拟恢复时尚未看到最新落盘值；SavedState 的明确选择优先。
+        settings.aggregationPreference.value = TrendAggregation.DAILY
+        val restored = TrendViewModel(FakeTrendRepository(), settings,
+            computeContext = UnconfinedTestDispatcher(testScheduler), savedStateHandle =
+            SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) }))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { restored.uiState.collect {} }
+        advanceUntilIdle()
+        assertEquals(TrendAggregation.RAW, restored.uiState.value.aggregation)
+    }
+
+    @Test
+    fun `每日平均往返恢复同时间的原Session并保持视窗与明细来源`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val now = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val date = today.minusDays(2)
+        val timestamp = date.atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+        val start = timestamp - 60 * 60 * 1000L
+        val end = timestamp + 60 * 60 * 1000L
+        val handle = SavedStateHandle(mapOf("trend.viewportStart" to start, "trend.viewportEnd" to end))
+        val repo = FakeTrendRepository().apply {
+            records.value = listOf(record("same-a", timestamp), record("same-b", timestamp))
+            extraDetailRecords = listOf(record("not-in-series", timestamp))
+        }
+        val settings = FakeSettingsRepository()
+        val vm = TrendViewModel(repo, settings, { now }, zone,
+            UnconfinedTestDispatcher(testScheduler), flowOf(today), handle)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        vm.setAggregation(TrendAggregation.RAW)
+        advanceUntilIdle()
+        vm.chartController.updateSeries(vm.uiState.value.series)
+        vm.selectPoint(vm.uiState.value.series.points.first { it.id == "same-b" })
+        vm.setAggregation(TrendAggregation.DAILY)
+        advanceUntilIdle()
+        assertEquals("day:$date", vm.uiState.value.selectedPointId)
+        vm.chartController.updateSeries(vm.uiState.value.series)
+        vm.openPointDetails(vm.uiState.value.series.points.single())
+        advanceUntilIdle()
+        assertEquals("$date 每日平均记录", vm.uiState.value.dayDetails?.title)
+        assertEquals(listOf("same-a", "same-b"), vm.uiState.value.dayDetails?.records?.map { it.id })
+        assertNull(vm.uiState.value.dayDetails?.selectedRecordId)
+
+        // DAILY 页面重建后仍记住原始 ID，不能只靠相同时间的最近点恢复。
+        val restored = TrendViewModel(repo, settings, { now }, zone,
+            UnconfinedTestDispatcher(testScheduler), flowOf(today),
+            SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) }))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { restored.uiState.collect {} }
+        advanceUntilIdle()
+        restored.chartController.updateSeries(restored.uiState.value.series)
+        restored.setAggregation(TrendAggregation.RAW)
+        advanceUntilIdle()
+        restored.chartController.updateSeries(restored.uiState.value.series)
+        assertEquals("same-b", restored.uiState.value.selectedPointId)
+        val viewport = restored.chartController.viewportFor(restored.uiState.value.range)
+        assertEquals(start, viewport.startMillis())
+        assertEquals(end, viewport.endMillis())
+        assertEquals(start, handle.get<Long>("trend.viewportStart"))
+        assertEquals(end, handle.get<Long>("trend.viewportEnd"))
+        restored.setAggregation(TrendAggregation.DAILY)
+        advanceUntilIdle()
+        repo.records.value = repo.records.value.filter { it.id != "same-b" }
+        advanceUntilIdle()
+        restored.setAggregation(TrendAggregation.RAW)
+        advanceUntilIdle()
+        assertEquals("same-a", restored.uiState.value.selectedPointId)
+    }
+
+    @Test
+    fun `窄视窗聚合往返只平移到映射节点且保持跨度与原Session`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val now = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val date = today.minusDays(2)
+        val early = date.atTime(9, 0).atZone(zone).toInstant().toEpochMilli()
+        val late = date.atTime(20, 0).atZone(zone).toInstant().toEpochMilli()
+        val latest = today.atTime(11, 0).atZone(zone).toInstant().toEpochMilli()
+        val hour = 60 * 60 * 1000L
+        val handle = SavedStateHandle(mapOf(
+            "trend.viewportStart" to early - hour,
+            "trend.viewportEnd" to early + hour
+        ))
+        val repo = FakeTrendRepository().apply {
+            records.value = listOf(record("early", early), record("late", late), record("latest", latest))
+        }
+        val settings = FakeSettingsRepository()
+        val vm = TrendViewModel(repo, settings, { now }, zone,
+            UnconfinedTestDispatcher(testScheduler), flowOf(today), handle)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        vm.setAggregation(TrendAggregation.RAW)
+        advanceUntilIdle()
+        vm.selectPoint(vm.uiState.value.series.points.first { it.id == "early" })
+        // 尚未由图表初始化 Controller 时也必须先恢复 08–10 的窗口，再平移。
+        vm.setAggregation(TrendAggregation.DAILY)
+        advanceUntilIdle()
+        val daily = vm.uiState.value.series.points.first { it.id == "day:$date" }
+        val dailyViewport = vm.chartController.viewportFor(vm.uiState.value.range)
+        assertEquals("day:$date", vm.uiState.value.selectedPointId)
+        assertEquals(2 * hour, dailyViewport.endMillis() - dailyViewport.startMillis())
+        assertTrue(daily.timestamp in dailyViewport.startMillis()..dailyViewport.endMillis())
+        assertTrue(dailyViewport.endMillis() < latest)
+        assertEquals(dailyViewport.startMillis(), handle.get<Long>("trend.viewportStart"))
+        assertEquals(dailyViewport.endMillis(), handle.get<Long>("trend.viewportEnd"))
+
+        val restored = TrendViewModel(repo, settings, { now }, zone,
+            UnconfinedTestDispatcher(testScheduler), flowOf(today),
+            SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) }))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { restored.uiState.collect {} }
+        advanceUntilIdle()
+        // 重建后的 Controller 也尚未初始化，切回 RAW 恢复 early 而非跳至 latest。
+        restored.setAggregation(TrendAggregation.RAW)
+        advanceUntilIdle()
+        val rawViewport = restored.chartController.viewportFor(restored.uiState.value.range)
+        assertEquals("early", restored.uiState.value.selectedPointId)
+        assertEquals(2 * hour, rawViewport.endMillis() - rawViewport.startMillis())
+        assertTrue(early in rawViewport.startMillis()..rawViewport.endMillis())
+        assertTrue(rawViewport.endMillis() < latest)
     }
 
     private fun record(id: String, timestamp: Long) = TrendRecord(
@@ -274,8 +472,8 @@ class TrendViewModelTest {
         )
         advanceUntilIdle()
 
-        // 30 天显示每次原始测量，所以新记录直接作为自己的节点进入折线。
-        assertEquals(listOf("later"), vm.uiState.value.series.points.map { it.id })
+        // 默认 30 天按自然日聚合，新增记录仍立即进入当日节点。
+        assertEquals(listOf("day:$today"), vm.uiState.value.series.points.map { it.id })
         assertEquals(1, vm.uiState.value.series.rawRecordCount)
         assertEquals(1, vm.uiState.value.series.points.single().recordCount)
         assertEquals(1, vm.uiState.value.insights.recordCount)
@@ -309,6 +507,16 @@ class TrendViewModelTest {
     }
 
     private class FakeSettingsRepository : SettingsRepository {
+        val aggregationPreference = MutableStateFlow<TrendAggregation?>(null)
+        var preferenceGate: CompletableDeferred<Unit>? = null
+        override fun observeTrendAggregationPreference(): Flow<TrendAggregation?> = flow {
+            val initial = aggregationPreference.value
+            preferenceGate?.await()
+            emit(initial)
+        }
+        override suspend fun setTrendAggregationPreference(aggregation: TrendAggregation) {
+            aggregationPreference.value = aggregation
+        }
         override fun observeSettings(): Flow<SettingsBundle> = flowOf(SettingsBundle())
         override suspend fun setLargeTextEnabled(enabled: Boolean) = Unit
         override suspend fun setHighRiskAlertEnabled(enabled: Boolean) = Unit

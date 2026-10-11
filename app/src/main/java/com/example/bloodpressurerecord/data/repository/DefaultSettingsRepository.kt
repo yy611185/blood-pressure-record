@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.data.repository
 import android.content.Context
 import android.net.Uri
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.data.db.dao.BloodPressureMeasurementDao
 import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
 import com.example.bloodpressurerecord.data.db.dao.UserProfileDao
@@ -40,6 +41,13 @@ class DefaultSettingsRepository(
     /** 应用内提醒开关只影响闹钟，不依赖可选的日历授权。 */
     private val medicationAlarmResync: (suspend () -> Unit)? = null
 ) : SettingsRepository {
+    override fun observeTrendAggregationPreference(): Flow<TrendAggregation?> =
+        appSettingsStore.trendAggregationPreference
+
+    override suspend fun setTrendAggregationPreference(aggregation: TrendAggregation) {
+        appSettingsStore.setTrendAggregationPreference(aggregation)
+    }
+
     override fun observeSettings(): Flow<SettingsBundle> = combine(
         appSettingsStore.settingsFlow,
         userProfileDao.observeProfile()

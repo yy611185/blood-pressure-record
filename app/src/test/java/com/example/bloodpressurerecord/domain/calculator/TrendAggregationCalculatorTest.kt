@@ -146,7 +146,7 @@ class TrendAggregationCalculatorTest {
     }
 
     @Test
-    fun legacyDailyKeepsItsAverageAggregationType() {
+    fun dailyKeepsItsAverageAggregationType() {
         val series = build(
             listOf(
                 record("a", "2026-10-02T08:00", 120, 80),
@@ -163,7 +163,7 @@ class TrendAggregationCalculatorTest {
 
     private fun build(
         records: List<TrendRecord>,
-        aggregation: TrendAggregation = TrendAggregation.DAILY_RANGE,
+        aggregation: TrendAggregation = TrendAggregation.DAILY,
         range: TrendRange = TrendRange.DAYS_7
     ): TrendSeries = TrendAggregationCalculator.build(records, range, now, zone, aggregation)
 

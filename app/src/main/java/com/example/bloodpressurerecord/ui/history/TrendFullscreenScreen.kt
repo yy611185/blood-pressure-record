@@ -54,10 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendRange
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /** 同一导航项内切换全屏，旋转与返回继续使用原趋势状态。 */
 @Composable
@@ -158,8 +156,13 @@ private fun TrendFullscreenToolbar(uiState: TrendUiState, viewModel: TrendViewMo
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TrendMenu(uiState.range.label, TrendRange.entries, { it.label }, viewModel::setRange)
+                TrendAggregationControl(
+                    selected = uiState.aggregation,
+                    onSelected = viewModel::setAggregation,
+                    modifier = Modifier.width(200.dp * LocalDensity.current.fontScale)
+                )
                 TrendMenu(uiState.metric.label, TrendMetricType.entries, { it.label }, viewModel::setMetric)
-                TextButton(
+                if (uiState.aggregation == TrendAggregation.RAW) TextButton(
                     onClick = { viewModel.setShowTimeLabels(!uiState.showTimeLabels) },
                     modifier = Modifier.heightIn(min = 48.dp).semantics {
                         contentDescription = "${if (uiState.showTimeLabels) "隐藏" else "显示"}横轴具体时分"
@@ -208,14 +211,15 @@ private fun TrendFullscreenReadout(point: TrendPoint?, modifier: Modifier = Modi
         Text("暂无测量记录", modifier.testTag("fullscreenReadout"), style = MaterialTheme.typography.labelMedium)
         return
     }
-    val date = Instant.ofEpochMilli(point.timestamp).atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-    val pressure = "${point.systolic}/${point.diastolic} mmHg"
-    val pulse = point.pulse?.let { "脉搏 $it 次/分" } ?: "脉搏 —"
+    val daily = point.aggregation != TrendAggregation.RAW
+    val date = formatTrendPointDate(point)
+    val pressure = "${if (daily) "平均 " else ""}${point.systolic}/${point.diastolic} mmHg"
+    val pulse = trendPointPulseText(point)
     Column(
         modifier.testTag("fullscreenReadout").semantics(mergeDescendants = true) {
-            contentDescription = "$date，收缩压 ${point.systolic}，舒张压 ${point.diastolic}，$pulse" +
-                if (point.containsHighRiskReading) "，含高风险读数" else ""
+            contentDescription = "$date，${if (daily) "当日平均" else ""}收缩压 ${point.systolic}，舒张压 ${point.diastolic}，$pulse" +
+                (if (daily) "，${point.recordCount} 次测量" else "") +
+                (if (point.containsHighRiskReading) "，含高风险读数" else "")
         },
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -228,6 +232,11 @@ private fun TrendFullscreenReadout(point: TrendPoint?, modifier: Modifier = Modi
             Text(pressure, style = MaterialTheme.typography.titleSmall, fontFamily = NumberFontFamily,
                 fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
             Text(pulse, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+            if (daily) Text("${point.recordCount} 次测量", style = MaterialTheme.typography.labelMedium)
+            if (point.containsHighRiskReading) Text(
+                if (daily) "当天含高风险记录" else "含高风险读数",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error
+            )
         }
     }
 }

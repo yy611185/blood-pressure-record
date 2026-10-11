@@ -12,6 +12,7 @@ object PreferenceKeys {
     val LARGE_TEXT = booleanPreferencesKey("large_text")
     val ENABLE_HIGH_RISK_ALERT = booleanPreferencesKey("enable_high_risk_alert")
     val SHOW_TREND_CHART = booleanPreferencesKey("show_trend_chart")
+    val TREND_AGGREGATION = stringPreferencesKey("trend_aggregation")
     val SHOW_BUDDY = booleanPreferencesKey("show_buddy")
     val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
     val MORNING_REMINDER_ENABLED = booleanPreferencesKey("morning_reminder_enabled")

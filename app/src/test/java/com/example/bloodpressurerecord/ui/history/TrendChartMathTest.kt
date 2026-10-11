@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.ui.history
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendRange
+import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import java.time.LocalDate
 import java.time.ZoneId
@@ -961,6 +962,71 @@ class TrendChartMathTest {
             assertEquals(axis.min, ticks.first())
             assertEquals(axis.max, ticks.last())
         }
+    }
+
+    @Test
+    fun samplingDailyMeansRetainsCurveExtremesAndHighRiskSourceFlags() {
+        val points = (0 until 100).map { index ->
+            point(index * 1_000L, pulse = 70).copy(
+                aggregation = TrendAggregation.DAILY,
+                systolic = when (index) { 15 -> 155; 22 -> 105; else -> 120 },
+                diastolic = when (index) { 15 -> 95; 22 -> 65; else -> 80 },
+                pulse = when (index) { 15 -> 100; 22 -> 50; else -> 70 },
+                systolicMin = 60, systolicMax = 200, diastolicMin = 40, diastolicMax = 110,
+                pulseMin = 40, pulseMax = 160, containsHighRiskReading = index == 17
+            )
+        }
+        // 来源极值相同；仍必须保留日均曲线峰谷及平均值正常的高风险日期。
+        val requiredIds = listOf(points[15].id, points[17].id, points[22].id)
+        assertTrue(TrendChartMath.sampleShared(points, 24).map { it.id }.containsAll(requiredIds))
+        assertTrue(TrendChartMath.samplePulse(points, 24).map { it.id }.containsAll(requiredIds))
+    }
+
+    @Test
+    fun nodeDensityKeepsRiskMarkersSelectionAndRealTimeSpacing() {
+        val points = listOf(point(0L), point(1L), point(2L).copy(containsHighRiskReading = true), point(100L))
+        assertEquals(listOf(points[2], points[1]),
+            TrendChartMath.nodePoints(points, points[1], false, 0L, 100L))
+        assertEquals(listOf(points[0], points[2], points[3]),
+            TrendChartMath.nodePoints(points, null, true, 0L, 100L, minimumTimeSpacingMillis = 20L))
+    }
+
+    @Test
+    fun dailyModeUsesDateOnlyTicksEvenWhenZoomedToOneHour() {
+        val zone = ZoneId.of("Asia/Taipei")
+        val start = LocalDate.of(2026, 9, 1).atTime(9, 17).atZone(zone).toInstant().toEpochMilli()
+        val ticks = TrendChartMath.timeTicks(
+            start, start + 3_600_000L, zone, showTimeLabels = true, aggregation = TrendAggregation.DAILY
+        )
+        assertEquals(listOf("09-01"), ticks.map { it.primary })
+        assertTrue(ticks.all { it.secondary == null })
+    }
+
+    @Test
+    fun aggregationSwitchKeepsSharedAbsoluteViewportAndZoom() {
+        val raw = TrendSeries(
+            range = TrendRange.DAYS_30,
+            points = listOf(point(10_000L), point(85_000L)),
+            rawRecordCount = 2, averageSystolic = 120, averageDiastolic = 80,
+            yAxis = TrendYAxis(60, 160, 10), rangeStart = 0L, rangeEnd = 100_000L
+        )
+        val controller = TrendChartController()
+        controller.updateSeries(raw)
+        val viewport = controller.viewportFor(raw.range)
+        viewport.zoomBy(5f, 0.5, 0.01)
+        viewport.panBy(0.1)
+        val window = viewport.startMillis() to viewport.endMillis()
+        val zoom = viewport.zoom
+        val daily = raw.copy(
+            aggregation = TrendAggregation.DAILY,
+            points = listOf(point(47_500L).copy(aggregation = TrendAggregation.DAILY, recordCount = 2))
+        )
+        controller.updateSeries(daily)
+        assertEquals(window, viewport.startMillis() to viewport.endMillis())
+        assertEquals(zoom, viewport.zoom, 0.0001f)
+        assertTrue(viewport === controller.viewportFor(daily.range))
+        controller.updateSeries(raw)
+        assertEquals(window, viewport.startMillis() to viewport.endMillis())
     }
 
     private fun point(

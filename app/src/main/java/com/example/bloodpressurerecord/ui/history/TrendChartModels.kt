@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import com.example.bloodpressurerecord.domain.calculator.TrendSeriesCalculator
 import com.example.bloodpressurerecord.domain.model.TrendPoint
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
 import java.time.Instant
@@ -513,7 +514,8 @@ object TrendChartMath {
     fun samplePulse(points: List<TrendPoint>, maxPoints: Int, selectedId: String? = null): List<TrendPoint> {
         val present = points.filter { it.pulse != null }
         if (present.size <= maxPoints || maxPoints < 4) return present
-        val bucketCount = (maxPoints / 4).coerceAtLeast(1)
+        val pointsPerBucket = if (present.any { it.aggregation != TrendAggregation.RAW }) 6 else 4
+        val bucketCount = (maxPoints / pointsPerBucket).coerceAtLeast(1)
         val bucketSize = ceil(points.size / bucketCount.toDouble()).toInt().coerceAtLeast(1)
         val selected = linkedSetOf<Int>()
         var start = 0
@@ -525,6 +527,10 @@ object TrendChartMath {
                 selected += valid.last()
                 selected += valid.minBy { points[it].pulseMin!! }
                 selected += valid.maxBy { points[it].pulseMax!! }
+                if (pointsPerBucket == 6) {
+                    selected += valid.minBy { points[it].pulse!! }
+                    selected += valid.maxBy { points[it].pulse!! }
+                }
             }
             start = end
         }
@@ -535,6 +541,7 @@ object TrendChartMath {
                 if (index < points.lastIndex && points[index + 1].pulse != null) selected += index + 1
             } else {
                 if (point.id == selectedId) selected += index
+                if (point.containsHighRiskReading) selected += index
                 if (index > 0 && points[index - 1].pulse != null &&
                     point.timestamp - points[index - 1].timestamp > 2L * DAY_MILLIS) {
                     selected += index - 1
@@ -609,9 +616,10 @@ object TrendChartMath {
         selectedId: String? = null
     ): List<TrendPoint> {
         if (points.size <= maxPoints || maxPoints < 8) return points
-        // 每桶首尾及 SYS/DIA 极值共六点；额外保留缺测断线的两侧和选中点。
+        // 每桶首尾及 SYS/DIA 极值；日聚合额外保留实际平均曲线的峰谷。
         // 必须保留的边界可能超过预算，不能截断后半区极值以满足数量上限。
-        val bucketCount = (maxPoints / 6).coerceAtLeast(1)
+        val pointsPerBucket = if (points.any { it.aggregation != TrendAggregation.RAW }) 10 else 6
+        val bucketCount = (maxPoints / pointsPerBucket).coerceAtLeast(1)
         val bucketSize = ceil(points.size / bucketCount.toDouble()).toInt().coerceAtLeast(1)
         val selected = linkedSetOf<Int>()
         for (start in points.indices step bucketSize) {
@@ -623,9 +631,15 @@ object TrendChartMath {
             selected += indices.maxBy { points[it].systolicMax }
             selected += indices.minBy { points[it].diastolicMin }
             selected += indices.maxBy { points[it].diastolicMax }
+            if (pointsPerBucket == 10) {
+                selected += indices.minBy { points[it].systolic }
+                selected += indices.maxBy { points[it].systolic }
+                selected += indices.minBy { points[it].diastolic }
+                selected += indices.maxBy { points[it].diastolic }
+            }
         }
         points.forEachIndexed { index, point ->
-            if (point.id == selectedId) selected += index
+            if (point.id == selectedId || point.containsHighRiskReading) selected += index
             if (index > 0 && point.timestamp - points[index - 1].timestamp > 2L * DAY_MILLIS) {
                 selected += index - 1
                 selected += index
@@ -638,17 +652,25 @@ object TrendChartMath {
         return (plotWidthDp / 80).coerceIn(3, 7)
     }
 
-    /** 选中节点最后独立覆盖绘制，不依赖采样是否包含它，也不改变折线数据。 */
+    /** 密集区域保留高风险提示；普通圆点按真实时间距离避让，选中节点最后覆盖。 */
     fun nodePoints(
         renderPoints: List<TrendPoint>,
         selected: TrendPoint?,
         showAllNodes: Boolean,
         viewportStart: Long,
-        viewportEnd: Long
+        viewportEnd: Long,
+        minimumTimeSpacingMillis: Long = 0L
     ): List<TrendPoint> = buildList {
-        if (showAllNodes) addAll(renderPoints.filter {
-            it.id != selected?.id && it.timestamp in viewportStart..viewportEnd
-        })
+        var previousTimestamp: Long? = null
+        renderPoints.forEach { point ->
+            if (point.id != selected?.id && point.timestamp in viewportStart..viewportEnd &&
+                (point.containsHighRiskReading || (showAllNodes &&
+                    (previousTimestamp == null || point.timestamp - previousTimestamp!! >= minimumTimeSpacingMillis)))
+            ) {
+                add(point)
+                previousTimestamp = point.timestamp
+            }
+        }
         selected?.takeIf { it.timestamp in viewportStart..viewportEnd }?.let(::add)
     }
 
@@ -810,13 +832,22 @@ object TrendChartMath {
         endMillis: Long,
         zoneId: ZoneId,
         maxTicks: Int = 7,
-        showTimeLabels: Boolean = false
+        showTimeLabels: Boolean = false,
+        aggregation: TrendAggregation = TrendAggregation.RAW
     ): List<TrendTimeTick> {
         if (endMillis <= startMillis) return emptyList()
         val safeMaxTicks = maxTicks.coerceIn(2, 7)
         val start = Instant.ofEpochMilli(startMillis).atZone(zoneId)
         val end = Instant.ofEpochMilli(endMillis).atZone(zoneId)
         val spanDays = ChronoUnit.HOURS.between(start, end).coerceAtLeast(1) / 24.0
+        // 日平均没有测量时分；小时级放大也只用日期标签，不暴露绘图中点。
+        if (aggregation != TrendAggregation.RAW) {
+            return when {
+                spanDays <= 45.0 -> dailyTicks(start, end, safeMaxTicks)
+                spanDays <= 730.0 -> monthlyTicks(start, end, safeMaxTicks)
+                else -> yearlyTicks(start, end, safeMaxTicks)
+            }
+        }
         val ticks = when {
             spanDays <= 2.0 -> hourlyTicks(start, end, safeMaxTicks)
             spanDays <= 45.0 -> dailyTicks(start, end, safeMaxTicks)

@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.data.datastore
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -28,6 +29,20 @@ data class AppSettings(
 class AppSettingsStore(
     private val context: Context
 ) {
+    /** 本机趋势显示偏好，不加入健康数据与备份设置格式。null 表示尚未主动选择。 */
+    val trendAggregationPreference: Flow<TrendAggregation?> = context.appDataStore.data.map { prefs ->
+        when (prefs[PreferenceKeys.TREND_AGGREGATION]) {
+            TrendAggregation.RAW.name -> TrendAggregation.RAW
+            TrendAggregation.DAILY.name -> TrendAggregation.DAILY
+            else -> null
+        }
+    }
+
+    suspend fun setTrendAggregationPreference(aggregation: TrendAggregation) {
+        require(aggregation == TrendAggregation.RAW || aggregation == TrendAggregation.DAILY)
+        context.appDataStore.edit { it[PreferenceKeys.TREND_AGGREGATION] = aggregation.name }
+    }
+
     val settingsFlow: Flow<AppSettings> = context.appDataStore.data.map { prefs ->
         AppSettings(
             largeTextEnabled = prefs[PreferenceKeys.LARGE_TEXT] ?: true,

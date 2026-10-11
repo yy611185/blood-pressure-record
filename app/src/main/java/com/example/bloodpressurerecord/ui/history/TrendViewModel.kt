@@ -29,12 +29,16 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class TrendDayDetails(
     val point: TrendPoint,
@@ -73,7 +77,7 @@ data class TrendUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrendViewModel(
     private val trendRepository: TrendRepository,
-    settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsRepository,
     private val clockMillis: () -> Long = System::currentTimeMillis,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     computeContext: CoroutineContext = Dispatchers.Default,
@@ -85,10 +89,14 @@ class TrendViewModel(
     private val selectedRange = MutableStateFlow(
         restoredEnum("trend.range", TrendRange.DAYS_30)
     )
-    private val restoredAggregation = restoredEnum("trend.aggregation", TrendAggregation.RAW)
-    // 日范围入口已移除；旧日桶状态迁移回每次测量，同时保留绝对视窗。
-    private val selectedAggregation = MutableStateFlow(TrendAggregation.RAW).also {
-        savedStateHandle["trend.aggregation"] = TrendAggregation.RAW.name
+    private val restoredAggregation = restoredEnum("trend.aggregation", defaultAggregation(selectedRange.value))
+    private var hasAggregationPreference = savedStateHandle.get<Boolean>("trend.aggregationExplicit") == true
+    private val preferenceReady = MutableStateFlow(false)
+    private val preferenceWriteMutex = Mutex()
+    private val selectedAggregation = MutableStateFlow(
+        restoredAggregation.takeUnless { it == TrendAggregation.DAILY_RANGE } ?: TrendAggregation.RAW
+    ).also {
+        savedStateHandle["trend.aggregation"] = it.value.name
     }
     private val displayOptions = MutableStateFlow(DisplayOptions(
         metric = restoredEnum("trend.metric", TrendMetricType.BOTH),
@@ -102,10 +110,13 @@ class TrendViewModel(
     private var detailsJob: Job? = null
     private var detailsRequest = 0L
     private var selectionTimestamp: Long? = savedStateHandle["trend.selectedTimestamp"]
+    private var originalRawRecordId: String? = savedStateHandle.get<String>("trend.originalRawRecordId")
+        ?: savedStateHandle.get<String>("trend.selectedPointId")
+            .takeIf { restoredAggregation == TrendAggregation.RAW }
     private var pendingSelectionMapping: Pair<TrendAggregation, Long>? =
         (savedStateHandle.get<Long>("trend.selectionMappingTimestamp")
-            ?: selectionTimestamp.takeIf { restoredAggregation != TrendAggregation.RAW })
-            ?.let { TrendAggregation.RAW to it }
+            ?: selectionTimestamp.takeIf { restoredAggregation == TrendAggregation.DAILY_RANGE })
+            ?.let { selectedAggregation.value to it }
             .also { mapping ->
                 // 聚合名迁移先写入；记录还未加载时重建也不能丢失待恢复的选择。
                 if (mapping != null) savedStateHandle["trend.selectionMappingTimestamp"] = mapping.second
@@ -124,8 +135,10 @@ class TrendViewModel(
     private val seriesState = combine(
         selectedRange,
         selectedAggregation,
-        todayTicks
-    ) { range, aggregation, today -> Triple(range, aggregation, today) }
+        todayTicks,
+        preferenceReady
+    ) { range, aggregation, today, ready -> Triple(range, aggregation, today).takeIf { ready } }
+        .filterNotNull()
         .flatMapLatest { (range, aggregation, today) ->
         val anchorMillis = today.atStartOfDay(zoneId).toInstant().toEpochMilli()
         val start = TrendSeriesCalculator.rangeStart(range, anchorMillis, zoneId)
@@ -200,6 +213,10 @@ class TrendViewModel(
         initialValue = TrendUiState(
             range = selectedRange.value,
             aggregation = selectedAggregation.value,
+            series = TrendUiState().series.copy(
+                range = selectedRange.value,
+                aggregation = selectedAggregation.value
+            ),
             metric = displayOptions.value.metric,
             selectedPointId = displayOptions.value.selectedPointId,
             showPulse = displayOptions.value.showPulse,
@@ -208,6 +225,24 @@ class TrendViewModel(
             fullscreen = displayOptions.value.fullscreen
         )
     )
+
+    init {
+        viewModelScope.launch {
+            val preference = settingsRepository.observeTrendAggregationPreference().first()
+                ?.takeIf { it == TrendAggregation.RAW || it == TrendAggregation.DAILY }
+            // 读取期间的主动选择与旋转恢复优先，旧异步读取不能覆盖刚点击的控件。
+            if (!hasAggregationPreference) {
+                if (preference != null) {
+                    hasAggregationPreference = true
+                    savedStateHandle["trend.aggregationExplicit"] = true
+                    applyAggregation(preference)
+                } else if (pendingSelectionMapping == null && restoredAggregation != TrendAggregation.DAILY_RANGE) {
+                    applyAggregation(defaultAggregation(selectedRange.value))
+                }
+            }
+            preferenceReady.value = true
+        }
+    }
 
     fun setRange(range: TrendRange) {
         if (selectedRange.value == range) return
@@ -219,6 +254,7 @@ class TrendViewModel(
         chartController.clearSavedViewport()
         savedStateHandle["trend.range"] = range.name
         selectedRange.value = range
+        if (!hasAggregationPreference) applyAggregation(defaultAggregation(range))
     }
 
     fun setMetric(metric: TrendMetricType) {
@@ -227,9 +263,31 @@ class TrendViewModel(
     }
 
     fun setAggregation(aggregation: TrendAggregation) {
-        // 保留旧调用契约，已废弃的聚合选择不能重新启用范围图。
-        if (aggregation != TrendAggregation.RAW) return
-        savedStateHandle["trend.aggregation"] = TrendAggregation.RAW.name
+        if (aggregation == TrendAggregation.DAILY_RANGE) return
+        // 点击已经选中的默认项也建立偏好，之后切换范围不再改写。
+        hasAggregationPreference = true
+        savedStateHandle["trend.aggregationExplicit"] = true
+        applyAggregation(aggregation)
+        viewModelScope.launch {
+            // 串行落盘，快速切换时最终选择不会被较早的写入覆盖。
+            preferenceWriteMutex.withLock {
+                settingsRepository.setTrendAggregationPreference(aggregation)
+            }
+        }
+    }
+
+    private fun applyAggregation(aggregation: TrendAggregation) {
+        if (selectedAggregation.value == aggregation) return
+        val selected = uiState.value.series.points.firstOrNull {
+            it.id == displayOptions.value.selectedPointId
+        }
+        if (selected?.aggregation == TrendAggregation.RAW) rememberRawRecord(selected.id)
+        val timestamp = pendingSelectionMapping?.second ?: selectionTimestamp ?: selected?.timestamp
+        pendingSelectionMapping = timestamp?.let { aggregation to it }
+        if (timestamp != null) savedStateHandle["trend.selectionMappingTimestamp"] = timestamp
+        dismissDayDetails()
+        savedStateHandle["trend.aggregation"] = aggregation.name
+        selectedAggregation.value = aggregation
     }
 
     fun selectPoint(point: TrendPoint?) {
@@ -287,7 +345,7 @@ class TrendViewModel(
     /**
      * 打开某一点所属日期的原始测量明细。
      *
-     * 每次测量定位原记录；每日范围只展示实际参与该桶统计的记录。
+     * 每次测量定位原记录；每日平均只展示实际参与统计的记录。
      */
     fun openPointDetails(point: TrendPoint) {
         val timestamp = selectionTimestamp.takeIf { displayOptions.value.selectedPointId == point.id }
@@ -299,7 +357,7 @@ class TrendViewModel(
         details.value = TrendDayDetails(
             point = point,
             selectedRecordId = point.id.takeIf { point.aggregation == TrendAggregation.RAW },
-            title = "$date ${if (point.aggregation == TrendAggregation.RAW) "当天记录" else "每日范围记录"}"
+            title = "$date ${if (point.aggregation == TrendAggregation.RAW) "当天记录" else "每日平均记录"}"
         )
         detailsJob = viewModelScope.launch {
             val (startInclusive, endExclusive) = dayRangeOf(point)
@@ -346,6 +404,11 @@ class TrendViewModel(
     }
 
     private fun writeSelection(point: TrendPoint?, timestamp: Long? = point?.timestamp) {
+        when {
+            point == null -> rememberRawRecord(null)
+            point.aggregation == TrendAggregation.RAW -> rememberRawRecord(point.id)
+            originalRawRecordId !in point.sourceRecordIds -> rememberRawRecord(null)
+        }
         selectionTimestamp = timestamp
         savedStateHandle["trend.selectedPointId"] = point?.id
         savedStateHandle["trend.selectedTimestamp"] = timestamp
@@ -360,12 +423,20 @@ class TrendViewModel(
             if (series.points.isEmpty()) return
             val timestamp = mapping.second
             val target = if (series.aggregation == TrendAggregation.RAW) {
-                series.points.minByOrNull { kotlin.math.abs(it.timestamp - timestamp) }
+                series.points.firstOrNull { it.id == originalRawRecordId }
+                    ?: series.points.minByOrNull { kotlin.math.abs(it.timestamp - timestamp) }
             } else {
                 series.points.firstOrNull { timestamp in it.intervalStart until it.intervalEndExclusive }
+                    ?: series.points.minByOrNull { kotlin.math.abs(it.timestamp - timestamp) }
             }
             clearSelectionMapping()
             writeSelection(target, timestamp.takeIf { target != null })
+            if (target != null) {
+                // 每日节点的绘图中点可能在原 Session 的窄窗口外；先恢复/更新
+                // 同一绝对视窗，再仅在必要时平移，保持缩放跨度与历史日期。
+                chartController.updateSeries(series)
+                chartController.ensureVisible(target.timestamp)
+            }
         } else {
             val selectedId = displayOptions.value.selectedPointId ?: return
             val selected = series.points.firstOrNull { it.id == selectedId }
@@ -388,6 +459,14 @@ class TrendViewModel(
         pendingSelectionMapping = null
         savedStateHandle.remove<Long>("trend.selectionMappingTimestamp")
     }
+
+    private fun rememberRawRecord(id: String?) {
+        originalRawRecordId = id
+        savedStateHandle["trend.originalRawRecordId"] = id
+    }
+
+    private fun defaultAggregation(range: TrendRange): TrendAggregation =
+        if (range == TrendRange.DAYS_7) TrendAggregation.RAW else TrendAggregation.DAILY
 
     private inline fun <reified T : Enum<T>> restoredEnum(key: String, fallback: T): T =
         savedStateHandle.get<String>(key)?.let { name -> enumValues<T>().firstOrNull { it.name == name } }
