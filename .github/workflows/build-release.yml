@@ -182,6 +182,58 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/release_ci.py publish
+      - name: Publish signed APK to update server
+        if: steps.version.outputs.should_release == 'true'
+        shell: bash
+        env:
+          BP_UPDATE_SSH_KEY: ${{ secrets.BP_UPDATE_SSH_KEY }}
+          BP_UPDATE_HOST_KEY: ${{ secrets.BP_UPDATE_HOST_KEY }}
+          BP_UPDATE_HOST: ${{ secrets.BP_UPDATE_HOST }}
+          BP_UPDATE_USER: ${{ secrets.BP_UPDATE_USER }}
+        run: |
+          set -euo pipefail
+
+          test -n "${BP_UPDATE_SSH_KEY}" || { echo "::error::Missing secret BP_UPDATE_SSH_KEY (dedicated deploybp deploy key)."; exit 1; }
+          test -n "${BP_UPDATE_HOST_KEY}" || { echo "::error::Missing secret BP_UPDATE_HOST_KEY (pinned SSH host key of the update server)."; exit 1; }
+          test -n "${BP_UPDATE_HOST}" || { echo "::error::Missing secret BP_UPDATE_HOST (update server IP)."; exit 1; }
+          test -n "${BP_UPDATE_USER}" || { echo "::error::Missing secret BP_UPDATE_USER (deploybp)."; exit 1; }
+
+          APK="app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk"
+          test -s "${APK}" || { echo "::error::Signed release APK not found: ${APK}"; exit 1; }
+
+          # The server recomputes SHA-256 and aborts on mismatch; here we first agree
+          # with the checksum file produced by the verification step above.
+          SHA="$(sha256sum "${APK}" | cut -d' ' -f1)"
+          EXPECTED="$(awk -v f="${APK}" '$2 == f {print $1}' app/build/outputs/release-sha256.txt)"
+          test -n "${EXPECTED}" || { echo "::error::APK missing from release-sha256.txt"; exit 1; }
+          test "${EXPECTED}" = "${SHA}" || { echo "::error::SHA-256 mismatch vs CI checksum file (${EXPECTED} != ${SHA})"; exit 1; }
+
+          NOTES_FILE="docs/release-v${VERSION_NAME}.md"
+          if [ -f "${NOTES_FILE}" ]; then
+            NOTES_B64="$(base64 -w0 "${NOTES_FILE}")"
+          else
+            NOTES_B64="$(printf 'Release v%s' "${VERSION_NAME}" | base64 -w0)"
+          fi
+
+          SSH_DIR="${RUNNER_TEMP}/bp-deploy"
+          mkdir -p "${SSH_DIR}" && chmod 700 "${SSH_DIR}"
+          printf '%s\n' "${BP_UPDATE_SSH_KEY}" > "${SSH_DIR}/key" && chmod 600 "${SSH_DIR}/key"
+          printf '%s\n' "${BP_UPDATE_HOST_KEY}" > "${SSH_DIR}/known_hosts"
+
+          # Streaming upload: the APK is piped over stdin into the server-side
+          # publish tool, which verifies SHA-256, checks the APK signature, refuses
+          # duplicate/downgrade publishes and only then atomically updates latest.json.
+          ssh -i "${SSH_DIR}/key" \
+              -o IdentitiesOnly=yes \
+              -o UserKnownHostsFile="${SSH_DIR}/known_hosts" \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              "${BP_UPDATE_USER}@${BP_UPDATE_HOST}" \
+              "publish --version ${VERSION_NAME} --version-code ${VERSION_CODE} --sha256 ${SHA} --releases-url ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/v${VERSION_NAME} --notes-b64 ${NOTES_B64} --file -" \
+              < "${APK}"
+
+          rm -f "${SSH_DIR}/key"
+
       - name: Remove restored keystore
         if: always()
         run: rm -f "${RUNNER_TEMP}/release.jks"
