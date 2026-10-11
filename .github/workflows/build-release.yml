@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
 
 permissions:
   contents: read
@@ -30,6 +28,8 @@ jobs:
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
+      - name: Validate release detection and recovery
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - name: Compile app and run focused trend unit tests
         run: |
           chmod +x gradlew
@@ -58,37 +58,46 @@ jobs:
           path: app/build/reports/tests/
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: android-production-release
+      cancel-in-progress: false
+      # Keep all version pushes queued instead of replacing a pending release.
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency
+      queue: max
+    env:
+      GITHUB_EVENT_BEFORE: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect new version or recover incomplete release
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_ci.py detect
       - uses: actions/setup-java@v4
+        if: steps.version.outputs.should_release == 'true'
         with:
           java-version: "17"
           distribution: temurin
           cache: gradle
       - uses: android-actions/setup-android@v3
+        if: steps.version.outputs.should_release == 'true'
         with:
           # setup-android@v3 defaults to installing the legacy "tools" package,
           # which is no longer published and makes the action fail before Gradle runs.
           packages: ""
       - name: Install Android 16 SDK
+        if: steps.version.outputs.should_release == 'true'
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-      - name: Resolve and verify release version
-        shell: bash
-        run: |
-          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*versionName = "\([^"]*\)".*/\1/')
-          VERSION_CODE=$(grep 'versionCode = ' app/build.gradle.kts | head -1 | sed 's/.*versionCode = \([0-9]*\).*/\1/')
-          test -n "${VERSION_NAME}"
-          test -n "${VERSION_CODE}"
-          test "${GITHUB_REF_NAME}" = "v${VERSION_NAME}"
-          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
-          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=v${VERSION_NAME}" >> "$GITHUB_ENV"
       - name: Restore release keystore
+        if: steps.version.outputs.should_release == 'true'
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -102,7 +111,8 @@ jobs:
           test -n "${ANDROID_KEY_PASSWORD}" || { echo "::error::Secret ANDROID_KEY_PASSWORD is empty. Add the key password."; exit 1; }
           echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/release.jks"
           test -s "${RUNNER_TEMP}/release.jks" || { echo "::error::Decoded keystore is empty; ANDROID_KEYSTORE_BASE64 may be invalid."; exit 1; }
-      - name: Build and verify signed Release
+      - name: Build signed Release APK and AAB
+        if: steps.version.outputs.should_release == 'true'
         shell: bash
         env:
           BP_RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
@@ -111,13 +121,22 @@ jobs:
           BP_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon bundleRelease assembleRelease --stacktrace
+          ./gradlew --no-daemon :app:bundleRelease :app:assembleRelease --stacktrace
           mv app/build/outputs/apk/release/app-release.apk \
             "app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk"
           mv app/build/outputs/bundle/release/app-release.aab \
             "app/build/outputs/bundle/release/blood-pressure-record-v${VERSION_NAME}-release.aab"
-          APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -1)
-          test -n "${APKSIGNER}"
+      - name: Restore packages from an interrupted release
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_ci.py restore-packages
+      - name: Verify production signatures, version, alignment and checksums
+        if: steps.version.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          APKSIGNER="${ANDROID_HOME}/build-tools/36.0.0/apksigner"
+          test -x "${APKSIGNER}"
           "${APKSIGNER}" verify --verbose --print-certs \
             "app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk" \
             | tee app/build/outputs/release-verification.txt
@@ -131,12 +150,24 @@ jobs:
           grep -F "package: name='com.yang.bloodpressure' versionCode='${VERSION_CODE}' versionName='${VERSION_NAME}'" \
             app/build/outputs/release-verification.txt
           jarsigner -verify \
-            "app/build/outputs/bundle/release/blood-pressure-record-v${VERSION_NAME}-release.aab"
+            "app/build/outputs/bundle/release/blood-pressure-record-v${VERSION_NAME}-release.aab" \
+            | tee -a app/build/outputs/release-verification.txt
+          # jarsigner alone may exit successfully for an unsigned JAR. Read every
+          # payload entry and require exactly the production signing certificate.
+          java scripts/VerifyReleaseBundle.java \
+            "app/build/outputs/bundle/release/blood-pressure-record-v${VERSION_NAME}-release.aab" \
+            46dfcbf4da054df8a8aca30e0df4df323161cbe4363a9eac7683a9da87d44012 \
+            | tee -a app/build/outputs/release-verification.txt
+          "$(dirname "${APKSIGNER}")/zipalign" -c -P 16 -v 4 \
+            "app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk" \
+            | tee -a app/build/outputs/release-verification.txt
           sha256sum \
             "app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk" \
             "app/build/outputs/bundle/release/blood-pressure-record-v${VERSION_NAME}-release.aab" \
             > "app/build/outputs/release-sha256.txt"
+          sha256sum --check app/build/outputs/release-sha256.txt
       - name: Upload signed Release packages
+        if: steps.version.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: blood-pressure-record-v${{ env.VERSION_NAME }}
@@ -146,17 +177,11 @@ jobs:
             app/build/outputs/release-sha256.txt
             app/build/outputs/release-verification.txt
           if-no-files-found: error
-      - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          target_commitish: ${{ github.sha }}
-          name: Release ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
-          body_path: docs/release-v${{ env.VERSION_NAME }}.md
-          fail_on_unmatched_files: true
-          files: |
-            app/build/outputs/apk/release/blood-pressure-record-v${{ env.VERSION_NAME }}-release.apk
-            app/build/outputs/bundle/release/blood-pressure-record-v${{ env.VERSION_NAME }}-release.aab
-            app/build/outputs/release-sha256.txt
-            app/build/outputs/release-verification.txt
+      - name: Create tag and publish verified GitHub Release
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_ci.py publish
+      - name: Remove restored keystore
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/release.jks"
