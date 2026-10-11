@@ -2,6 +2,9 @@ package com.example.bloodpressurerecord
 
 import android.content.Context
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
+import com.example.bloodpressurerecord.data.datastore.appDataStore
+import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
+import com.example.bloodpressurerecord.data.repository.DefaultBpZoneConfigRepository
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.DefaultBloodPressureRepository
@@ -17,6 +20,7 @@ import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
 import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
 
 interface AppContainer {
+    val bpZoneConfigRepository: BpZoneConfigRepository
     val bloodPressureRepository: BloodPressureRepository
     val settingsRepository: SettingsRepository
     val trendRepository: TrendRepository
@@ -29,6 +33,10 @@ class DefaultAppContainer(context: Context) : AppContainer {
     private val appContext = context.applicationContext
     private val database by lazy { AppDatabase.create(appContext) }
     private val appSettingsStore by lazy { AppSettingsStore(appContext) }
+
+    override val bpZoneConfigRepository: BpZoneConfigRepository by lazy {
+        DefaultBpZoneConfigRepository(appContext.appDataStore)
+    }
 
     override val sessionDraftRepository: SessionDraftRepository by lazy {
         FileSessionDraftRepository(appContext)

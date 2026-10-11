@@ -51,7 +51,8 @@ class AppViewModelFactory(
                     repository = container.bloodPressureRepository,
                     medicationRepository = container.medicationRepository,
                     todayTicks = dayTicks(),
-                    settingsRepository = container.settingsRepository
+                    settingsRepository = container.settingsRepository,
+                    zoneConfigRepository = container.bpZoneConfigRepository
                 ) as T
             }
 
@@ -67,7 +68,8 @@ class AppViewModelFactory(
             SettingsViewModel::class.java -> {
                 SettingsViewModel(
                     repository = container.settingsRepository,
-                    medicationRepository = container.medicationRepository
+                    medicationRepository = container.medicationRepository,
+                    zoneConfigRepository = container.bpZoneConfigRepository
                 ) as T
             }
 

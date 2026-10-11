@@ -12,9 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,8 +59,12 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,6 +77,7 @@ import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
+import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import java.time.Instant
 import java.time.LocalDate
@@ -206,9 +210,8 @@ internal fun gradeLook(category: String): GradeLook {
     return if (dark) look.copy(soft = look.ink.copy(alpha = 0.23f), ink = look.body) else look
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ReadingHero(state: DashboardUiState) {
+internal fun ReadingHero(state: DashboardUiState) {
     val latest = state.latest ?: return
     val detail = state.latestSession
     val look = gradeLook(latest.category)
@@ -263,30 +266,39 @@ private fun ReadingHero(state: DashboardUiState) {
             style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
             color = look.ink.copy(alpha = 0.82f)
         )
-        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 6.dp)) {
-            Text("${latest.avgSystolic}", style = MaterialTheme.typography.displayMedium.copy(fontSize = 58.sp, lineHeight = 62.sp), color = look.ink)
-            Text("/", style = MaterialTheme.typography.displayMedium.copy(fontSize = 48.sp, fontWeight = FontWeight.Light), color = look.ink.copy(alpha = 0.36f))
-            Text("${latest.avgDiastolic}", style = MaterialTheme.typography.displayMedium.copy(fontSize = 58.sp, lineHeight = 62.sp), color = look.ink)
-            Text("mmHg", style = MaterialTheme.typography.labelMedium, color = look.ink.copy(alpha = 0.7f), modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            GradeChip(CategoryPresentation.label(latest.category), look)
-            if (risk) RiskChip()
-            detail?.avgPulse?.let { pulse ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.FavoriteBorder, null, Modifier.size(16.dp), tint = look.ink)
-                    Text(" $pulse 次/分", style = MaterialTheme.typography.labelMedium, color = look.ink)
+        Row(
+            Modifier.fillMaxWidth().padding(top = AppSpacing.xSmall),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            HeroPressureValue(latest.avgSystolic, latest.avgDiastolic, look.ink, Modifier.weight(1f))
+            Column(
+                Modifier.padding(bottom = AppSpacing.small),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+            ) {
+                Text("mmHg", style = MaterialTheme.typography.labelMedium, color = look.ink.copy(alpha = 0.7f))
+                detail?.avgPulse?.let { pulse ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.xSmall),
+                        modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "脉搏 $pulse 次/分" }
+                    ) {
+                        Icon(Icons.Outlined.FavoriteBorder, null, Modifier.size(16.dp), tint = look.ink)
+                        Text("$pulse 次/分", style = MaterialTheme.typography.labelMedium, color = look.ink)
+                    }
                 }
             }
         }
+        if (risk) RiskChip()
         val count = detail?.readings?.size
         if (count != null) {
             Text(
                 if (detail.averageStrategy == AverageStrategy.DISCARD_FIRST && count >= 2) "弃第1组 · ${count - 1} 组平均" else "$count 组平均",
                 style = MaterialTheme.typography.labelMedium, color = look.ink.copy(alpha = 0.72f),
-                modifier = Modifier.padding(top = 7.dp)
+                modifier = Modifier.padding(top = AppSpacing.xSmall)
             )
         }
+        BpRangeBar(state.bpRange, Modifier.padding(top = AppSpacing.small))
         if (risk) {
             Text(
                 "有读数达到 180/120 以上。请静坐休息后复测；伴胸痛、剧烈头痛等请立即就医。",
@@ -296,6 +308,29 @@ private fun ReadingHero(state: DashboardUiState) {
                     .clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.error).padding(11.dp)
             )
         }
+    }
+}
+
+/** 为右侧单位与脉搏保留空间，小屏或大字时按实际文字宽度调整血压字号。 */
+@Composable
+private fun HeroPressureValue(sys: Int, dia: Int, color: Color, modifier: Modifier = Modifier) {
+    val textMeasurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.displayMedium.copy(fontSize = 58.sp, lineHeight = 62.sp)
+    fun pressureText(scale: Float) = buildAnnotatedString {
+        append(sys.toString())
+        withStyle(SpanStyle(fontSize = (48 * scale).sp, fontWeight = FontWeight.Light, color = color.copy(alpha = 0.36f))) {
+            append("/")
+        }
+        append(dia.toString())
+    }
+    BoxWithConstraints(modifier) {
+        val fullWidth = textMeasurer.measure(pressureText(1f), style, softWrap = false, maxLines = 1).size.width
+        val scale = (constraints.maxWidth.toFloat() / fullWidth.coerceAtLeast(1)).coerceAtMost(1f)
+        Text(
+            pressureText(scale),
+            style = style.copy(fontSize = (58 * scale).sp, lineHeight = (62 * scale).sp),
+            color = color, softWrap = false, maxLines = 1
+        )
     }
 }
 
@@ -322,6 +357,9 @@ private fun EmptyHero(message: String, onAdd: (() -> Unit)?, showBuddy: Boolean)
                 Icon(Icons.Default.Add, null, Modifier.size(20.dp))
                 Text("记第一次血压")
             }
+        }
+        if (onAdd != null) {
+            BpRangeBar(BpRangeUiState.Empty, Modifier.padding(top = AppSpacing.small))
         }
     }
 }

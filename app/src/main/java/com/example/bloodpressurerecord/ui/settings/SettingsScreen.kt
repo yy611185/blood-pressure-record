@@ -56,6 +56,7 @@ import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.home.Buddy
+import com.example.bloodpressurerecord.ui.home.BpZoneTargetSheet
 
 private val restoreSystemEnter = fadeIn(AppMotion.floatFast) + expandVertically(AppMotion.sizeFast)
 private val restoreSystemExit = fadeOut(AppMotion.floatFast) + shrinkVertically(AppMotion.sizeFast)
@@ -70,6 +71,15 @@ fun SettingsScreen(
     onOpenInfo: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val targetEditorState by viewModel.zoneTargetEditorState.collectAsStateWithLifecycle()
+    targetEditorState?.let { editor ->
+        BpZoneTargetSheet(
+            state = editor,
+            onChange = viewModel::updateZoneTargetField,
+            onSave = viewModel::saveZoneTargetEditor,
+            onDismiss = viewModel::dismissZoneTargetEditor
+        )
+    }
     val systemDark = isSystemInDarkTheme()
     val darkEnabled = when (state.appearanceMode) {
         "dark" -> true
@@ -116,6 +126,11 @@ fun SettingsScreen(
                         TargetTile("目标低压", state.targetDiastolicText.ifBlank { "—" }, Modifier.weight(1f))
                     }
                 }
+            }
+            SettingsSectionTitle("血压")
+            SettingsGroup {
+                SettingRow("血压目标范围", "自定义首页血压分段范围", Icons.Outlined.FavoriteBorder,
+                    viewModel::openZoneTargetEditor)
             }
             SettingsSectionTitle("提醒")
             SettingsGroup {

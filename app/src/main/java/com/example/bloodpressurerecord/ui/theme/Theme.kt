@@ -6,6 +6,7 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -88,10 +89,12 @@ fun BloodPressureRecordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = AppTypography,
-        shapes = AppShapes,
-        content = content
-    )
+    CompositionLocalProvider(LocalBpRangeColors provides if (darkTheme) DarkBpRangeColors else LightBpRangeColors) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkColors else LightColors,
+            typography = AppTypography,
+            shapes = AppShapes,
+            content = content
+        )
+    }
 }

@@ -24,4 +24,28 @@
         <item quantity="one">%d 次测量</item>
         <item quantity="other">%d 次测量</item>
     </plurals>
+    <string name="bp_zone_low">偏低</string>
+    <string name="bp_zone_normal">正常</string>
+    <string name="bp_zone_elevated">偏高</string>
+    <string name="bp_zone_high">过高</string>
+    <string name="bp_range_description">收缩压 %1$d，舒张压 %2$d，属于%3$s区间</string>
+    <string name="bp_range_empty_description">还没有有效读数，测一次后显示你的区间</string>
+    <string name="bp_range_empty_hint">测一次后显示你的区间</string>
+    <string name="bp_range_edit_hint">目标范围可自定义</string>
+    <string name="bp_zone_config_title">自定义目标范围</string>
+    <string name="bp_zone_config_placeholder_note">默认数字只是占位示例，不构成医学标准，实际分级与默认目标范围待产品确认。</string>
+    <string name="bp_zone_config_help">单位为 mmHg。三个起点须严格递增，并在显示范围内；读数等于起点时进入更高一级。</string>
+    <string name="bp_zone_config_sys">收缩压</string>
+    <string name="bp_zone_config_dia">舒张压</string>
+    <string name="bp_zone_config_field_min">显示下限</string>
+    <string name="bp_zone_config_field_low_cut">正常起点</string>
+    <string name="bp_zone_config_field_normal_cut">偏高起点</string>
+    <string name="bp_zone_config_field_high_cut">过高起点</string>
+    <string name="bp_zone_config_field_max">显示上限</string>
+    <string name="bp_zone_config_field_description">%1$s，%2$s，单位 mmHg</string>
+    <string name="bp_zone_config_invalid">请填写正整数：下限须小于上限，三个起点须严格递增并在显示范围内。</string>
+    <string name="bp_zone_config_save_failed">保存失败，请重试。</string>
+    <string name="bp_zone_config_save">保存范围</string>
+    <string name="bp_zone_config_saving">正在保存…</string>
+    <string name="bp_zone_config_cancel">取消</string>
 </resources>

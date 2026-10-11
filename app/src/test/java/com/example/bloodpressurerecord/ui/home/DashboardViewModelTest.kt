@@ -1,6 +1,8 @@
 package com.example.bloodpressurerecord.ui.home
 
+import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
+import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
 import com.example.bloodpressurerecord.data.repository.CalendarSessionSummary
 import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
@@ -11,13 +13,19 @@ import com.example.bloodpressurerecord.data.repository.SessionRecord
 import com.example.bloodpressurerecord.data.repository.SessionSummary
 import com.example.bloodpressurerecord.data.repository.SessionReading
 import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
+import com.example.bloodpressurerecord.domain.model.BpZone
+import com.example.bloodpressurerecord.domain.model.BpZoneConfig
+import com.example.bloodpressurerecord.domain.model.BpZoneCuts
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
+import com.example.bloodpressurerecord.ui.settings.FakeTargetSettingsRepository
+import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -35,6 +43,125 @@ class DashboardViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
     private val zone = ZoneId.of("Asia/Taipei")
+
+    @Test
+    fun `dashboard waits for first persisted config`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val latest = latestSummary(record("reading", today, 8, 0, ""))
+            .copy(avgSystolic = 119, avgDiastolic = 75)
+        val delayedConfig = MutableSharedFlow<BpZoneConfig>()
+        val custom = BpZoneConfig.Default.copy(
+            sys = BpZoneConfig.Default.sys.copy(cuts = BpZoneCuts(90, 110, 130))
+        )
+        val vm = DashboardViewModel(
+            FakeRepository(emptyMap(), latestFlow = flowOf(latest)),
+            zoneId = zone,
+            todayTicks = flowOf(today),
+            zoneConfigRepository = FakeZoneConfigRepository(observedConfig = delayedConfig)
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.bpRangeState.collect {} }
+        runCurrent()
+        assertTrue(vm.uiState.value.loading)
+        assertEquals(BpRangeUiState.Empty, vm.bpRangeState.value)
+
+        delayedConfig.emit(custom)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.loading)
+        assertEquals(BpZone.ELEVATED, vm.bpRangeState.value.zone)
+    }
+
+    @Test
+    fun `range follows empty ready and deleted readings using one dashboard snapshot`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val latest = MutableStateFlow<LatestSessionSummary?>(null)
+        val configRepo = FakeZoneConfigRepository()
+        val vm = DashboardViewModel(
+            FakeRepository(emptyMap(), latestFlow = latest),
+            zoneId = zone,
+            todayTicks = flowOf(today),
+            zoneConfigRepository = configRepo
+        )
+        val emissions = mutableListOf<BpRangeUiState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.bpRangeState.collect { emissions += it }
+        }
+        advanceUntilIdle()
+        assertEquals(BpRangeUiState.Empty, vm.bpRangeState.value)
+
+        latest.value = latestSummary(record("newest", today, 20, 0, ""))
+            .copy(avgSystolic = 119, avgDiastolic = 75)
+        advanceUntilIdle()
+        val ready = vm.bpRangeState.value as BpRangeUiState.Ready
+        assertEquals(119, ready.sys)
+        assertEquals(75, ready.dia)
+        assertEquals(BpZone.NORMAL, ready.zone)
+        assertEquals(R.string.bp_zone_normal, ready.zoneLabelRes)
+        assertEquals(ready, vm.uiState.value.bpRange)
+        assertEquals(vm.uiState.value.latest?.avgSystolic, ready.sys)
+        assertEquals(vm.uiState.value.latest?.avgDiastolic, ready.dia)
+
+        latest.value = null
+        advanceUntilIdle()
+        assertEquals(BpRangeUiState.Empty, vm.bpRangeState.value)
+        assertEquals(listOf(BpRangeUiState.Empty, ready, BpRangeUiState.Empty), emissions)
+    }
+
+    @Test
+    fun `saving a target config from settings updates range without changing the latest reading`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val latest = latestSummary(record("reading", today, 8, 0, ""))
+            .copy(avgSystolic = 119, avgDiastolic = 75)
+        val configRepo = FakeZoneConfigRepository()
+        val vm = DashboardViewModel(
+            FakeRepository(emptyMap(), latestFlow = flowOf(latest)),
+            zoneId = zone,
+            todayTicks = flowOf(today),
+            zoneConfigRepository = configRepo
+        )
+        // 只订阅色条即可激活首页与目标配置；无需额外订阅 uiState。
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.bpRangeState.collect {} }
+        // 公开配置也是 WhileSubscribed，订阅后获得最新配置。
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.zoneConfig.collect {} }
+        advanceUntilIdle()
+        val before = vm.bpRangeState.value as BpRangeUiState.Ready
+        assertEquals(BpZone.NORMAL, before.zone)
+
+        val settings = SettingsViewModel(FakeTargetSettingsRepository(), zoneConfigRepository = configRepo)
+        settings.openZoneTargetEditor()
+        advanceUntilIdle()
+        settings.updateZoneTargetField(BpZoneAxis.SYS, BpZoneField.NORMAL_CUT, "110")
+        settings.updateZoneTargetField(BpZoneAxis.SYS, BpZoneField.HIGH_CUT, "130")
+        settings.saveZoneTargetEditor()
+        advanceUntilIdle()
+        val after = vm.bpRangeState.value as BpRangeUiState.Ready
+        assertEquals(BpZone.ELEVATED, after.zone)
+        assertEquals(R.string.bp_zone_elevated, after.zoneLabelRes)
+        assertTrue(after.position.percent > before.position.percent)
+        assertEquals(latest, vm.uiState.value.latest)
+        assertEquals(after, vm.uiState.value.bpRange)
+        assertEquals(BpZoneCuts(90, 110, 130), vm.zoneConfig.value.sys.cuts)
+        assertEquals(null, settings.zoneTargetEditorState.value)
+    }
+
+    @Test
+    fun `invalid latest reading produces empty range`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val latest = MutableStateFlow<LatestSessionSummary?>(
+            latestSummary(record("reading", today, 8, 0, "")).copy(avgSystolic = 0)
+        )
+        val vm = DashboardViewModel(
+            FakeRepository(emptyMap(), latestFlow = latest),
+            zoneId = zone,
+            todayTicks = flowOf(today)
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.bpRangeState.collect {} }
+        advanceUntilIdle()
+        assertEquals(BpRangeUiState.Empty, vm.bpRangeState.value)
+        latest.value = latest.value?.copy(avgSystolic = 119, avgDiastolic = -1)
+        advanceUntilIdle()
+        assertEquals(BpRangeUiState.Empty, vm.bpRangeState.value)
+        assertEquals(null, vm.bpRangeState.value.zone)
+    }
 
     @Test
     fun `跨零点后今日统计切换到新的一天`() = runTest {
@@ -273,6 +400,26 @@ class DashboardViewModelTest {
             Result.success(Unit)
         override suspend fun deleteSession(sessionId: String): Result<Unit> = Result.success(Unit)
         override suspend fun restoreSession(session: SessionRecord): Result<Unit> = Result.success(Unit)
+    }
+
+    private class FakeZoneConfigRepository(
+        initial: BpZoneConfig = BpZoneConfig.Default,
+        private val observedConfig: Flow<BpZoneConfig>? = null
+    ) : BpZoneConfigRepository {
+        private val config = MutableStateFlow(initial)
+        var saveResult: Result<Unit> = Result.success(Unit)
+        var saveGate: CompletableDeferred<Unit>? = null
+        var saveCalls = 0
+
+        override fun observeConfig(): Flow<BpZoneConfig> = observedConfig ?: config
+
+        override suspend fun saveConfig(config: BpZoneConfig): Result<Unit> {
+            saveCalls += 1
+            if (!config.isValid()) return Result.failure(IllegalArgumentException("Invalid target config"))
+            saveGate?.await()
+            if (saveResult.isSuccess) this.config.value = config
+            return saveResult
+        }
     }
 
     private class BlockingMedicationRepository : MedicationRepository {

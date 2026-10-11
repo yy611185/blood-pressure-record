@@ -3,7 +3,9 @@ package com.example.bloodpressurerecord.ui.settings
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
+import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
@@ -12,10 +14,21 @@ import com.example.bloodpressurerecord.data.repository.backup.BackupImportOption
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import com.example.bloodpressurerecord.data.repository.backup.BackupPassphraseException
 import com.example.bloodpressurerecord.data.repository.backup.BackupPassphraseRequiredException
+import com.example.bloodpressurerecord.domain.model.BpZoneConfig
+import com.example.bloodpressurerecord.ui.home.BpZoneAxis
+import com.example.bloodpressurerecord.ui.home.BpZoneField
+import com.example.bloodpressurerecord.ui.home.BpZoneTargetDraft
+import com.example.bloodpressurerecord.ui.home.BpZoneTargetEditorUiState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -69,10 +82,19 @@ data class SettingsUiState(
 
 class SettingsViewModel(
     private val repository: SettingsRepository,
-    private val medicationRepository: MedicationRepository? = null
+    private val medicationRepository: MedicationRepository? = null,
+    private val zoneConfigRepository: BpZoneConfigRepository? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+    private val mutableZoneTargetEditorState = MutableStateFlow<BpZoneTargetEditorUiState?>(null)
+    val zoneTargetEditorState: StateFlow<BpZoneTargetEditorUiState?> =
+        mutableZoneTargetEditorState.asStateFlow()
+    private var openZoneTargetEditorJob: Job? = null
+    // 始终观察持久化配置；打开编辑器时使用真实配置，不让默认占位值覆盖已保存目标。
+    private val zoneConfigFlow =
+        (zoneConfigRepository?.observeConfig() ?: flowOf(BpZoneConfig.Default))
+            .shareIn(viewModelScope, SharingStarted.Eagerly, replay = 1)
     private var isProfileDirty: Boolean = false
     /** 等待用户输入口令后继续预览的加密备份文件。 */
     private var pendingImportUri: Uri? = null
@@ -122,6 +144,60 @@ class SettingsViewModel(
                         lastSuccessfulExportAt = bundle.appSettings.lastSuccessfulExportAt
                     )
                 }
+            }
+        }
+    }
+
+    fun openZoneTargetEditor() {
+        if (mutableZoneTargetEditorState.value?.saving == true) return
+        openZoneTargetEditorJob?.cancel()
+        val loadedConfig = zoneConfigFlow.replayCache.lastOrNull()
+        if (loadedConfig != null) {
+            mutableZoneTargetEditorState.value = BpZoneTargetEditorUiState(BpZoneTargetDraft.from(loadedConfig))
+        } else {
+            openZoneTargetEditorJob = viewModelScope.launch {
+                val config = zoneConfigFlow.first()
+                mutableZoneTargetEditorState.value = BpZoneTargetEditorUiState(BpZoneTargetDraft.from(config))
+            }
+        }
+    }
+
+    fun updateZoneTargetField(axis: BpZoneAxis, field: BpZoneField, value: String) {
+        mutableZoneTargetEditorState.update { state ->
+            if (state == null || state.saving) state
+            else state.copy(draft = state.draft.update(axis, field, value), errorRes = null)
+        }
+    }
+
+    fun dismissZoneTargetEditor() {
+        if (mutableZoneTargetEditorState.value?.saving != true) {
+            openZoneTargetEditorJob?.cancel()
+            openZoneTargetEditorJob = null
+            mutableZoneTargetEditorState.value = null
+        }
+    }
+
+    fun saveZoneTargetEditor() {
+        val state = mutableZoneTargetEditorState.value ?: return
+        if (state.saving) return
+        val config = state.draft.toConfigOrNull()
+        if (config == null) {
+            mutableZoneTargetEditorState.value = state.copy(errorRes = R.string.bp_zone_config_invalid)
+            return
+        }
+        mutableZoneTargetEditorState.value = state.copy(saving = true, errorRes = null)
+        viewModelScope.launch {
+            try {
+                val result = zoneConfigRepository?.saveConfig(config)
+                    ?: Result.failure(IllegalStateException("Blood pressure target repository is unavailable"))
+                mutableZoneTargetEditorState.value = if (result.isSuccess) null
+                else state.copy(errorRes = R.string.bp_zone_config_save_failed)
+            } catch (error: Throwable) {
+                if (error is CancellationException) {
+                    mutableZoneTargetEditorState.value = state
+                    throw error
+                }
+                mutableZoneTargetEditorState.value = state.copy(errorRes = R.string.bp_zone_config_save_failed)
             }
         }
     }
