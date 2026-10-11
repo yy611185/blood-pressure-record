@@ -98,6 +98,16 @@ object AppReleaseNotes {
     val notes = listOf(
         ReleaseNote(
             version = AppInfoContent.CURRENT_VERSION,
+            summary = "新增应用内更新检查、下载安装和更新偏好。",
+            changes = listOf(
+                "应用说明页新增检查更新、自动检查、自动下载安装包和仅 Wi-Fi 下载设置，自动下载默认关闭。",
+                "支持延后 72 小时提醒、跳过指定版本及可继续使用的必要更新提示，录入、编辑和备份期间暂缓弹窗。",
+                "安装包通过可信 HTTPS 下载，支持前台续传、取消和重试；完成后检查大小、摘要、正式包名、版本和签名身份。",
+                "由用户确认通过 Android 系统安装器升级；健康记录、个人资料和备份不会上传，原有数据格式保持兼容。"
+            )
+        ),
+        ReleaseNote(
+            version = "2.3.2",
             summary = "首页新增血压区间示意条，支持本地自定义目标范围。",
             changes = listOf(
                 "最近一次读数下显示偏低、正常、偏高、过高四段示意条，三角标记与加粗标签显示所在区间。",

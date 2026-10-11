@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册，健康数据保存在手机里。仅为检查与下载软件更新联网。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.2-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.3-orange)
 
 ---
 
