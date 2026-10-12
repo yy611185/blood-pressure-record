@@ -9,6 +9,8 @@ import com.example.bloodpressurerecord.export.report.ReportTheme
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 
 data class ReportArtifact(val file: File, val plan: ReportLayoutPlan)
 
@@ -27,10 +29,11 @@ class DefaultReportGenerator(
         var pendingFile: File? = null
         try {
             return withContext(Dispatchers.IO) {
+                val taskContext = currentCoroutineContext()
                 val plan = ReportLayoutPlanner.plan(report, ReportTheme.layoutSpec, renderer.textMetrics())
                 val file = cache.create(report.period)
                 pendingFile = file
-                renderer.render(plan, file)
+                renderer.render(plan, file, isCancelled = { !taskContext.isActive })
                 ReportArtifact(file, plan)
             }
         } catch (error: Throwable) {

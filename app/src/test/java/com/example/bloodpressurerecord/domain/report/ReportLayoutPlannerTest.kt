@@ -161,6 +161,68 @@ class ReportLayoutPlannerTest {
         assertFalse(serialized.contains("私人药名"))
     }
 
+    @Test fun `三十及九十天日期横排而三百六十五天竖排且刻度完整`() {
+        val digitMetrics = ReportTextMetrics { text, size, _ -> text.length * size / 2 }
+        listOf(30 to false, 90 to false, 365 to true).forEach { (days, expectedVertical) ->
+            val plan = ReportLayoutPlanner.plan(report(days, listOf(record("one"))), spec, digitMetrics)
+            val labels = (plan.pages.first() as ReportPage.Summary).dateLabels
+            val expectedIndices = (0 until days step spec.trendLabelInterval).toMutableList().apply {
+                if (last() != days - 1) add(days - 1)
+            }
+            assertEquals(expectedIndices, labels.map { it.dayIndex })
+            assertTrue(labels.all { it.vertical == expectedVertical })
+            labels.forEach { label ->
+                val day = plan.report.period.startDate.plusDays(label.dayIndex.toLong())
+                assertEquals("${day.monthValue}/${day.dayOfMonth}", label.text)
+            }
+            if (!expectedVertical) assertTrue(labels.all { it.xOffset == 0f })
+        }
+    }
+
+    @Test fun `最后一天恰为五日刻度时不重复标签`() {
+        val plan = ReportLayoutPlanner.plan(report(31, listOf(record("one"))), spec, metrics)
+        val labels = (plan.pages.first() as ReportPage.Summary).dateLabels
+        assertEquals(listOf(0, 5, 10, 15, 20, 25, 30), labels.map { it.dayIndex })
+        assertEquals(1, labels.count { it.dayIndex == 30 })
+    }
+
+    @Test fun `竖排末日标签靠近前刻度时只右移文字以保留最小间距`() {
+        val plan = ReportLayoutPlanner.plan(report(365, listOf(record("one"))), spec, metrics)
+        val labels = (plan.pages.first() as ReportPage.Summary).dateLabels
+        val previous = labels[labels.lastIndex - 1]
+        val last = labels.last()
+        val slotWidth = spec.trendPlotWidth / plan.report.period.dayCount
+        val originalSeparation = (last.dayIndex - previous.dayIndex) * slotWidth
+        assertTrue(last.vertical)
+        assertEquals(364, last.dayIndex)
+        assertTrue(last.xOffset > 0f)
+        assertEquals(spec.tinySize + spec.trendLabelGap, originalSeparation + last.xOffset, 0.001f)
+        assertTrue(labels.dropLast(1).all { it.xOffset == 0f })
+        assertTrue(last.xOffset < spec.margin)
+    }
+
+    @Test fun `九十二天横排末日只隔一格时右移文字避免相撞且三十天不变`() {
+        val digitMetrics = ReportTextMetrics { text, size, _ -> text.length * size / 2 }
+        val plan = ReportLayoutPlanner.plan(report(92, listOf(record("one"))), spec, digitMetrics)
+        val labels = (plan.pages.first() as ReportPage.Summary).dateLabels
+        assertEquals((0..90 step 5).toList() + 91, labels.map { it.dayIndex })
+        assertTrue(labels.none { it.vertical })
+        val previous = labels[labels.lastIndex - 1]
+        val last = labels.last()
+        val slotWidth = spec.trendPlotWidth / plan.report.period.dayCount
+        val previousRight = previous.dayIndex * slotWidth + digitMetrics.width(previous.text, spec.tinySize, false) / 2
+        val lastLeft = last.dayIndex * slotWidth + last.xOffset - digitMetrics.width(last.text, spec.tinySize, false) / 2
+        assertTrue(last.xOffset > 0f)
+        assertEquals(spec.trendLabelGap, lastLeft - previousRight, 0.001f)
+        assertTrue(last.xOffset < spec.margin)
+        assertTrue(labels.dropLast(1).all { it.xOffset == 0f })
+
+        val ordinary = ReportLayoutPlanner.plan(report(30, listOf(record("one"))), spec, digitMetrics)
+        val ordinaryLabels = (ordinary.pages.first() as ReportPage.Summary).dateLabels
+        assertTrue(ordinaryLabels.all { !it.vertical && it.xOffset == 0f })
+        assertEquals(listOf(0, 5, 10, 15, 20, 25, 29), ordinaryLabels.map { it.dayIndex })
+    }
+
     private fun report(days: Int, records: List<ReportMeasurement>): BpReport = requireNotNull(ReportBuilder.build(
         ReportSnapshot(records), ReportPeriod(date.minusDays(days.toLong() - 1), date, zone), ReportOptions(), 0))
 

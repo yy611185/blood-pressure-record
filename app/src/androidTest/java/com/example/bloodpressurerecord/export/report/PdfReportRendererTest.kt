@@ -39,12 +39,13 @@ class PdfReportRendererTest {
             val period = period(dayCount)
             val report = requireNotNull(ReportBuilder.build(fixture(dayCount), period, ReportOptions(), period.endExclusive - 1))
             val plan = ReportLayoutPlanner.plan(report, ReportTheme.layoutSpec, renderer.textMetrics())
-            val file = File(context.cacheDir, "render-$dayCount.pdf")
+            val file = if (dayCount == 365) File(context.filesDir, "report-layout-365.pdf")
+                else File(context.cacheDir, "render-$dayCount.pdf")
             file.delete()
             try {
                 renderer.render(plan, file)
                 inspect(file, plan.pageCount)
-            } finally { file.delete() }
+            } finally { if (dayCount != 365) file.delete() }
         }
     }
 

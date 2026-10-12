@@ -25,16 +25,22 @@ data class ReportLayoutSpec(
     val summaryMedicationCount: Int = 2,
     val summaryMedicationLabelWidth: Float = 150f,
     val summaryMedicationTimeWidth: Float = 95f,
-    val supplementLinesPerPage: Int = 30
+    val supplementLinesPerPage: Int = 30,
+    val trendPlotWidth: Float = 449.28f,
+    val trendLabelInterval: Int = 5,
+    val trendLabelGap: Float = 2f
 ) {
     init {
         require(detailRowsPerPage > 0 && supplementLinesPerPage > 0)
         require(summaryNoteLines >= 0 && summaryMedicationCount >= 0)
         require(contentWidth > 0 && noteColumnWidth > cellPadding * 2)
+        require(trendPlotWidth > 0 && trendLabelInterval > 0 && trendLabelGap >= 0 && tinySize > 0)
     }
 }
 
 data class ReportTextLine(val text: String, val bold: Boolean = false, val prefix: String? = null)
+/** xOffset only shifts the date label; its measurement point and axis tick stay at the day slot center. */
+data class TrendDateLabel(val dayIndex: Int, val text: String, val vertical: Boolean, val xOffset: Float = 0f)
 data class ReportDetailRow(
     val date: LocalDate, val morning: ReportMeasurement?, val evening: ReportMeasurement?, val noteText: String
 )
@@ -43,7 +49,8 @@ sealed interface ReportPage {
         val noteLines: List<ReportTextLine>,
         val medications: List<ReportMedicationSummary>,
         val hiddenMedicationCount: Int,
-        val hiddenNoteCount: Int
+        val hiddenNoteCount: Int,
+        val dateLabels: List<TrendDateLabel> = emptyList()
     ) : ReportPage
     data class DailyDetail(val rows: List<ReportDetailRow>) : ReportPage
     data class Supplement(val lines: List<ReportTextLine>) : ReportPage
@@ -55,6 +62,7 @@ data class ReportLayoutPlan(val report: BpReport, val pages: List<ReportPage>) {
 object ReportLayoutPlanner {
     private val dateFormat = DateTimeFormatter.ofPattern("MM-dd")
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
+    private val trendDateFormat = DateTimeFormatter.ofPattern("M/d")
 
     fun plan(report: BpReport, spec: ReportLayoutSpec, metrics: ReportTextMetrics): ReportLayoutPlan {
         val notesByMeasurement = report.notes.associateBy { it.measurementId }
@@ -126,11 +134,29 @@ object ReportLayoutPlanner {
         return ReportLayoutPlan(report, buildList {
             add(ReportPage.Summary(
                 summaryLines, report.medications.take(spec.summaryMedicationCount), extraMedications.size,
-                report.notes.size - completedSummaryNotes
+                report.notes.size - completedSummaryNotes, trendDateLabels(report, spec, metrics)
             ))
             rows.chunked(spec.detailRowsPerPage).forEach { add(ReportPage.DailyDetail(it)) }
             supplement.chunked(spec.supplementLinesPerPage).forEach { add(ReportPage.Supplement(it)) }
         })
+    }
+
+    private fun trendDateLabels(report: BpReport, spec: ReportLayoutSpec, metrics: ReportTextMetrics): List<TrendDateLabel> {
+        val indices = report.days.indices.filter { it % spec.trendLabelInterval == 0 || it == report.days.lastIndex }
+        val texts = indices.map { trendDateFormat.format(report.days[it].date) }
+        val slotWidth = spec.trendPlotWidth / report.period.dayCount
+        val labelWidths = texts.map { metrics.width(it, spec.tinySize, false) }
+        val maxLabelWidth = labelWidths.maxOrNull() ?: 0f
+        val vertical = slotWidth * spec.trendLabelInterval < maxLabelWidth + spec.trendLabelGap
+        return indices.mapIndexed { index, dayIndex ->
+            val offset = if (index == indices.lastIndex && index > 0) {
+                val separation = (dayIndex - indices[index - 1]) * slotWidth
+                val minimumSeparation = if (vertical) spec.tinySize + spec.trendLabelGap else
+                    (labelWidths[index - 1] + labelWidths[index]) / 2 + spec.trendLabelGap
+                (minimumSeparation - separation).coerceAtLeast(0f)
+            } else 0f
+            TrendDateLabel(dayIndex, texts[index], vertical, offset)
+        }
     }
 
     private fun fitSingleLine(text: String, width: Float, size: Float, metrics: ReportTextMetrics): String {

@@ -1,24 +1,29 @@
 package com.example.bloodpressurerecord.export.report
 
 import android.graphics.Canvas
+import android.graphics.Bitmap
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withClip
+import androidx.core.graphics.withRotation
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.domain.report.*
 import java.io.File
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.CancellationException
+import kotlin.math.roundToInt
 
 /** Android drawing only: statistics, text wrapping and page breaks are planned in the domain layer. */
 class PdfReportRenderer(private val appName: String) {
     private val regular = Typeface.DEFAULT
     private val bold = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.SIMPLIFIED_CHINESE)
-    private val shortDate = DateTimeFormatter.ofPattern("M/d", Locale.SIMPLIFIED_CHINESE)
     private val detailDate = DateTimeFormatter.ofPattern("MM-dd E", Locale.SIMPLIFIED_CHINESE)
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.SIMPLIFIED_CHINESE)
 
@@ -27,7 +32,12 @@ class PdfReportRenderer(private val appName: String) {
     }
 
     /** Publish only a complete PDF. A failed render cannot leave a readable partial report. */
-    fun render(plan: ReportLayoutPlan, target: File, pageIndices: List<Int>? = null) {
+    fun render(
+        plan: ReportLayoutPlan,
+        target: File,
+        pageIndices: List<Int>? = null,
+        isCancelled: () -> Boolean = { false }
+    ) {
         val indices = pageIndices ?: plan.pages.indices.toList()
         require(indices.isNotEmpty() && indices.distinct().size == indices.size)
         require(indices.all { it in plan.pages.indices })
@@ -39,6 +49,7 @@ class PdfReportRenderer(private val appName: String) {
             val document = PdfDocument()
             try {
                 indices.forEachIndexed { outputIndex, pageIndex ->
+                    checkCancellation(isCancelled)
                     val info = PdfDocument.PageInfo.Builder(
                         ReportTheme.PAGE_WIDTH, ReportTheme.PAGE_HEIGHT, outputIndex + 1
                     ).create()
@@ -56,7 +67,9 @@ class PdfReportRenderer(private val appName: String) {
                         document.finishPage(page)
                     }
                 }
+                checkCancellation(isCancelled)
                 partial.outputStream().use(document::writeTo)
+                checkCancellation(isCancelled)
             } finally {
                 document.close()
             }
@@ -66,10 +79,38 @@ class PdfReportRenderer(private val appName: String) {
         }
     }
 
+    /** Draw the same planned summary at an export resolution independent of display density. */
+    fun summaryBitmap(plan: ReportLayoutPlan): Bitmap {
+        val summary = plan.pages.firstOrNull() as? ReportPage.Summary
+            ?: error("Report has no summary page")
+        val scale = ReportTheme.SUMMARY_IMAGE_DPI / ReportTheme.POINTS_PER_INCH
+        val bitmap = createBitmap(
+            (ReportTheme.A4_WIDTH * scale).roundToInt(),
+            (ReportTheme.A4_HEIGHT * scale).roundToInt(),
+            Bitmap.Config.ARGB_8888
+        )
+        bitmap.density = ReportTheme.SUMMARY_IMAGE_DPI
+        try {
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(ReportTheme.WHITE)
+            canvas.scale(scale, scale)
+            drawSummary(canvas, plan.report, summary)
+            drawFooter(canvas, 1, plan.pageCount)
+            return bitmap
+        } catch (failure: Throwable) {
+            bitmap.recycle()
+            throw failure
+        }
+    }
+
+    private fun checkCancellation(isCancelled: () -> Boolean) {
+        if (isCancelled()) throw CancellationException("Report output cancelled")
+    }
+
     private fun drawSummary(canvas: Canvas, report: BpReport, summary: ReportPage.Summary): Float {
         drawSummaryHeader(canvas, report)
         drawCore(canvas, report)
-        drawTrend(canvas, report)
+        drawTrend(canvas, report, summary)
         drawDistribution(canvas, report)
         drawMedications(canvas, summary)
         drawNotes(canvas, summary)
@@ -123,7 +164,7 @@ class PdfReportRenderer(private val appName: String) {
         return ReportTheme.COVERAGE_Y - ReportTheme.CORE_TOP
     }
 
-    private fun drawTrend(canvas: Canvas, report: BpReport): Float {
+    private fun drawTrend(canvas: Canvas, report: BpReport, summary: ReportPage.Summary): Float {
         text(canvas, "血压趋势", ReportTheme.MARGIN, ReportTheme.TREND_TITLE_Y,
             ReportTheme.SECTION_SIZE, bold = true)
         drawLegend(canvas)
@@ -149,11 +190,18 @@ class PdfReportRenderer(private val appName: String) {
         }
         val slot = (plotRight - left) / report.period.dayCount
         fun pointX(index: Int) = left + (index + 0.5f) * slot
-        report.days.forEachIndexed { index, day ->
-            if (index % ReportTheme.X_LABEL_INTERVAL == 0 || index == report.days.lastIndex) {
-                val x = pointX(index)
-                line(canvas, x, bottom, x, bottom + ReportTheme.AXIS_TICK_LENGTH, ReportTheme.AXIS)
-                text(canvas, shortDate.format(day.date), x, bottom + ReportTheme.X_LABEL_OFFSET,
+        summary.dateLabels.forEach { label ->
+            val tickX = pointX(label.dayIndex)
+            val x = tickX + label.xOffset
+            line(canvas, tickX, bottom, tickX, bottom + ReportTheme.AXIS_TICK_LENGTH, ReportTheme.AXIS)
+            if (label.vertical) {
+                val anchorY = bottom + ReportTheme.X_VERTICAL_LABEL_OFFSET
+                canvas.withRotation(ReportTheme.X_LABEL_ROTATION, x, anchorY) {
+                    text(this, label.text, x, anchorY, ReportTheme.TINY_SIZE,
+                        ReportTheme.SECONDARY_TEXT, align = Paint.Align.RIGHT)
+                }
+            } else {
+                text(canvas, label.text, x, bottom + ReportTheme.X_LABEL_OFFSET,
                     ReportTheme.TINY_SIZE, ReportTheme.SECONDARY_TEXT, align = Paint.Align.CENTER)
             }
         }
@@ -187,10 +235,15 @@ class PdfReportRenderer(private val appName: String) {
         if (report.days.any { day -> listOfNotNull(day.average.systolic, day.average.diastolic,
                 day.systolicMin, day.systolicMax, day.diastolicMin, day.diastolicMax)
                 .any { it !in ReportTheme.AXIS_MIN..ReportTheme.AXIS_MAX } }) {
-            text(canvas, "箭头表示超出图示范围，完整读数见明细。", ReportTheme.MARGIN,
+            text(canvas, "箭头表示超出图示范围，完整读数见明细。", ReportTheme.OVERFLOW_NOTICE_X,
                 ReportTheme.OVERFLOW_NOTICE_Y, ReportTheme.TINY_SIZE, ReportTheme.SECONDARY_TEXT)
         }
-        return bottom + ReportTheme.X_LABEL_OFFSET - ReportTheme.TREND_TITLE_Y
+        val labelExtent = summary.dateLabels.maxOfOrNull { label ->
+            if (label.vertical) ReportTheme.X_VERTICAL_LABEL_OFFSET +
+                textMetrics().width(label.text, ReportTheme.TINY_SIZE, false)
+            else ReportTheme.X_LABEL_OFFSET
+        } ?: ReportTheme.X_LABEL_OFFSET
+        return bottom + labelExtent - ReportTheme.TREND_TITLE_Y
     }
 
     private fun drawLegend(canvas: Canvas) {
@@ -429,12 +482,11 @@ class PdfReportRenderer(private val appName: String) {
 
     private fun cell(canvas: Canvas, value: String, x: Float, top: Float, width: Float,
         bold: Boolean = false) {
-        canvas.save()
-        canvas.clipRect(x + ReportTheme.CELL_PADDING, top, x + width - ReportTheme.CELL_PADDING,
-            top + ReportTheme.TABLE_ROW_HEIGHT)
-        text(canvas, value, x + ReportTheme.CELL_PADDING, top + ReportTheme.CELL_BASELINE_OFFSET,
-            ReportTheme.BODY_SIZE, bold = bold)
-        canvas.restore()
+        canvas.withClip(x + ReportTheme.CELL_PADDING, top, x + width - ReportTheme.CELL_PADDING,
+            top + ReportTheme.TABLE_ROW_HEIGHT) {
+            text(this, value, x + ReportTheme.CELL_PADDING, top + ReportTheme.CELL_BASELINE_OFFSET,
+                ReportTheme.BODY_SIZE, bold = bold)
+        }
     }
 
     private fun clippedText(canvas: Canvas, value: String, x: Float, y: Float, width: Float,

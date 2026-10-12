@@ -13,12 +13,18 @@ object ReportTheme {
         summaryMedicationCount = SUMMARY_MEDICATION_COUNT,
         summaryMedicationLabelWidth = MEDICATION_LABEL_WIDTH,
         summaryMedicationTimeWidth = MEDICATION_TIME_WIDTH,
-        supplementLinesPerPage = SUPPLEMENT_LINES
+        supplementLinesPerPage = SUPPLEMENT_LINES,
+        trendPlotWidth = CONTENT_WIDTH - PLOT_LEFT_INSET - PLOT_RIGHT_INSET,
+        trendLabelInterval = X_LABEL_INTERVAL,
+        trendLabelGap = X_LABEL_GAP
     )
     const val PAGE_WIDTH = 595
     const val PAGE_HEIGHT = 842
     const val A4_WIDTH = 595.28f
     const val A4_HEIGHT = 841.89f
+    const val POINTS_PER_INCH = 72f
+    const val SUMMARY_IMAGE_DPI = 150
+    const val PRINT_COPY_BUFFER_BYTES = 8192
     const val MARGIN = 40f
     const val CONTENT_WIDTH = 515.28f
     const val FOOTER_LINE_Y = 786f
@@ -60,6 +66,9 @@ object ReportTheme {
     const val AXIS_LABEL_BASELINE_OFFSET = 2.5f
     const val AXIS_TICK_LENGTH = 3f
     const val X_LABEL_OFFSET = 14f
+    const val X_VERTICAL_LABEL_OFFSET = 5f
+    const val X_LABEL_ROTATION = -90f
+    const val X_LABEL_GAP = 2f
     const val X_LABEL_INTERVAL = 5
     const val REFERENCE_SYSTOLIC = 140
     const val REFERENCE_DIASTOLIC = 90
@@ -74,7 +83,8 @@ object ReportTheme {
     const val DIASTOLIC_RADIUS = 3.3f
     const val DIASTOLIC_STROKE = 1.2f
     const val OVERFLOW_ARROW = 3f
-    const val OVERFLOW_NOTICE_Y = 486f
+    const val OVERFLOW_NOTICE_X = 90f
+    const val OVERFLOW_NOTICE_Y = 249f
     const val DISTRIBUTION_TITLE_Y = 503f
     const val HALF_GAP = 12f
     const val DISTRIBUTION_ROW_TOP = 518f
