@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord
 
 import android.content.Context
+import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.datastore.appDataStore
 import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
@@ -24,6 +25,13 @@ import com.example.bloodpressurerecord.update.UpdateDownloadManager
 import com.example.bloodpressurerecord.update.UpdateVerifier
 import com.example.bloodpressurerecord.update.UpdateInstaller
 import com.example.bloodpressurerecord.update.UpdatePromptGate
+import com.example.bloodpressurerecord.data.repository.ReportRepository
+import com.example.bloodpressurerecord.data.repository.DefaultReportRepository
+import com.example.bloodpressurerecord.export.report.PdfReportRenderer
+import com.example.bloodpressurerecord.export.report.ReportCache
+import com.example.bloodpressurerecord.ui.report.ReportGenerator
+import com.example.bloodpressurerecord.ui.report.DefaultReportGenerator
+import java.io.File
 
 interface AppContainer {
     val bpZoneConfigRepository: BpZoneConfigRepository
@@ -38,6 +46,9 @@ interface AppContainer {
     val updateDownloadManager: UpdateDownloadManager
     val updateInstaller: UpdateInstaller
     val updatePromptGate: UpdatePromptGate
+    val reportRepository: ReportRepository
+    val reportCache: ReportCache
+    val reportGenerator: ReportGenerator
 }
 
 class DefaultAppContainer(context: Context) : AppContainer {
@@ -52,6 +63,11 @@ class DefaultAppContainer(context: Context) : AppContainer {
     }
     override val updateInstaller by lazy { UpdateInstaller(appContext, updateVerifier) }
     override val updatePromptGate = UpdatePromptGate()
+    override val reportRepository: ReportRepository by lazy { DefaultReportRepository(database) }
+    override val reportCache by lazy { ReportCache(File(appContext.cacheDir, "reports")) }
+    override val reportGenerator: ReportGenerator by lazy {
+        DefaultReportGenerator(PdfReportRenderer(appContext.getString(R.string.app_name)), reportCache)
+    }
 
     override val bpZoneConfigRepository: BpZoneConfigRepository by lazy {
         DefaultBpZoneConfigRepository(appContext.appDataStore)

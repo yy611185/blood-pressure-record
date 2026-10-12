@@ -54,6 +54,8 @@ import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.record.AddMeasurementScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsDataManagementScreen
+import com.example.bloodpressurerecord.ui.report.ReportScreen
+import com.example.bloodpressurerecord.ui.report.ReportViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsProfileScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsReminderScreen
@@ -348,7 +350,15 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                 }
                 composable(AppDestination.SettingsDataManagement.route) {
                     val vm: SettingsViewModel = viewModel(factory = factory)
-                    SettingsDataManagementScreen(viewModel = vm, onBack = { navController.popBackStack() })
+                    SettingsDataManagementScreen(
+                        viewModel = vm,
+                        onBack = { navController.popBackStack() },
+                        onOpenDoctorReport = { navController.navigate(AppDestination.DoctorReport.route) }
+                    )
+                }
+                composable(AppDestination.DoctorReport.route) {
+                    val vm: ReportViewModel = viewModel(factory = factory)
+                    ReportScreen(viewModel = vm, onBack = { navController.popBackStack() })
                 }
                 composable(AppDestination.SettingsInfo.route) {
                     SettingsInfoScreen(

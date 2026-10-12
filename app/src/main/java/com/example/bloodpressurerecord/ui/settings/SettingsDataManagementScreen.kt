@@ -55,7 +55,8 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun SettingsDataManagementScreen(
     viewModel: SettingsViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenDoctorReport: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var exportPassphrase by remember { mutableStateOf("") }
@@ -441,6 +442,11 @@ fun SettingsDataManagementScreen(
             }
 
             Text("导出与备份", style = MaterialTheme.typography.titleMedium)
+            AppSecondaryButton(
+                text = "导出医生报告 PDF",
+                onClick = { if (!uiState.isDataActionRunning) onOpenDoctorReport() },
+                modifier = Modifier.fillMaxWidth()
+            )
             Text("超过 5000 条记录会自动分卷，明文和加密备份均可逐卷保存与恢复。", style = MaterialTheme.typography.bodySmall)
             AppPrimaryButton(
                 text = if (uiState.isDataActionRunning) "正在处理..." else "导出为 Excel (.xlsx)",

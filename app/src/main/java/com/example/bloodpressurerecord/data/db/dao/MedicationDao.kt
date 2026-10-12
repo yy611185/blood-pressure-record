@@ -36,6 +36,19 @@ interface MedicationDao {
     @Query("SELECT * FROM medication_intake_logs WHERE epochDay = :epochDay")
     suspend fun getLogsForDay(epochDay: Long): List<MedicationIntakeLogEntity>
 
+    /** 报告按打卡归属自然日读取，操作时间 takenAt 不改变归属。 */
+    @Query(
+        """
+        SELECT * FROM medication_intake_logs
+        WHERE epochDay >= :startInclusiveEpochDay AND epochDay < :endExclusiveEpochDay
+        ORDER BY epochDay ASC, timeId ASC, id ASC
+        """
+    )
+    suspend fun getLogsInRange(
+        startInclusiveEpochDay: Long,
+        endExclusiveEpochDay: Long
+    ): List<MedicationIntakeLogEntity>
+
     @Query("SELECT * FROM medication_intake_logs ORDER BY epochDay ASC, timeId ASC")
     suspend fun getAllLogs(): List<MedicationIntakeLogEntity>
 

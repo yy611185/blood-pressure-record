@@ -25,6 +25,7 @@ sealed class AppDestination(
     data object SettingsReminder : AppDestination("settings/reminder", "提醒设置", Icons.Outlined.Settings)
     data object SettingsDisplay : AppDestination("settings/display", "显示设置", Icons.Outlined.Settings)
     data object SettingsDataManagement : AppDestination("settings/data", "数据管理", Icons.Outlined.Settings)
+    data object DoctorReport : AppDestination("settings/data/report", "导出医生报告", Icons.Outlined.Settings)
     data object SettingsInfo : AppDestination("settings/info", "应用说明与更新说明", Icons.Outlined.Settings)
     data object SettingsInfoAppGuide : AppDestination("settings/info/app-guide", "应用说明", Icons.Outlined.Settings)
     data object SettingsInfoReleaseNotes : AppDestination("settings/info/release-notes", "更新说明", Icons.Outlined.Settings)

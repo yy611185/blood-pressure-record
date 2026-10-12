@@ -14,6 +14,7 @@ import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import kotlinx.coroutines.flow.map
 import com.example.bloodpressurerecord.update.UpdateViewModel
+import com.example.bloodpressurerecord.ui.report.ReportViewModel
 
 class AppViewModelFactory(
     private val application: Application
@@ -37,6 +38,9 @@ class AppViewModelFactory(
         // 用精确类型匹配而非 isAssignableFrom：后者方向容易写反，
         // 请求 ViewModel 基类时会错误命中第一个分支。
         return when (modelClass) {
+            ReportViewModel::class.java -> {
+                ReportViewModel(container.reportRepository, container.reportGenerator) as T
+            }
             HomeViewModel::class.java -> {
                 HomeViewModel(
                     repository = container.bloodPressureRepository,
