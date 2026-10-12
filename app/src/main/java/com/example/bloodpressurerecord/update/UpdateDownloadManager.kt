@@ -25,8 +25,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
 import java.net.URL
 import java.util.Properties
 import javax.net.ssl.HttpsURLConnection
@@ -37,10 +35,9 @@ data class UpdateDownloadState(
     val phase: UpdateDownloadPhase = UpdateDownloadPhase.IDLE,
     val manifest: UpdateManifest? = null,
     val downloadedBytes: Long = 0,
-    val message: String? = null
+    val message: String? = null,
+    val source: String? = null
 )
-
-private class UpdateTransferException(message: String) : IOException(message)
 
 /** Single application-owned foreground transfer; no health repository or backup data is referenced. */
 class UpdateDownloadManager(
@@ -174,7 +171,7 @@ class UpdateDownloadManager(
                         return@withLock
                     }
                 }
-                UpdateUrls.validateApk(manifest.url, manifest.version, manifest.apk)
+                updateDownloadCandidates(manifest).forEach { UpdateUrls.validateApk(it, manifest.version, manifest.apk) }
                 if (manifest.size !in 1..UpdateDownloadSafety.MAX_BYTES || manifest.versionCode <= BuildConfig.VERSION_CODE) {
                     throw UpdateVerificationException("更新版本或安装包大小不符合要求")
                 }
@@ -192,6 +189,12 @@ class UpdateDownloadManager(
                     automaticPaused = false
                     saveTask(manifest)
                 } else {
+                    // Mirrors may be added to a previously saved task without changing its identity.
+                    if (previous.manifest?.mirrors != manifest.mirrors) {
+                        stopTransfer()
+                        mutableState.value = mutableState.value.copy(manifest = manifest)
+                        saveTask(manifest, state.value.phase)
+                    }
                     if (automatic && this@UpdateDownloadManager.automatic) {
                         automaticPaused = false
                     }
@@ -350,101 +353,39 @@ class UpdateDownloadManager(
         try {
             partialDir.mkdirs()
             verifiedDir.mkdirs()
-            var offset = partial.length()
-            if (offset > manifest.size) {
-                throw UpdateVerificationException("已下载文件超过预期大小")
-            }
-            if (partialDir.usableSpace < manifest.size - offset + UpdateDownloadSafety.STORAGE_RESERVE) {
-                throw UpdateTransferException("存储空间不足，请至少保留安装包大小及 64 MB 空间")
-            }
-            if (offset < manifest.size) {
-                currentCoroutineContext().ensureActive()
-                if (!foreground || eligibleNetwork() != network) {
-                    throw CancellationException()
-                }
-                val https = network.openConnection(URL(manifest.url)) as? HttpsURLConnection
+            val transferContext = currentCoroutineContext()
+            val downloader = UpdateHttpDownload(openConnection = { url ->
+                network.openConnection(URL(url)) as? HttpsURLConnection
                     ?: throw UpdateVerificationException("更新下载必须使用 HTTPS")
-                connection = https
-                https.instanceFollowRedirects = false
-                https.connectTimeout = 10_000
-                https.readTimeout = 15_000
-                https.setRequestProperty("Accept-Encoding", "identity")
-                if (offset > 0) {
-                    https.setRequestProperty("Range", "bytes=$offset-")
+            })
+            downloader.download(
+                candidates = updateDownloadCandidates(manifest), partial = partial, expectedSize = manifest.size,
+                checkActive = {
+                    transferContext.ensureActive()
+                    if (!foreground || eligibleNetwork() != network) throw CancellationException()
+                },
+                onConnection = { connection = it as? HttpsURLConnection },
+                onSource = { url ->
+                    mutableState.value = mutableState.value.copy(phase = UpdateDownloadPhase.DOWNLOADING,
+                        downloadedBytes = partial.length(), source = updateDownloadSource(url), message = null)
+                },
+                onProgress = { bytes ->
+                    mutableState.value = mutableState.value.copy(downloadedBytes = bytes)
+                },
+                verifyFile = { file ->
+                    transferContext.ensureActive()
+                    mutableState.value = mutableState.value.copy(phase = UpdateDownloadPhase.VERIFYING,
+                        downloadedBytes = file.length())
+                    verifier.verify(file, manifest)
                 }
-                val response = https.responseCode
-                val responseBytes = when (response) {
-                    200 -> {
-                        offset = 0
-                        manifest.size
-                    }
-                    206 -> UpdateDownloadSafety.requireRange(https.getHeaderField("Content-Range"), offset, manifest.size)
-                    in 300..399 -> throw UpdateVerificationException("服务器返回了不允许的下载重定向")
-                    else -> throw UpdateTransferException("下载服务暂时不可用（HTTP $response）")
-                }
-                val length = https.getHeaderFieldLong("Content-Length", -1)
-                if (length >= 0 && length != responseBytes) {
-                    throw UpdateVerificationException("下载响应大小与清单不一致")
-                }
-                val encoding = https.getHeaderField("Content-Encoding")
-                if (!encoding.isNullOrBlank() && !encoding.equals("identity", true)) {
-                    throw UpdateVerificationException("下载响应编码不受支持")
-                }
-                if (partialDir.usableSpace < manifest.size - offset + UpdateDownloadSafety.STORAGE_RESERVE) {
-                    throw UpdateTransferException("存储空间不足，无法继续下载")
-                }
-                mutableState.value = UpdateDownloadState(UpdateDownloadPhase.DOWNLOADING, manifest, offset)
-                var received = 0L
-                var lastProgress = 0L
-                https.inputStream.buffered().use { input ->
-                    FileOutputStream(partial, offset > 0).use { output ->
-                        val buffer = ByteArray(32 * 1024)
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            if (!foreground || eligibleNetwork() != network) {
-                                throw CancellationException()
-                            }
-                            val count = input.read(buffer)
-                            if (count < 0) {
-                                break
-                            }
-                            currentCoroutineContext().ensureActive()
-                            if (!foreground || eligibleNetwork() != network) {
-                                throw CancellationException()
-                            }
-                            UpdateDownloadSafety.requireWriteFits(offset, count, manifest.size)
-                            if (received > responseBytes - count) {
-                                throw UpdateVerificationException("下载响应超过声明范围")
-                            }
-                            if (partialDir.usableSpace < UpdateDownloadSafety.STORAGE_RESERVE + count) {
-                                throw UpdateTransferException("存储空间不足，下载已暂停")
-                            }
-                            output.write(buffer, 0, count)
-                            offset += count
-                            received += count
-                            val now = android.os.SystemClock.elapsedRealtime()
-                            if (now - lastProgress >= 500) {
-                                mutableState.value = mutableState.value.copy(downloadedBytes = offset)
-                                lastProgress = now
-                            }
-                        }
-                        output.fd.sync()
-                    }
-                }
-                if (received != responseBytes) {
-                    throw UpdateTransferException("下载连接中断，可重试续传")
-                }
-            }
-            currentCoroutineContext().ensureActive()
-            mutableState.value = UpdateDownloadState(UpdateDownloadPhase.VERIFYING, manifest, partial.length())
-            verifier.verify(partial, manifest)
+            )
             currentCoroutineContext().ensureActive()
             val completed = completedFile(manifest)
             if (!partial.renameTo(completed)) {
                 throw UpdateTransferException("无法保存校验后的安装包")
             }
-            mutableState.value = UpdateDownloadState(UpdateDownloadPhase.READY, manifest, manifest.size,
-                "安装包预检完成，点击安装后由系统验证并升级")
+            mutableState.value = mutableState.value.copy(phase = UpdateDownloadPhase.READY, downloadedBytes = manifest.size,
+                message = "安装包预检完成，点击安装后由系统验证并升级")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -455,12 +396,13 @@ class UpdateDownloadManager(
             if (failure !is UpdateVerificationException && (!foreground || eligibleNetwork() != network)) {
                 return
             }
-            if (failure is UpdateVerificationException) {
+            if (failure is UpdateVerificationException ||
+                (failure is UpdateSourcesExhaustedException && failure.verificationFailure)) {
                 partial.delete()
                 completedFile(manifest).delete()
             }
-            mutableState.value = UpdateDownloadState(UpdateDownloadPhase.FAILED, manifest, partial.length(),
-                failureMessage(failure))
+            mutableState.value = mutableState.value.copy(phase = UpdateDownloadPhase.FAILED, downloadedBytes = partial.length(),
+                message = failureMessage(failure))
             persistFailure(manifest)
         } finally {
             connection?.disconnect()
@@ -470,7 +412,7 @@ class UpdateDownloadManager(
 
     private fun kotlin.coroutines.CoroutineContext.isActiveForTransfer(): Boolean = this[Job]?.isActive != false
     private fun failureMessage(failure: Exception): String = when (failure) {
-        is UpdateVerificationException, is UpdateTransferException -> failure.message ?: "下载失败，请重试"
+        is UpdateVerificationException, is UpdateTransferException, is UpdateSourcesExhaustedException -> failure.message ?: "下载失败，请重试"
         else -> "下载失败，请确认网络与存储空间后重试"
     }
     private fun partialFile(manifest: UpdateManifest) = File(partialDir, "${manifest.versionCode}.part")

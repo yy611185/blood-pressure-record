@@ -266,6 +266,7 @@ private fun UpdateDownloadContent(
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold
         )
+        download.source?.let { SecondaryText("下载来源：$it") }
         if (download.phase == UpdateDownloadPhase.DOWNLOADING || download.phase == UpdateDownloadPhase.PAUSED ||
             download.phase == UpdateDownloadPhase.WAITING_NETWORK) {
             if (total > 0L) {

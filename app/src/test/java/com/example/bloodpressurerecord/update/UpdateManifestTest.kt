@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class UpdateManifestTest {
@@ -14,6 +15,59 @@ class UpdateManifestTest {
         assertEquals(44L, manifest.versionCode)
         assertNull(manifest.minSupportedVersionCode)
         assertEquals(manifest, UpdateManifest.parse(manifest.encode()))
+    }
+
+    @Test fun `legacy manifest retains every field and omits mirrors when encoded`() {
+        val manifest = UpdateManifest.parse(fixture)
+        assertEquals(UpdateManifest(version = "2.3.3", versionCode = 44L,
+            apk = "blood-pressure-record-v2.3.3-release.apk", size = 12345678L,
+            sha256 = "0123456789abcdef".repeat(4),
+            url = "https://updates.0u0w0u0.com/android/stable/blood-pressure-record-v2.3.3-release.apk",
+            notes = "本地固定测试样本，仅用于客户端解析和策略测试。", releasesUrl = "https://github.com/yy611185/blood-pressure-record/releases/tag/v2.3.3",
+            publishedAt = "2026-10-11T00:00:00Z"), manifest)
+        assertFalse(manifest.encode().contains("mirrors"))
+        assertEquals(manifest, UpdateManifest.parse(add("\"mirrors\": []")))
+    }
+
+    @Test fun `whitelist admits only the two exact HTTPS endpoints`() {
+        val manifest = UpdateManifest.parse(fixture)
+        val path = "/android/stable/${manifest.apk}"
+        listOf("https://${UpdateUrls.HOST}$path", "https://${UpdateUrls.DIRECT_HOST}:8443$path").forEach {
+            UpdateUrls.validateApk(it, manifest.version, manifest.apk)
+        }
+        listOf(
+            "http://${UpdateUrls.HOST}$path", "http://${UpdateUrls.DIRECT_HOST}:8443$path",
+            "https://other.example$path", "https://${UpdateUrls.HOST}:443$path",
+            "https://${UpdateUrls.HOST}:8443$path", "https://${UpdateUrls.DIRECT_HOST}$path",
+            "https://${UpdateUrls.DIRECT_HOST}:443$path", "https://${UpdateUrls.DIRECT_HOST}:8444$path",
+            "https://${UpdateUrls.DIRECT_HOST}:08443$path", "https://${UpdateUrls.DIRECT_HOST}:8443$path?x=1",
+            "https://user@${UpdateUrls.DIRECT_HOST}:8443$path", "https://${UpdateUrls.DIRECT_HOST}:8443$path#x",
+            "https://${UpdateUrls.DIRECT_HOST}:8443/android/stable/another.apk"
+        ).forEach { url ->
+            assertThrows("Must reject $url", IllegalArgumentException::class.java) {
+                UpdateUrls.validateApk(url, manifest.version, manifest.apk)
+            }
+        }
+    }
+
+    @Test fun `mirrors round trip preserve candidate order and identity`() {
+        val base = UpdateManifest.parse(fixture)
+        val direct = base.url.replace(UpdateUrls.HOST, "${UpdateUrls.DIRECT_HOST}:8443")
+        val manifest = UpdateManifest.parse(add("\"mirrors\": [\"$direct\", \"${base.url}\"]"))
+        assertEquals(listOf(base.url, direct, base.url), updateDownloadCandidates(manifest))
+        assertEquals(listOf(base.url), updateDownloadCandidates(base))
+        assertEquals(base.identity, manifest.identity)
+        assertEquals(manifest, UpdateManifest.parse(manifest.encode()))
+        assertEquals("Cloudflare", updateDownloadSource(base.url))
+        assertEquals("直连", updateDownloadSource(direct))
+    }
+
+    @Test fun `mirrors reject wrong field types non strings and untrusted URLs`() {
+        listOf("null", "{}", "\"url\"", "[null]", "[1]", "[{}]", "[true]",
+            "[\"https://evil.example/file.apk\"]").forEach { invalid(add("\"mirrors\": $it")) }
+        val base = UpdateManifest.parse(fixture)
+        val valid = base.url.replace(UpdateUrls.HOST, "${UpdateUrls.DIRECT_HOST}:8443")
+        invalid(add("\"mirrors\": [\"$valid\", \"$valid?token=1\"]"))
     }
 
     @Test fun `unknown fields remain forward compatible`() {
