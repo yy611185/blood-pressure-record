@@ -8,6 +8,9 @@ object ReportBuilder {
     fun build(
         snapshot: ReportSnapshot, period: ReportPeriod, options: ReportOptions, generatedAtMillis: Long
     ): BpReport? {
+        require(options.template != ReportTemplate.HOME_SEVEN_DAY || period.dayCount == ReportPolicy.SEVEN_DAY_LENGTH) {
+            "7 日监测模板的统计周期必须为 7 天。"
+        }
         val records = snapshot.measurements.asSequence()
             .filter { it.measuredAt >= period.startInclusive && it.measuredAt < period.endExclusive }
             .sortedWith(compareBy<ReportMeasurement> { it.measuredAt }.thenBy { it.id })
@@ -23,13 +26,15 @@ object ReportBuilder {
                 SessionStatisticsCalculator.isMorning(it.measuredAt, period.zoneId) ||
                     SessionStatisticsCalculator.isEvening(it.measuredAt, period.zoneId)
             }
+            val range = if (options.template == ReportTemplate.HOME_SEVEN_DAY) {
+                listOf(average(morning), average(evening))
+            } else (morning + evening).map { ReportAverage(it.systolic, it.diastolic, it.pulse) }
             val average = average(values)
-            val range = morning + evening
             ReportDay(
                 date, average, morning, evening, other,
                 average.systolic?.let { CategoryCalculator.calculate(it, requireNotNull(average.diastolic)) },
-                range.minOfOrNull { it.systolic }, range.maxOfOrNull { it.systolic },
-                range.minOfOrNull { it.diastolic }, range.maxOfOrNull { it.diastolic }
+                range.mapNotNull { it.systolic }.minOrNull(), range.mapNotNull { it.systolic }.maxOrNull(),
+                range.mapNotNull { it.diastolic }.minOrNull(), range.mapNotNull { it.diastolic }.maxOrNull()
             )
         }
         val notes = records.mapNotNull { record ->
@@ -51,7 +56,7 @@ object ReportBuilder {
             period, generatedAtMillis, snapshot.profile.takeIf { options.includeIdentity }, average(records),
             average(days.flatMap { it.morning }), average(days.flatMap { it.evening }),
             grouped.size, records.size, days,
-            days.mapNotNull { it.category }.groupingBy { it }.eachCount(), medications, notes
+            days.mapNotNull { it.category }.groupingBy { it }.eachCount(), medications, notes, options.template
         )
     }
 

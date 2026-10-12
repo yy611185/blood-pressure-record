@@ -15,18 +15,19 @@ import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.bloodpressurerecord.domain.report.ReportLayoutPlan
+import com.example.bloodpressurerecord.domain.report.ReportPolicy
 import java.time.format.DateTimeFormatter
 
 class ReportShare(private val context: Context, private val cache: ReportCache) {
-    fun share(file: File) {
+    fun share(file: File, title: String = ReportPolicy.TITLE) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.reports.files", file)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = PDF_MIME_TYPE
             putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = ClipData.newUri(context.contentResolver, "血压报告", uri)
+            clipData = ClipData.newUri(context.contentResolver, title, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        val chooser = Intent.createChooser(send, "分享血压报告").apply {
+        val chooser = Intent.createChooser(send, "分享$title").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -48,7 +49,7 @@ class ReportShare(private val context: Context, private val cache: ReportCache) 
             .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
             .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
             .build()
-        return manager.print("家庭血压报告", ReportPrintAdapter(plan, renderer, cache), attributes)
+        return manager.print(plan.report.template.title, ReportPrintAdapter(plan, renderer, cache), attributes)
     }
 
     suspend fun saveSummaryImage(plan: ReportLayoutPlan, renderer: PdfReportRenderer, uri: Uri) =

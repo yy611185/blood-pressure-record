@@ -118,10 +118,14 @@ class PdfReportRenderer(private val appName: String) {
     }
 
     private fun drawSummaryHeader(canvas: Canvas, report: BpReport): Float {
-        text(canvas, ReportPolicy.TITLE, ReportTheme.MARGIN, ReportTheme.HEADER_TITLE_Y,
+        text(canvas, report.template.title, ReportTheme.MARGIN, ReportTheme.HEADER_TITLE_Y,
             ReportTheme.TITLE_SIZE, bold = true)
         text(canvas, appName, ReportTheme.MARGIN, ReportTheme.HEADER_APP_Y,
             ReportTheme.CAPTION_SIZE, ReportTheme.SECONDARY_TEXT)
+        if (report.template == ReportTemplate.HOME_SEVEN_DAY) {
+            text(canvas, ReportPolicy.SEVEN_DAY_RULES, ReportTheme.MARGIN,
+                ReportTheme.SEVEN_DAY_RULES_Y, ReportTheme.TINY_SIZE, ReportTheme.SECONDARY_TEXT)
+        }
         text(canvas, "统计周期  ${periodText(report)}", right, ReportTheme.HEADER_PERIOD_Y,
             ReportTheme.HEADER_META_SIZE, align = Paint.Align.RIGHT)
         val generated = Instant.ofEpochMilli(report.generatedAtMillis).atZone(report.period.zoneId)
@@ -380,7 +384,7 @@ class PdfReportRenderer(private val appName: String) {
     }
 
     private fun drawDetailHeader(canvas: Canvas, report: BpReport, supplement: Boolean): Float {
-        text(canvas, "${ReportPolicy.TITLE} · ${if (supplement) "补充明细" else "逐日明细"}",
+        text(canvas, "${report.template.title} · ${if (supplement) "补充明细" else "逐日明细"}",
             ReportTheme.MARGIN, ReportTheme.DETAIL_TITLE_Y, ReportTheme.SECTION_SIZE, bold = true)
         val identity = report.profile?.name?.takeIf { it.isNotBlank() }?.let { "$it  " }.orEmpty()
         clippedText(canvas, identity + periodText(report), ReportTheme.DETAIL_METADATA_X,
@@ -400,17 +404,25 @@ class PdfReportRenderer(private val appName: String) {
                 ReportTheme.CONTENT_WIDTH, ReportTheme.TABLE_ROW_HEIGHT, ReportTheme.ZEBRA)
             cell(canvas, detailDate.format(row.date).replace("星期", "周"), boundaries[0], top,
                 ReportTheme.TABLE_WIDTHS[0])
-            drawReadingCells(canvas, row.morning, report, boundaries, 1, top)
-            drawReadingCells(canvas, row.evening, report, boundaries, 4, top)
+            drawReadingCells(canvas, row.morning, report, boundaries, 1, top, row.morningTimeLabel)
+            drawReadingCells(canvas, row.evening, report, boundaries, 4, top, row.eveningTimeLabel)
             cell(canvas, row.noteText, boundaries[7], top, ReportTheme.TABLE_WIDTHS[7])
         }
         line(canvas, ReportTheme.MARGIN,
             ReportTheme.TABLE_ROW_TOP + detail.rows.size * ReportTheme.TABLE_ROW_HEIGHT, right,
             ReportTheme.TABLE_ROW_TOP + detail.rows.size * ReportTheme.TABLE_ROW_HEIGHT)
-        text(canvas, "加粗并带底色：高于参考线（${ReportTheme.REFERENCE_SYSTOLIC}/${ReportTheme.REFERENCE_DIASTOLIC}）。—：该时段无记录。每个时段为当次多组读数的平均值。",
+        val legend = "加粗并带底色：高于参考线（${ReportTheme.REFERENCE_SYSTOLIC}/${ReportTheme.REFERENCE_DIASTOLIC}）。—：该时段无记录。"
+        text(canvas, legend + if (report.template == ReportTemplate.HOME_SEVEN_DAY) ""
+                else "每个时段为当次多组读数的平均值。",
             ReportTheme.MARGIN, ReportTheme.DETAIL_LEGEND_Y,
             ReportTheme.TINY_SIZE, ReportTheme.SECONDARY_TEXT)
-        return ReportTheme.DETAIL_LEGEND_Y - ReportTheme.DETAIL_TITLE_Y
+        val extraHeight = if (report.template == ReportTemplate.HOME_SEVEN_DAY) {
+            text(canvas, ReportPolicy.SEVEN_DAY_DETAIL_LEGEND, ReportTheme.MARGIN,
+                ReportTheme.DETAIL_LEGEND_Y + ReportTheme.DETAIL_LEGEND_LINE_HEIGHT,
+                ReportTheme.TINY_SIZE, ReportTheme.SECONDARY_TEXT)
+            ReportTheme.DETAIL_LEGEND_LINE_HEIGHT
+        } else 0f
+        return ReportTheme.DETAIL_LEGEND_Y + extraHeight - ReportTheme.DETAIL_TITLE_Y
     }
 
     private fun drawTableHeader(canvas: Canvas): Float {
@@ -438,7 +450,7 @@ class PdfReportRenderer(private val appName: String) {
     }
 
     private fun drawReadingCells(canvas: Canvas, record: ReportMeasurement?, report: BpReport,
-        boundaries: List<Float>, start: Int, top: Float) {
+        boundaries: List<Float>, start: Int, top: Float, timeLabel: String?) {
         val high = record != null && (record.systolic >= ReportTheme.REFERENCE_SYSTOLIC ||
             record.diastolic >= ReportTheme.REFERENCE_DIASTOLIC)
         if (high) rect(canvas, boundaries[start], top, ReportTheme.TABLE_WIDTHS[start],
@@ -447,7 +459,7 @@ class PdfReportRenderer(private val appName: String) {
             ReportTheme.TABLE_WIDTHS[start], bold = high)
         cell(canvas, record?.pulse?.toString() ?: "—", boundaries[start + 1], top,
             ReportTheme.TABLE_WIDTHS[start + 1])
-        val time = record?.let {
+        val time = timeLabel ?: record?.let {
             timeFormat.format(Instant.ofEpochMilli(it.measuredAt).atZone(report.period.zoneId))
         } ?: "—"
         cell(canvas, time, boundaries[start + 2], top, ReportTheme.TABLE_WIDTHS[start + 2])

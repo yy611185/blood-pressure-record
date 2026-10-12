@@ -96,7 +96,8 @@ fun ReportPreviewScreen(
         else viewModel.showMessage("保存已取消。")
     }
     Column(Modifier.fillMaxSize().padding(top = statusBarTopPadding())) {
-        AppTopBar(title = "医生报告预览", onBack = onBack)
+        AppTopBar(title = if (state.options.template == com.example.bloodpressurerecord.domain.report.ReportTemplate.GENERAL)
+            "医生报告预览" else "${state.options.template.title}预览", onBack = onBack)
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -142,7 +143,7 @@ fun ReportPreviewScreen(
                         onClick = {
                             if (!viewModel.uiState.value.canExport || viewModel.uiState.value.artifact !== artifact) return@Button
                             try {
-                                share.share(artifact.file)
+                                share.share(artifact.file, artifact.plan.report.template.title)
                             } catch (_: Exception) {
                                 viewModel.showMessage("无法打开分享面板，请重试。")
                             }

@@ -13,6 +13,7 @@ import com.example.bloodpressurerecord.domain.report.ReportPeriod
 import com.example.bloodpressurerecord.domain.report.ReportSnapshot
 import com.example.bloodpressurerecord.domain.report.ReportTextMetrics
 import com.example.bloodpressurerecord.domain.report.ReportUserProfile
+import com.example.bloodpressurerecord.domain.report.ReportTemplate
 import com.example.bloodpressurerecord.ui.home.MainDispatcherRule
 import java.io.File
 import java.time.LocalDate
@@ -48,6 +49,30 @@ class ReportViewModelTest {
     @After
     fun clearViewModels() {
         stores.forEach { it.clear() }
+    }
+
+    @Test
+    fun `seven day template restricts period and retains template on a new export`() = runTest {
+        val generator = FakeReportGenerator()
+        val vm = model(generator = generator)
+        vm.selectTemplate(ReportTemplate.HOME_SEVEN_DAY)
+        assertEquals(7, vm.uiState.value.period.dayCount)
+        vm.selectRecentPeriod(30)
+        assertEquals(7, vm.uiState.value.period.dayCount)
+        val end = vm.uiState.value.period.endDate
+        assertFalse(vm.selectCustomPeriod(end.minusDays(7), end))
+        assertTrue(vm.selectCustomPeriod(end.minusDays(6), end))
+        vm.requestPreview()
+        vm.setIncludeIdentity(true)
+        vm.confirmAndGenerate()
+        advanceUntilIdle()
+        assertEquals(ReportTemplate.HOME_SEVEN_DAY, generator.reports.single().template)
+        vm.returnToOptions()
+        assertEquals(ReportTemplate.HOME_SEVEN_DAY, vm.uiState.value.options.template)
+        assertFalse(vm.uiState.value.options.includeIdentity)
+        vm.selectTemplate(ReportTemplate.GENERAL)
+        vm.selectRecentPeriod(30)
+        assertEquals(30, vm.uiState.value.period.dayCount)
     }
 
     @Test

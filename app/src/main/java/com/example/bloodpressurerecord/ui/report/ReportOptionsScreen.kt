@@ -34,6 +34,7 @@ import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.domain.report.ReportPolicy
+import com.example.bloodpressurerecord.domain.report.ReportTemplate
 import java.time.LocalDate
 
 @Composable
@@ -82,9 +83,20 @@ fun ReportOptionsScreen(state: ReportUiState, viewModel: ReportViewModel, onBack
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             DataCard {
+                Column {
+                    Text("报告模板", style = MaterialTheme.typography.titleLarge)
+                    ReportTemplate.entries.forEach { template ->
+                        PeriodChoice(template.title, state.options.template == template, !state.isGenerating) {
+                            viewModel.selectTemplate(template)
+                        }
+                    }
+                }
+            }
+            DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("统计周期", style = MaterialTheme.typography.titleLarge)
-                    listOf(7, 30, 90).forEach { days ->
+                    val periods = if (state.options.template == ReportTemplate.HOME_SEVEN_DAY) listOf(7) else listOf(7, 30, 90)
+                    periods.forEach { days ->
                         PeriodChoice("近 $days 天", state.periodPresetDays == days, !state.isGenerating) {
                             viewModel.selectRecentPeriod(days)
                         }
@@ -97,6 +109,7 @@ fun ReportOptionsScreen(state: ReportUiState, viewModel: ReportViewModel, onBack
                 }
             }
             Text("报告在本机生成。请先检查预览，再分享或保存。")
+            if (state.options.template == ReportTemplate.HOME_SEVEN_DAY) Text(ReportPolicy.SEVEN_DAY_RULES)
             Text(
                 "现有记录未区分测量场景，分级与参考线采用诊室标准。用药仅显示现有药品信息和保留的打卡次数。",
                 style = MaterialTheme.typography.bodyMedium,
@@ -137,7 +150,9 @@ private fun CustomPeriodDialog(state: ReportUiState, viewModel: ReportViewModel,
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("日期格式：年-月-日。包含开始和结束当天，最多 ${ReportPolicy.MAX_PERIOD_DAYS} 天。")
+                Text(if (state.options.template == ReportTemplate.HOME_SEVEN_DAY)
+                    "日期格式：年-月-日。包含开始和结束当天，须恰好 7 天。"
+                else "日期格式：年-月-日。包含开始和结束当天，最多 ${ReportPolicy.MAX_PERIOD_DAYS} 天。")
                 OutlinedTextField(start, { start = it; error = "" }, label = { Text("开始日期") }, singleLine = true)
                 OutlinedTextField(end, { end = it; error = "" }, label = { Text("结束日期") }, singleLine = true)
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)

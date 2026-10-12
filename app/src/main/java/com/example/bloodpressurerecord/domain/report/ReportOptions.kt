@@ -4,5 +4,6 @@ package com.example.bloodpressurerecord.domain.report
 data class ReportOptions(
     val includeIdentity: Boolean = false,
     val includeNotes: Boolean = true,
-    val includeMedications: Boolean = true
+    val includeMedications: Boolean = true,
+    val template: ReportTemplate = ReportTemplate.GENERAL
 )

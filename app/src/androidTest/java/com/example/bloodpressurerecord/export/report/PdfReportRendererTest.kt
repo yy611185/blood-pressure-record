@@ -49,6 +49,27 @@ class PdfReportRendererTest {
         }
     }
 
+    @Test fun sevenDayTemplate_withMultipleMorningMeasurements_rendersSummaryDailyAndSupplement() {
+        val renderer = PdfReportRenderer("家庭血压记录")
+        val snapshot = fixture(7)
+        val firstMorning = snapshot.measurements.first()
+        val report = requireNotNull(ReportBuilder.build(
+            snapshot.copy(measurements = snapshot.measurements + firstMorning.copy(
+                id = "extra-morning", measuredAt = firstMorning.measuredAt + 30 * 60 * 1000L,
+                systolic = 150, diastolic = 100
+            )),
+            period(7), ReportOptions(template = ReportTemplate.HOME_SEVEN_DAY),
+            period(7).endExclusive - 1
+        ))
+        val plan = ReportLayoutPlanner.plan(report, ReportTheme.layoutSpec, renderer.textMetrics())
+        assertEquals(3, plan.pageCount)
+        assertEquals(7, (plan.pages[1] as ReportPage.DailyDetail).rows.size)
+        val output = File(context.filesDir, "report-layout-seven-day.pdf")
+        output.delete()
+        renderer.render(plan, output)
+        inspect(output, plan.pageCount)
+    }
+
     @Test fun reportProvider_exposesOnlyReportCacheSubdirectory() {
         val cache = ReportCache(File(context.cacheDir, "reports"))
         val file = cache.create(period(30)).apply { writeText("fixture") }

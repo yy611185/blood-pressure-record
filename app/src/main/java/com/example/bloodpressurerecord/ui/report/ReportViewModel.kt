@@ -7,6 +7,7 @@ import com.example.bloodpressurerecord.domain.report.ReportBuilder
 import com.example.bloodpressurerecord.domain.report.ReportOptions
 import com.example.bloodpressurerecord.domain.report.ReportPeriod
 import com.example.bloodpressurerecord.domain.report.ReportPolicy
+import com.example.bloodpressurerecord.domain.report.ReportTemplate
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -83,13 +84,30 @@ class ReportViewModel(
 
     fun selectRecentPeriod(days: Int) {
         if (days !in listOf(7, 30, 90) || _uiState.value.isGenerating || _uiState.value.isSaving) return
+        if (_uiState.value.options.template == ReportTemplate.HOME_SEVEN_DAY && days != 7) return
         selectPeriod(ReportPeriod.recent(days, nowMillis(), zoneId), days)
+    }
+
+    fun selectTemplate(template: ReportTemplate) {
+        val state = _uiState.value
+        if (state.isGenerating || state.isSaving || state.options.template == template) return
+        state.artifact?.let(::discardSafely)
+        val period = if (template == ReportTemplate.HOME_SEVEN_DAY) {
+            ReportPeriod(state.period.endDate.minusDays(6), state.period.endDate, zoneId)
+        } else state.period
+        _uiState.update { it.copy(options = it.options.copy(template = template, includeIdentity = false),
+            period = period, periodPresetDays = if (template == ReportTemplate.HOME_SEVEN_DAY && it.periodPresetDays != null) 7 else it.periodPresetDays,
+            artifact = null, previewOptions = null, showIdentityConfirmation = false, message = "") }
     }
 
     fun selectCustomPeriod(start: LocalDate, end: LocalDate): Boolean {
         if (_uiState.value.isGenerating || _uiState.value.isSaving) return false
         val today = Instant.ofEpochMilli(nowMillis()).atZone(zoneId).toLocalDate()
         val period = runCatching { ReportPeriod(start, end, zoneId) }.getOrNull()
+        if (_uiState.value.options.template == ReportTemplate.HOME_SEVEN_DAY && period?.dayCount != 7) {
+            showMessage("7 日监测的起止日期须恰好包含 7 个自然日。")
+            return false
+        }
         if (period == null || end.isAfter(today)) {
             showMessage("请选择不晚于今天的有效日期范围，最多 ${ReportPolicy.MAX_PERIOD_DAYS} 天。")
             return false
@@ -190,7 +208,7 @@ class ReportViewModel(
         ++generationId
         generationJob?.cancel()
         _uiState.value.artifact?.let(::discardSafely)
-        _uiState.update { it.copy(options = ReportOptions(), artifact = null, previewOptions = null,
+        _uiState.update { it.copy(options = ReportOptions(template = it.options.template), artifact = null, previewOptions = null,
             showIdentityConfirmation = false, isGenerating = false, message = "") }
     }
 

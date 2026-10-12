@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.domain.report
 
+import com.example.bloodpressurerecord.domain.calculator.SessionStatisticsCalculator
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -42,7 +43,11 @@ data class ReportTextLine(val text: String, val bold: Boolean = false, val prefi
 /** xOffset only shifts the date label; its measurement point and axis tick stay at the day slot center. */
 data class TrendDateLabel(val dayIndex: Int, val text: String, val vertical: Boolean, val xOffset: Float = 0f)
 data class ReportDetailRow(
-    val date: LocalDate, val morning: ReportMeasurement?, val evening: ReportMeasurement?, val noteText: String
+    val date: LocalDate, val morning: ReportMeasurement?, val evening: ReportMeasurement?, val noteText: String,
+    val morningCount: Int = if (morning == null) 0 else 1,
+    val eveningCount: Int = if (evening == null) 0 else 1,
+    val morningTimeLabel: String? = null,
+    val eveningTimeLabel: String? = null
 )
 sealed interface ReportPage {
     data class Summary(
@@ -65,19 +70,28 @@ object ReportLayoutPlanner {
     private val trendDateFormat = DateTimeFormatter.ofPattern("M/d")
 
     fun plan(report: BpReport, spec: ReportLayoutSpec, metrics: ReportTextMetrics): ReportLayoutPlan {
+        val sevenDay = report.template == ReportTemplate.HOME_SEVEN_DAY
+        require(!sevenDay || report.period.dayCount == ReportPolicy.SEVEN_DAY_LENGTH)
         val notesByMeasurement = report.notes.associateBy { it.measurementId }
         val fullNotesNeeded = linkedSetOf<Int>()
         val rows = report.days.flatMap { day ->
-            (0 until maxOf(day.morning.size, day.evening.size, 1)).map { index ->
-                val morning = day.morning.getOrNull(index)
-                val evening = day.evening.getOrNull(index)
-                val notes = listOfNotNull(morning, evening).mapNotNull { notesByMeasurement[it.id] }
+            (0 until if (sevenDay) 1 else maxOf(day.morning.size, day.evening.size, 1)).map { index ->
+                val morning = if (sevenDay) aggregate(day.morning) else day.morning.getOrNull(index)
+                val evening = if (sevenDay) aggregate(day.evening) else day.evening.getOrNull(index)
+                val noteMeasurements = if (sevenDay) day.morning + day.evening + day.other else listOfNotNull(morning, evening)
+                val notes = noteMeasurements.mapNotNull { notesByMeasurement[it.id] }
                 val text = notes.joinToString("；") { "[${it.reference}] ${it.text}" }
                 val width = spec.noteColumnWidth - spec.cellPadding * 2
                 // The daily table uses the body font; a smaller measurement could hide text without a supplement.
                 val display = fitSingleLine(text, width, spec.bodySize, metrics)
                 if (display != text) notes.forEach { fullNotesNeeded += it.reference }
-                ReportDetailRow(day.date, morning, evening, display)
+                ReportDetailRow(
+                    day.date, morning, evening, display,
+                    if (sevenDay) day.morning.size else if (morning == null) 0 else 1,
+                    if (sevenDay) day.evening.size else if (evening == null) 0 else 1,
+                    ReportPolicy.MULTIPLE_MEASUREMENTS.takeIf { sevenDay && day.morning.size > 1 },
+                    ReportPolicy.MULTIPLE_MEASUREMENTS.takeIf { sevenDay && day.evening.size > 1 }
+                )
             }
         }
 
@@ -102,15 +116,25 @@ object ReportLayoutPlanner {
                 supplement += ReportTextLine(it, bold)
             }
         }
+        fun addMeasurement(record: ReportMeasurement, periodLabel: String = "") {
+            val local = Instant.ofEpochMilli(record.measuredAt).atZone(report.period.zoneId)
+            val note = notesByMeasurement[record.id]
+            addWrapped("${dateFormat.format(local)} ${timeFormat.format(local)} $periodLabel ${record.systolic}/${record.diastolic} mmHg  脉搏 ${record.pulse?.toString() ?: "—"} 次/分${note?.let { "  备注 [${it.reference}]" } ?: ""}")
+            note?.let { fullNotesNeeded += it.reference }
+        }
+        if (sevenDay) {
+            val repeatedPeriods = report.days.flatMap { day ->
+                listOf("早" to day.morning, "晚" to day.evening).filter { it.second.size > 1 }
+            }
+            if (repeatedPeriods.isNotEmpty()) {
+                addWrapped(ReportPolicy.MULTIPLE_MEASUREMENTS_DETAIL, true)
+                repeatedPeriods.forEach { (label, records) -> records.forEach { addMeasurement(it, label) } }
+            }
+        }
         val otherRecords = report.days.flatMap { it.other }
         if (otherRecords.isNotEmpty()) {
             addWrapped("其他时段测量", true)
-            otherRecords.forEach { record ->
-                val local = Instant.ofEpochMilli(record.measuredAt).atZone(report.period.zoneId)
-                val note = notesByMeasurement[record.id]
-                addWrapped("${dateFormat.format(local)} ${timeFormat.format(local)}  ${record.systolic}/${record.diastolic} mmHg  脉搏 ${record.pulse?.toString() ?: "—"} 次/分${note?.let { "  备注 [${it.reference}]" } ?: ""}")
-                note?.let { fullNotesNeeded += it.reference }
-            }
+            otherRecords.forEach { addMeasurement(it) }
         }
         val longNotes = report.notes.filter { it.reference in fullNotesNeeded }
         if (longNotes.isNotEmpty()) {
@@ -139,6 +163,16 @@ object ReportLayoutPlanner {
             rows.chunked(spec.detailRowsPerPage).forEach { add(ReportPage.DailyDetail(it)) }
             supplement.chunked(spec.supplementLinesPerPage).forEach { add(ReportPage.Supplement(it)) }
         })
+    }
+
+    /** 仅合并明细单元格；ReportDay 中的逐次测量及总体统计保持不变。 */
+    private fun aggregate(records: List<ReportMeasurement>): ReportMeasurement? {
+        if (records.size <= 1) return records.firstOrNull()
+        val pressure = requireNotNull(SessionStatisticsCalculator.pressureAverage(records, { it.systolic }, { it.diastolic }))
+        return records.first().copy(
+            systolic = pressure.first, diastolic = pressure.second,
+            pulse = SessionStatisticsCalculator.pulseAverage(records) { it.pulse }, note = null
+        )
     }
 
     private fun trendDateLabels(report: BpReport, spec: ReportLayoutSpec, metrics: ReportTextMetrics): List<TrendDateLabel> {

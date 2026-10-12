@@ -39,6 +39,7 @@ object ReportTheme {
     const val SECONDARY_SIZE = 18f
     const val HEADER_TITLE_Y = 62f
     const val HEADER_APP_Y = 78f
+    const val SEVEN_DAY_RULES_Y = 89f
     const val HEADER_PERIOD_Y = 54f
     const val HEADER_GENERATED_Y = 69f
     const val HEADER_IDENTITY_Y = 99f
@@ -119,6 +120,7 @@ object ReportTheme {
     const val CELL_PADDING = 4f
     const val CELL_BASELINE_OFFSET = 12f
     const val DETAIL_LEGEND_Y = 658f
+    const val DETAIL_LEGEND_LINE_HEIGHT = 11f
     const val SUPPLEMENT_TOP = 91f
     const val SUPPLEMENT_LINE_HEIGHT = 15f
     const val THIN_LINE = 0.5f

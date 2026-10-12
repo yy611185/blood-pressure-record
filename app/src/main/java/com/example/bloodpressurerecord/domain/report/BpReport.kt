@@ -39,7 +39,8 @@ data class BpReport(
     val average: ReportAverage, val morningAverage: ReportAverage, val eveningAverage: ReportAverage,
     val validDays: Int, val measurementCount: Int, val days: List<ReportDay>,
     val categoryDays: Map<BloodPressureCategory, Int>,
-    val medications: List<ReportMedicationSummary>, val notes: List<ReportNote>
+    val medications: List<ReportMedicationSummary>, val notes: List<ReportNote>,
+    val template: ReportTemplate = ReportTemplate.GENERAL
 ) {
     val insufficientData: Boolean get() = validDays < ReportPolicy.MIN_VALID_DAYS_FOR_STATS
 }
