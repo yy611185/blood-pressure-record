@@ -412,11 +412,11 @@ def main():
     parser.add_argument("command", choices=("detect", "restore-packages", "publish"))
     args = parser.parse_args()
     try:
-        sha = os.environ.get("GITHUB_SHA", "")
+        sha = os.environ.get("RELEASE_COMMIT_SHA") or os.environ.get("GITHUB_SHA", "")
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
-            raise ReleaseError("GITHUB_SHA must be the full build commit SHA.")
+            raise ReleaseError("Release target must be a full commit SHA.")
         if git("rev-parse", "HEAD") != sha:
-            raise ReleaseError("Checkout HEAD differs from GITHUB_SHA.")
+            raise ReleaseError("Checkout HEAD differs from release target SHA.")
         api = GitHub(os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_TOKEN", ""))
         commands = {"detect": detect, "restore-packages": restore_packages, "publish": publish}
         emit(commands[args.command](api, sha, os.environ.get("GITHUB_EVENT_BEFORE")))
