@@ -84,7 +84,7 @@ fun UpdateDialog(
                 }
                 UpdateNotes(manifest.notes)
                 if (taskMatchesLatest) {
-                    UpdateDownloadContent(state.download, onRetry, onCancel, onInstall)
+                    UpdateDownloadContent(state.download, state.installInProgress, state.installMessage, onRetry, onCancel, onInstall)
                     AppSecondaryButton("稍后查看", onDismiss, Modifier.fillMaxWidth())
                 } else {
                     otherTask?.let {
@@ -185,7 +185,7 @@ fun UpdateSettingsContent(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    UpdateDownloadContent(state.download, onRetry, onCancel, onInstall)
+                    UpdateDownloadContent(state.download, state.installInProgress, state.installMessage, onRetry, onCancel, onInstall)
                 }
             }
         }
@@ -247,6 +247,8 @@ private fun UpdateNotes(notes: String) {
 @Composable
 private fun UpdateDownloadContent(
     download: UpdateDownloadState,
+    installInProgress: Boolean,
+    installMessage: String?,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
     onInstall: () -> Unit
@@ -288,8 +290,20 @@ private fun UpdateDownloadContent(
         when (download.phase) {
             UpdateDownloadPhase.READY -> {
                 SecondaryText("点击后由 Android 系统安装。请在系统页面确认更新；取消后可回来继续安装。")
-                AppPrimaryButton("安装更新", onInstall, Modifier.fillMaxWidth())
-                AppSecondaryButton("删除安装包", onCancel, Modifier.fillMaxWidth())
+                if (installInProgress) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    SecondaryText("正在验证安装包或等待安装来源授权…")
+                } else {
+                    AppPrimaryButton("安装更新", onInstall, Modifier.fillMaxWidth())
+                    AppSecondaryButton("删除安装包", onCancel, Modifier.fillMaxWidth())
+                }
+                installMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
             UpdateDownloadPhase.FAILED, UpdateDownloadPhase.PAUSED -> {
                 AppPrimaryButton("继续下载或重试", onRetry, Modifier.fillMaxWidth())

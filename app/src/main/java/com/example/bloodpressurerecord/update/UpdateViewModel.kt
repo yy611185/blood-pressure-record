@@ -23,6 +23,8 @@ data class UpdateUiState(
     val checkState: UpdateCheckState = UpdateCheckState.IDLE,
     val checkMessage: String? = null,
     val download: UpdateDownloadState = UpdateDownloadState(),
+    val installInProgress: Boolean = false,
+    val installMessage: String? = null,
     val dialogVisible: Boolean = false,
     val required: Boolean = false
 )
@@ -251,6 +253,13 @@ class UpdateViewModel(
     fun retryDownload() { policyPausedIdentity = null; downloadAction { downloadManager.retry() } }
     fun cancelDownload() { policyPausedIdentity = null; downloadAction { downloadManager.cancel() } }
     suspend fun verifiedFile(): File? = downloadManager.verifiedFile()
+
+    /** Visible feedback for both the update Dialog and the Settings update card. */
+    fun setInstallFeedback(inProgress: Boolean, message: String? = null) {
+        mutableState.update {
+            it.copy(installInProgress = inProgress, installMessage = message)
+        }
+    }
 
     fun snooze() {
         val manifest = mutableState.value.manifest ?: return

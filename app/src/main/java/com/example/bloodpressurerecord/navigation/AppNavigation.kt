@@ -109,7 +109,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     val updatePromptAllowed = updateForeground && safeUpdateRoute && !dataActionBusy
     val snackbar = remember { SnackbarHostState() }
     val updateActions = rememberUpdatePlatformActions(
-        updateVm, application.appContainer.updateInstaller, updatePromptAllowed, snackbar
+        updateVm, application.appContainer.updateInstaller, snackbar
     )
 
     DisposableEffect(lifecycleOwner, updateVm) {
