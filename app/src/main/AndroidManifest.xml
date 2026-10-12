@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 仅用于软件更新清单和 APK 下载，不上传健康记录。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 用户主动请求通过系统安装器覆盖升级；安装来源仍由系统授权。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 健康提醒优先使用用户可授权的精确闹钟；未授权时代码会自动回退为非精确闹钟。 -->
@@ -10,6 +15,7 @@
 
     <application
         android:name=".BloodPressureApplication"
+        android:usesCleartextTraffic="false"
         android:enableOnBackInvokedCallback="true"
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
@@ -19,6 +25,24 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.BloodPressureRecord">
         <profileable android:shell="true" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.reports.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/reports_file_paths" />
+        </provider>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.update.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true">

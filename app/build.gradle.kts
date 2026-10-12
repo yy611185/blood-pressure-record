@@ -14,8 +14,8 @@ android {
         applicationId = "com.yang.bloodpressure"
         minSdk = 26
         targetSdk = 36
-        versionCode = 43
-        versionName = "2.3.2"
+        versionCode = 44
+        versionName = "2.3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -113,6 +113,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // 更新清单在客户端与 JVM 测试使用相同的严格 JSON 解析器。
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

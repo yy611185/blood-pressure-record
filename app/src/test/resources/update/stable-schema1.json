@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "2.3.3",
+  "versionCode": 44,
+  "apk": "blood-pressure-record-v2.3.3-release.apk",
+  "size": 12345678,
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "url": "https://updates.0u0w0u0.com/android/stable/blood-pressure-record-v2.3.3-release.apk",
+  "notes": "本地固定测试样本，仅用于客户端解析和策略测试。",
+  "releasesUrl": "https://github.com/yy611185/blood-pressure-record/releases/tag/v2.3.3",
+  "publishedAt": "2026-10-11T00:00:00Z"
+}

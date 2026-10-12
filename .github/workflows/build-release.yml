@@ -30,26 +30,10 @@ jobs:
         uses: gradle/actions/wrapper-validation@v4
       - name: Validate release detection and recovery
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
-      - name: Compile app and run focused trend unit tests
+      - name: Compile app and run unit tests and lint
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :app:testDebugUnitTest \
-            --tests '*TrendAggregationCalculatorTest' \
-            --tests '*TrendSeriesCalculatorTest.everyRangeUsesSessionRepresentatives' \
-            --tests '*TrendSeriesCalculatorTest.averagePulseIgnoresMissingValuesAndSessionPulseStaysNullable' \
-            --tests '*TrendSeriesCalculatorTest.rangeFiltering_excludesOldAndFutureRecords' \
-            --tests '*TrendViewModelTest' \
-            --tests '*TrendChartMathTest.sharedSampling*' \
-            --tests '*TrendChartMathTest.sampling*' \
-            --tests '*TrendChartMathTest.pulseSampling*' \
-            --tests '*TrendChartMathTest.nodeDensity*' \
-            --tests '*TrendChartMathTest.dailyMode*' \
-            --tests '*TrendChartMathTest.aggregationSwitch*' \
-            --tests '*TrendChartMathTest.stableYAxis*' \
-            --tests '*TrendChartMathTest.restoredViewport*' \
-            --tests '*TrendChartMathTest.selectedBloodPressure*' \
-            --tests '*TrendInsightCalculatorTest' \
-            --tests '*AppReleaseNotesTest' --stacktrace
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.ui.history
 
 import com.example.bloodpressurerecord.domain.calculator.BloodPressureRules
+import com.example.bloodpressurerecord.domain.calculator.SessionStatisticsCalculator
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.domain.model.DayNightAverage
 import com.example.bloodpressurerecord.domain.model.TrendRecord
@@ -37,8 +38,8 @@ internal object TrendInsightCalculator {
         targetDiastolic: Int?,
         zoneId: ZoneId
     ): TrendInsights {
-        val morning = records.filter { Instant.ofEpochMilli(it.measuredAt).atZone(zoneId).hour in 5..11 }
-        val evening = records.filter { Instant.ofEpochMilli(it.measuredAt).atZone(zoneId).hour in 18..23 }
+        val morning = records.filter { SessionStatisticsCalculator.isMorning(it.measuredAt, zoneId) }
+        val evening = records.filter { SessionStatisticsCalculator.isEvening(it.measuredAt, zoneId) }
         // 夜间包含 22:00 至次日 05:59，范围仍按页面所选自然日窗口筛选。
         val (daytime, nighttime) = records.partition {
             Instant.ofEpochMilli(it.measuredAt).atZone(zoneId).hour in 6..21
@@ -46,11 +47,8 @@ internal object TrendInsightCalculator {
         fun recordDays(values: List<TrendRecord>): Int = values.map {
             Instant.ofEpochMilli(it.measuredAt).atZone(zoneId).toLocalDate()
         }.toSet().size
-        fun average(values: List<TrendRecord>): Pair<Int, Int>? = values.takeIf { it.isNotEmpty() }
-            ?.let { list ->
-                list.map { it.systolic }.average().roundToInt() to
-                    list.map { it.diastolic }.average().roundToInt()
-            }
+        fun average(values: List<TrendRecord>): Pair<Int, Int>? =
+            SessionStatisticsCalculator.pressureAverage(values, { it.systolic }, { it.diastolic })
         fun targetRate(values: List<TrendRecord>): Int? {
             if (targetSystolic == null || targetDiastolic == null || values.isEmpty()) return null
             return (values.count {

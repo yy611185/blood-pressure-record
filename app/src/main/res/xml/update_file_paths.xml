@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 只共享已完成的更新包，不包含部分下载、健康记录和备份。 -->
+    <files-path name="verified_updates" path="updates/verified/" />
+</paths>
