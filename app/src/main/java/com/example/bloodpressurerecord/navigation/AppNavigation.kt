@@ -9,7 +9,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -40,6 +42,8 @@ import androidx.navigation.compose.rememberNavController
 import com.example.bloodpressurerecord.AppViewModelFactory
 import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.ui.common.AppBottomDock
+import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberDockScrollState
 import com.example.bloodpressurerecord.ui.history.EditSessionScreen
 import com.example.bloodpressurerecord.ui.history.EditSessionViewModel
@@ -147,6 +151,14 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     val showBottomBar = current in TopLevelRoutes &&
         !(current == AppDestination.Trend.route && trendFullscreen)
     val dockScrollState = rememberDockScrollState(current)
+    val snackbarBottomPadding = if (showBottomBar) {
+        dockContentBottomPadding()
+    } else {
+        maxOf(
+            pageContentBottomPadding(),
+            WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+        )
+    }
 
     LaunchedEffect(showTrendChart, current) {
         if (!showTrendChart && current == AppDestination.Trend.route) {
@@ -159,7 +171,9 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = {
+            SnackbarHost(snackbar, modifier = Modifier.padding(bottom = snackbarBottomPadding))
+        },
         // 系统栏 inset 全部交给页面自己处理（见 ui/common/AppInsets.kt）：
         // 根布局只做容器，避免出现「innerPadding + 页面 navigationBarsPadding」的重复叠加。
         contentWindowInsets = WindowInsets(0.dp)

@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.domain.report.ReportPolicy
 import com.example.bloodpressurerecord.domain.report.ReportTemplate
@@ -79,7 +80,9 @@ fun ReportOptionsScreen(state: ReportUiState, viewModel: ReportViewModel, onBack
     Column(Modifier.fillMaxSize().padding(top = statusBarTopPadding())) {
         AppTopBar(title = "导出医生报告", onBack = onBack)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(top = 20.dp, bottom = pageContentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             DataCard {

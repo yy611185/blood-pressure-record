@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -57,6 +58,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -67,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.data.repository.MedicationSlot
 import com.example.bloodpressurerecord.data.repository.SessionSummary
@@ -147,10 +150,7 @@ fun DashboardScreen(
             }
         }
         SectionHeader("今天的测量", "早晚各一次最好")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MeasurementSlot("早上", true, state.todayMorning, onAddMeasurement, Modifier.weight(1f))
-            MeasurementSlot("晚上", false, state.todayEvening, onAddMeasurement, Modifier.weight(1f))
-        }
+        MeasurementSlotsSection(state.todayMorning, state.todayEvening, onAddMeasurement)
         SectionHeader("今日服药", "${state.medicationSlots.count { it.taken }}/${state.medicationSlots.size} 已打卡")
         if (state.medicationSlots.isEmpty()) {
             EmptyMedication(onOpenMedicationSettings)
@@ -232,7 +232,8 @@ internal fun ReadingHero(state: DashboardUiState) {
         guidance,
         "戳我干嘛～ 测之前先静坐 5 分钟哦",
         if (state.streakDays > 1) "已经连续记录 ${state.streakDays} 天啦，继续保持！" else "每天早晚各测一次，我会帮你记着～",
-        nextMedication?.let { "今天 ${it.timeText} 记得吃${it.name}" } ?: "今天的药都吃过啦，真棒！"
+        nextMedication?.let { "今天 ${it.timeText} 记得吃${it.name}" }
+            ?: if (state.medicationSlots.isEmpty()) "尚未设置服药提醒" else "今天的药都吃过啦，真棒！"
     )
     var messageIndex by remember(latest.id) { mutableIntStateOf(0) }
     Column(
@@ -365,27 +366,75 @@ private fun EmptyHero(message: String, onAdd: (() -> Unit)?, showBuddy: Boolean)
 }
 
 @Composable
-private fun SectionHeader(title: String, trailing: String?, onTrailing: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 10.dp, start = 2.dp, end = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp), fontWeight = FontWeight.ExtraBold)
-        if (trailing != null) {
-            if (onTrailing == null) Text(trailing, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            else TextButton(onClick = onTrailing, modifier = Modifier.height(48.dp)) {
-                Text(trailing, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun SectionHeader(title: String, trailing: String?, onTrailing: (() -> Unit)? = null) {
+    BoxWithConstraints(
+        Modifier.fillMaxWidth().testTag("section-header-$title")
+            .padding(top = 24.dp, bottom = 10.dp, start = 2.dp, end = 2.dp)
+    ) {
+        val fontScale = LocalDensity.current.fontScale
+        val compact = trailing != null && maxWidth < 240.dp * fontScale
+        if (compact) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                    fontWeight = FontWeight.ExtraBold)
+                trailing?.let { SectionHeaderTrailing(it, onTrailing) }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp),
+                    fontWeight = FontWeight.ExtraBold)
+                if (trailing != null) SectionHeaderTrailing(trailing, onTrailing)
             }
         }
     }
 }
 
 @Composable
-private fun MeasurementSlot(label: String, morning: Boolean, session: SessionSummary?, onAdd: () -> Unit, modifier: Modifier = Modifier) {
+private fun SectionHeaderTrailing(trailing: String, onTrailing: (() -> Unit)?) {
+    if (onTrailing == null) {
+        Text(trailing, style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        TextButton(onClick = onTrailing, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(trailing, style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+internal fun MeasurementSlotsSection(
+    morning: SessionSummary?,
+    evening: SessionSummary?,
+    onAdd: () -> Unit
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val compact = maxWidth < 270.dp * LocalDensity.current.fontScale
+        if (compact) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MeasurementSlot("早上", true, morning, onAdd, Modifier.fillMaxWidth())
+                MeasurementSlot("晚上", false, evening, onAdd, Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MeasurementSlot("早上", true, morning, onAdd, Modifier.weight(1f))
+                MeasurementSlot("晚上", false, evening, onAdd, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+internal fun MeasurementSlot(label: String, morning: Boolean, session: SessionSummary?, onAdd: () -> Unit, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(22.dp)
-    val base = if (session == null) modifier.height(104.dp).border(2.dp, colors.outlineVariant, shape).clickable(onClick = onAdd)
-    else modifier.height(104.dp).clip(shape).background(colors.surface)
-    Column(base.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+    val base = if (session == null) modifier.heightIn(min = 104.dp).border(2.dp, colors.outlineVariant, shape).clickable(onClick = onAdd)
+    else modifier.heightIn(min = 104.dp).clip(shape).background(colors.surface)
+    Column(base.testTag("measurement-slot-$label").padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.SpaceBetween) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(if (morning) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay, null, Modifier.size(16.dp), tint = colors.onSurfaceVariant)
             val time = session?.let { Instant.ofEpochMilli(it.measuredAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm")) } ?: "待测"
@@ -498,76 +547,95 @@ private fun PillGlyph(primary: Color, secondary: Color) {
 }
 
 @Composable
-private fun WeekCard(state: DashboardUiState) {
+internal fun WeekCard(state: DashboardUiState) {
     val colors = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(colors.surface).padding(8.dp)) {
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(colors.primaryContainer)
-            .padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(WeekSpacing)) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(WeekSpacing)
-            ) {
-                Icon(Icons.Outlined.LocalFireDepartment, null, Modifier.size(25.dp), tint = colors.primary)
-                Column {
-                    Text("${state.streakDays} 天", style = MaterialTheme.typography.titleLarge.copy(fontFamily = NumberFontFamily, fontSize = 25.sp), color = colors.onPrimaryContainer)
-                    Text("连续记录", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = colors.onPrimaryContainer)
+    Column(Modifier.fillMaxWidth().testTag("week-card").clip(RoundedCornerShape(26.dp)).background(colors.surface).padding(8.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 240.dp * LocalDensity.current.fontScale
+            val headerModifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                .background(colors.primaryContainer).padding(horizontal = 12.dp, vertical = 12.dp)
+            if (compact) {
+                Column(headerModifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    WeekStreakSummary(state, Modifier.fillMaxWidth())
+                    WeekdayIndicators(state, Modifier.fillMaxWidth())
                 }
-            }
-            // 固定自然周：日、一、二、三、四、五、六（今天显示真实星期，不替换为“今”）。
-            state.week.forEach { day ->
-                val today = day.date == state.today
-                val future = day.date.isAfter(state.today)
-                val container = when {
-                    today -> colors.primary.copy(alpha = 0.22f)
-                    day.recorded -> colors.primary
-                    future -> colors.surfaceContainerHighest
-                    else -> colors.primary.copy(alpha = 0.18f)
-                }
-                val content = when {
-                    today -> colors.onPrimaryContainer
-                    day.recorded -> colors.onPrimary
-                    future -> colors.onSurfaceVariant.copy(alpha = 0.55f)
-                    else -> colors.onPrimaryContainer
-                }
-                Box(
-                    Modifier.size(22.dp).clip(RoundedCornerShape(8.dp)).background(container)
-                        .then(if (today) Modifier.border(1.dp, colors.primary, RoundedCornerShape(8.dp)) else Modifier),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        weekdayLabel(day.date),
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
-                        fontWeight = FontWeight.ExtraBold,
-                        color = content
-                    )
+            } else {
+                Row(headerModifier, verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(WeekSpacing)) {
+                    WeekStreakSummary(state, Modifier.weight(1f))
+                    WeekdayIndicators(state, Modifier.width(166.dp))
                 }
             }
         }
         if (state.showTrendChart) {
-        Row(Modifier.fillMaxWidth().height(138.dp).padding(horizontal = 6.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(WeekSpacing), verticalAlignment = Alignment.Bottom) {
-            state.week.forEach { day ->
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(day.averageSystolic?.toString() ?: "", style = MaterialTheme.typography.labelMedium.copy(fontFamily = NumberFontFamily, fontSize = 11.sp), color = colors.onSurfaceVariant)
-                    Box(Modifier.widthIn(max = 26.dp).fillMaxWidth().height(weekBarHeight(day)).clip(RoundedCornerShape(10.dp))
-                        .background(if (day.averageSystolic == null) colors.surfaceContainerHighest else gradeLook(day.categoryName()).mid))
-                    val today = day.date == state.today
-                    Text(weekdayLabel(day.date),
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                        fontWeight = if (today) FontWeight.ExtraBold else FontWeight.SemiBold,
-                        color = if (today) colors.onSurface else colors.onSurfaceVariant,
-                        maxLines = 1, overflow = TextOverflow.Clip)
+            Row(Modifier.fillMaxWidth().height(138.dp).padding(horizontal = 6.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(WeekSpacing), verticalAlignment = Alignment.Bottom) {
+                state.week.forEach { day ->
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(day.averageSystolic?.toString() ?: "", style = MaterialTheme.typography.labelMedium.copy(fontFamily = NumberFontFamily, fontSize = 11.sp), color = colors.onSurfaceVariant)
+                        Box(Modifier.widthIn(max = 26.dp).fillMaxWidth().height(weekBarHeight(day)).clip(RoundedCornerShape(10.dp))
+                            .background(if (day.averageSystolic == null) colors.surfaceContainerHighest else gradeLook(day.categoryName()).mid))
+                        val today = day.date == state.today
+                        Text(weekdayLabel(day.date),
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                            fontWeight = if (today) FontWeight.ExtraBold else FontWeight.SemiBold,
+                            color = if (today) colors.onSurface else colors.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Clip)
+                    }
                 }
             }
-        }
-        Text("柱子数字为当天收缩压平均值", style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant.copy(alpha = 0.72f), modifier = Modifier.padding(start = 8.dp, bottom = 4.dp))
+            Text("柱子数字为当天收缩压平均值", style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant.copy(alpha = 0.72f), modifier = Modifier.padding(start = 8.dp, bottom = 4.dp))
         } else {
             Text("每天记一记，连续记录会显示在上方。", style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp))
+        }
+    }
+}
+
+@Composable
+private fun WeekStreakSummary(state: DashboardUiState, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Row(modifier.testTag("week-streak-summary"), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(WeekSpacing)) {
+        Icon(Icons.Outlined.LocalFireDepartment, null, Modifier.size(25.dp), tint = colors.primary)
+        Column {
+            Text("${state.streakDays} 天", style = MaterialTheme.typography.titleLarge.copy(fontFamily = NumberFontFamily, fontSize = 25.sp), color = colors.onPrimaryContainer)
+            Text("连续记录", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = colors.onPrimaryContainer)
+        }
+    }
+}
+
+@Composable
+private fun WeekdayIndicators(state: DashboardUiState, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Row(modifier.testTag("week-day-indicators"), horizontalArrangement = Arrangement.spacedBy(WeekSpacing),
+        verticalAlignment = Alignment.CenterVertically) {
+        state.week.forEachIndexed { index, day ->
+            val today = day.date == state.today
+            val future = day.date.isAfter(state.today)
+            val container = when {
+                today -> colors.primary.copy(alpha = 0.22f)
+                day.recorded -> colors.primary
+                future -> colors.surfaceContainerHighest
+                else -> colors.primary.copy(alpha = 0.18f)
+            }
+            val content = when {
+                today -> colors.onPrimaryContainer
+                day.recorded -> colors.onPrimary
+                future -> colors.onSurfaceVariant.copy(alpha = 0.55f)
+                else -> colors.onPrimaryContainer
+            }
+            Box(
+                Modifier.weight(1f).heightIn(min = 22.dp).clip(RoundedCornerShape(8.dp)).background(container)
+                    .then(if (today) Modifier.border(1.dp, colors.primary, RoundedCornerShape(8.dp)) else Modifier),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(weekdayLabel(day.date), modifier = Modifier.testTag("week-day-label-$index"),
+                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
+                    fontWeight = FontWeight.ExtraBold, color = content)
+            }
         }
     }
 }
@@ -590,4 +658,4 @@ private fun DashboardWeekDay.categoryName(): String =
 /** 自然周固定顺序：周日起。今天也显示真实星期。 */
 private val WeekDayLabels = listOf("日", "一", "二", "三", "四", "五", "六")
 
-private fun weekdayLabel(date: LocalDate): String = WeekDayLabels[date.dayOfWeek.value - 1]
+internal fun weekdayLabel(date: LocalDate): String = WeekDayLabels[date.dayOfWeek.value % 7]

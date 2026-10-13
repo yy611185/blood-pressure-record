@@ -3,7 +3,6 @@ package com.example.bloodpressurerecord.ui.history
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -22,7 +21,7 @@ class CalendarAccessibilityTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun no_record_day_is_disabled_and_announces_today() {
+    fun no_record_day_is_selectable_and_announces_today() {
         val date = LocalDate.of(2026, 7, 25)
         composeRule.setContent {
             BloodPressureRecordTheme(darkTheme = true) {
@@ -34,6 +33,7 @@ class CalendarAccessibilityTest {
                         summary = null,
                         selected = false,
                         today = true,
+                        currentDate = date,
                         onClick = {},
                         onDoubleClick = {}
                     )
@@ -42,8 +42,8 @@ class CalendarAccessibilityTest {
         }
 
         composeRule.onNodeWithContentDescription(
-            "7月25日，今天，无记录，不可选择"
-        ).assertIsNotEnabled()
+            "7月25日，今天，无记录，可选择"
+        ).assertIsEnabled()
     }
 
     @Test
@@ -57,6 +57,7 @@ class CalendarAccessibilityTest {
                     summary = CalendarDaySummary(date, recordCount = 3, containsHighRisk = false),
                     selected = true,
                     today = false,
+                    currentDate = date,
                     onClick = { clicks += 1 },
                     onDoubleClick = { clicks += 2 }
                 )
@@ -69,6 +70,8 @@ class CalendarAccessibilityTest {
             .assertIsEnabled()
             .assertIsSelected()
             .performClick()
+        // combinedClickable waits out the double-click interval before a single click.
+        composeRule.waitUntil(timeoutMillis = 2_000) { clicks == 1 }
         assertEquals(1, clicks)
     }
 
@@ -85,6 +88,7 @@ class CalendarAccessibilityTest {
                     ),
                     selected = false,
                     today = false,
+                    currentDate = date,
                     onClick = {},
                     onDoubleClick = { detailClicks += 1 }
                 )

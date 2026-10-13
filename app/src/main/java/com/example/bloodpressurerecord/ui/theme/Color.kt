@@ -25,6 +25,8 @@ val Terracotta300 = Color(0xFFFFC6A5)
 val Terracotta400 = Color(0xFFFFA997)
 val Terracotta500 = Color(0xFFDF6A55)
 val Terracotta600 = Color(0xFFC4513E)
+// 操作文字同时用于纸色背景和白底按钮，保持珊瑚色相并满足正文对比度。
+val TerracottaAction = Color(0xFFB94B39)
 val Terracotta700 = Color(0xFF963828)
 val Terracotta800 = Color(0xFF532B24)
 val Terracotta900 = Color(0xFF40201B)

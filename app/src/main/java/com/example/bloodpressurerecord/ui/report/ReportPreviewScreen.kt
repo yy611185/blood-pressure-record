@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -52,6 +53,7 @@ import com.example.bloodpressurerecord.export.report.ReportShare
 import com.example.bloodpressurerecord.export.report.PdfReportRenderer
 import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.ui.common.AppTopBar
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -100,6 +102,7 @@ fun ReportPreviewScreen(
             "医生报告预览" else "${state.options.template.title}预览", onBack = onBack)
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = pageContentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -133,7 +136,7 @@ fun ReportPreviewScreen(
             }
             item {
                 Column(
-                    Modifier.fillMaxWidth().padding(bottom = 40.dp),
+                    Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (state.isSaving) LinearProgressIndicator(Modifier.fillMaxWidth())

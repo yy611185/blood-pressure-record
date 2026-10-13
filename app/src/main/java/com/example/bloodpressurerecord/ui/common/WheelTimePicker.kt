@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,17 +21,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private val WheelItemHeight = 44.dp
 private const val WheelVisibleCount = 3
 
 /**
@@ -45,6 +50,7 @@ fun WheelTimePickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (hour: Int, minute: Int) -> Unit
 ) {
+    val itemHeight = with(LocalDensity.current) { 32.sp.toDp().coerceAtLeast(48.dp) }
     val hourState = rememberLazyListState(
         initialFirstVisibleItemIndex = initialHour.coerceIn(0, 23)
     )
@@ -70,7 +76,7 @@ fun WheelTimePickerDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(0.86f)
-                        .height(WheelItemHeight)
+                        .height(itemHeight)
                         .background(
                             MaterialTheme.colorScheme.primaryContainer,
                             MaterialTheme.shapes.large
@@ -81,6 +87,7 @@ fun WheelTimePickerDialog(
                         state = hourState,
                         itemCount = 24,
                         selectedIndex = selectedHour,
+                        itemHeight = itemHeight,
                         describe = { "$it 时" }
                     )
                     Text(
@@ -94,6 +101,7 @@ fun WheelTimePickerDialog(
                         state = minuteState,
                         itemCount = 60,
                         selectedIndex = selectedMinute,
+                        itemHeight = itemHeight,
                         describe = { "$it 分" }
                     )
                 }
@@ -124,17 +132,19 @@ private fun WheelColumn(
     state: LazyListState,
     itemCount: Int,
     selectedIndex: Int,
+    itemHeight: Dp,
     describe: (Int) -> String
 ) {
+    val scope = rememberCoroutineScope()
     LazyColumn(
         state = state,
         flingBehavior = rememberSnapFlingBehavior(lazyListState = state),
         modifier = Modifier
             .width(84.dp)
-            .height(WheelItemHeight * WheelVisibleCount),
+            .height(itemHeight * WheelVisibleCount),
         // 上下各留一行高度，让第一项/最后一项也能滚到中间。
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            vertical = WheelItemHeight
+            vertical = itemHeight
         )
     ) {
         items(itemCount) { index ->
@@ -142,13 +152,19 @@ private fun WheelColumn(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(WheelItemHeight)
+                    .height(itemHeight)
+                    .selectable(
+                        selected = isSelected,
+                        role = Role.RadioButton,
+                        onClick = { scope.launch { state.animateScrollToItem(index) } }
+                    )
                     .semantics { contentDescription = describe(index) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "%02d".format(index),
                     fontSize = if (isSelected) 24.sp else 18.sp,
+                    lineHeight = if (isSelected) 32.sp else 26.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                     color = if (isSelected) {
                         MaterialTheme.colorScheme.onPrimaryContainer
