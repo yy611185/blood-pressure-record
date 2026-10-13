@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册，健康数据保存在手机里。仅为检查与下载软件更新联网。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.3-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.5-orange)
 
 ---
 
@@ -184,6 +184,8 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 2.3.5 | 2026-10-13 | 首页大字布局、星期标记、时间选择与对比度优化 |
+| 2.3.4 | 2026-10-12 | 应用内更新自动版本发布流程 |
 | 2.3.2 | 2026-10-11 | 首页血压区间示意条、本地自定义范围、深浅色与无障碍支持 |
 | 2.3.1 | 2026-10-11 | 趋势每次测量/每日平均自由组合，记住偏好，优化密集节点和粒度切换 |
 | 2.2.2 | 2026-10-07 | 底部导航随滚动收起，统一选项、打卡、录入与折叠的轻量过渡 |
@@ -212,7 +214,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ---
 
-*最后更新：2026-10 · 版本 2.3.2 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
+*最后更新：2026-10 · 版本 2.3.5 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
 
 - `BP_RELEASE_STORE_FILE`：签名库路径
 - `BP_RELEASE_STORE_PASSWORD`：签名库密码
@@ -258,6 +260,8 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 2.3.5 | 2026-10-13 | 首页大字布局、星期标记、时间选择与对比度优化 |
+| 2.3.4 | 2026-10-12 | 应用内更新自动版本发布流程 |
 | 2.3.2 | 2026-10-11 | 首页血压区间示意条、本地自定义范围、深浅色与无障碍支持 |
 | 2.3.1 | 2026-10-11 | 趋势每次测量/每日平均自由组合，记住偏好，优化密集节点和粒度切换 |
 | 2.2.2 | 2026-10-07 | 底部导航随滚动收起，统一选项、打卡、录入与折叠的轻量过渡 |

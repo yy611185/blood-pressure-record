@@ -4,6 +4,7 @@ import java.net.URI
 import java.net.URISyntaxException
 import java.time.Instant
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -22,7 +23,8 @@ data class UpdateManifest(
     val notes: String,
     val releasesUrl: String,
     val publishedAt: String,
-    val minSupportedVersionCode: Long? = null
+    val minSupportedVersionCode: Long? = null,
+    val mirrors: List<String> = emptyList()
 ) {
     val identity: String get() = "$versionCode|$url|$size|${sha256.lowercase()}"
 
@@ -38,6 +40,7 @@ data class UpdateManifest(
         put("releasesUrl", releasesUrl)
         put("publishedAt", publishedAt)
         minSupportedVersionCode?.let { put("minSupportedVersionCode", it) }
+        if (mirrors.isNotEmpty()) put("mirrors", JsonArray(mirrors.map { JsonPrimitive(it) }))
     }.toString()
 
     companion object {
@@ -74,6 +77,15 @@ data class UpdateManifest(
             val apk = string("apk")
             val url = string("url")
             UpdateUrls.validateApk(url, version, apk)
+            val mirrors = root["mirrors"]?.let { value ->
+                val array = value as? JsonArray
+                    ?: throw IllegalArgumentException("更新清单字段 mirrors 必须为字符串数组")
+                array.map { item ->
+                    val mirror = item as? JsonPrimitive
+                    require(mirror != null && mirror.isString) { "更新清单字段 mirrors 必须为字符串数组" }
+                    mirror.content.also { UpdateUrls.validateApk(it, version, apk) }
+                }
+            }.orEmpty()
             val release = string("releasesUrl")
             UpdateUrls.validateRelease(release)
             val published = string("publishedAt")
@@ -90,7 +102,8 @@ data class UpdateManifest(
             return UpdateManifest(
                 version = version, versionCode = versionCode, apk = apk, size = size,
                 sha256 = sha256.lowercase(), url = url, notes = string("notes"),
-                releasesUrl = release, publishedAt = published, minSupportedVersionCode = minimum
+                releasesUrl = release, publishedAt = published, minSupportedVersionCode = minimum,
+                mirrors = mirrors
             )
         }
     }
@@ -98,13 +111,23 @@ data class UpdateManifest(
 
 object UpdateUrls {
     const val HOST = "updates.0u0w0u0.com"
+    const val DIRECT_HOST = "dl.0u0w0u0.com"
     const val MANIFEST_URL = "https://updates.0u0w0u0.com/android/stable/latest.json"
     const val MAX_APK_BYTES = 256L * 1024 * 1024
 
     fun validateApk(url: String, version: String, apk: String) {
         val expected = "blood-pressure-record-v$version-release.apk"
         require(apk == expected && Regex("[A-Za-z0-9.-]+\\.apk").matches(apk)) { "安装包文件名无效" }
-        val uri = trustedUri(url, HOST)
+        val uri = parseUri(url)
+        // Explicit port spelling is part of the whitelist, including rejection of :443.
+        val endpoint = uri.host to uri.port
+        require(uri.scheme == "https" && endpoint in APK_ENDPOINTS &&
+            uri.rawAuthority == when (endpoint) {
+                HOST to -1 -> HOST
+                else -> "$DIRECT_HOST:8443"
+            } && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
+            "更新地址必须为可信 HTTPS 地址"
+        }
         require(uri.rawPath == "/android/stable/$expected") { "安装包地址超出可信范围" }
     }
 
@@ -116,13 +139,25 @@ object UpdateUrls {
     }
 
     private fun trustedUri(url: String, host: String): URI {
-        val uri = try { URI(url) } catch (error: URISyntaxException) {
-            throw IllegalArgumentException("更新地址格式错误", error)
-        }
+        val uri = parseUri(url)
         require(uri.scheme == "https" && uri.host == host && uri.port == -1 &&
             uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
             "更新地址必须为可信 HTTPS 地址"
         }
         return uri
     }
+
+    private val APK_ENDPOINTS = setOf(HOST to -1, DIRECT_HOST to 8443)
+
+    private fun parseUri(url: String): URI = try { URI(url) } catch (error: URISyntaxException) {
+        throw IllegalArgumentException("更新地址格式错误", error)
+    }
+}
+
+internal fun updateDownloadCandidates(manifest: UpdateManifest): List<String> = listOf(manifest.url) + manifest.mirrors
+
+internal fun updateDownloadSource(url: String): String = when (URI(url).host) {
+    UpdateUrls.HOST -> "Cloudflare"
+    UpdateUrls.DIRECT_HOST -> "直连"
+    else -> URI(url).authority.orEmpty()
 }

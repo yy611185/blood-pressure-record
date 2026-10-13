@@ -13,11 +13,11 @@ import androidx.compose.ui.unit.dp
 
 // UIredesign 根目录原型：奶白背景、白色卡片、珊瑚橙操作。
 private val LightColors = lightColorScheme(
-    primary = Terracotta500,
+    primary = TerracottaAction,
     onPrimary = OnTerracotta,
     primaryContainer = Terracotta200,
     onPrimaryContainer = Terracotta700,
-    secondary = Sage500,
+    secondary = Sage600,
     onSecondary = Sage100,
     secondaryContainer = Sage200,
     onSecondaryContainer = Sage700,

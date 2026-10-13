@@ -248,7 +248,20 @@ class UpdateViewModel(
         downloadAction { downloadManager.start(manifest, automatic = false) }
     }
 
-    fun retryDownload() { policyPausedIdentity = null; downloadAction { downloadManager.retry() } }
+    fun retryDownload() {
+        policyPausedIdentity = null
+        val state = mutableState.value
+        val latest = state.manifest
+        val task = state.download.manifest
+        downloadAction {
+            // A restored task can predate mirrors added to the current version's manifest.
+            if (latest != null && task != null && task.identity == latest.identity && task.mirrors != latest.mirrors) {
+                downloadManager.start(latest, automatic = false)
+            } else {
+                downloadManager.retry()
+            }
+        }
+    }
     fun cancelDownload() { policyPausedIdentity = null; downloadAction { downloadManager.cancel() } }
     suspend fun verifiedFile(): File? = downloadManager.verifiedFile()
 
