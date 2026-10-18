@@ -113,7 +113,7 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
     val updatePromptAllowed = updateForeground && safeUpdateRoute && !dataActionBusy
     val snackbar = remember { SnackbarHostState() }
     val updateActions = rememberUpdatePlatformActions(
-        updateVm, application.appContainer.updateInstaller, updatePromptAllowed, snackbar
+        updateVm, snackbar
     )
 
     DisposableEffect(lifecycleOwner, updateVm) {
@@ -380,8 +380,9 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                         onOpenAppGuide = { navController.navigate(AppDestination.SettingsInfoAppGuide.route) },
                         onOpenReleaseNotes = { navController.navigate(AppDestination.SettingsInfoReleaseNotes.route) },
                         updateViewModel = updateVm,
-                        onInstallUpdate = updateActions.install,
-                        onOpenReleases = updateActions.openReleases
+                        onDownloadUpdate = updateActions.download,
+                        onOpenReleases = updateActions.openReleases,
+                        onOpenDirectDownload = updateActions.openDirectDownload
                     )
                 }
                 composable(AppDestination.SettingsInfoAppGuide.route) {
@@ -416,14 +417,12 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
         UpdateDialog(
             state = updateState,
             currentVersion = BuildConfig.VERSION_NAME,
-            onDownload = updateVm::download,
-            onRetry = updateVm::retryDownload,
-            onCancel = updateVm::cancelDownload,
-            onInstall = updateActions.install,
+            onDownload = updateActions.download,
             onSnooze = updateVm::snooze,
             onSkip = updateVm::skip,
             onDismiss = updateVm::dismissDialog,
-            onOpenReleases = updateActions.openReleases
+            onOpenReleases = updateActions.openReleases,
+            onOpenDirectDownload = updateActions.openDirectDownload
         )
     }
 }

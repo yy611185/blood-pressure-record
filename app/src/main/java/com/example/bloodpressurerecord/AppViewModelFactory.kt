@@ -91,8 +91,7 @@ class AppViewModelFactory(
             UpdateViewModel::class.java -> {
                 UpdateViewModel(
                     repository = container.updateRepository,
-                    preferences = container.updatePreferences,
-                    downloadManager = container.updateDownloadManager
+                    preferences = container.updatePreferences
                 ) as T
             }
 

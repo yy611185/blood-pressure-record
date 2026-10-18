@@ -29,11 +29,16 @@ class UpdateManifestTest {
         assertEquals(manifest, UpdateManifest.parse(add("\"mirrors\": []")))
     }
 
-    @Test fun `whitelist admits only the two exact HTTPS endpoints`() {
+    @Test fun `primary and direct download use separate exact HTTPS endpoints`() {
         val manifest = UpdateManifest.parse(fixture)
         val path = "/android/stable/${manifest.apk}"
-        listOf("https://${UpdateUrls.HOST}$path", "https://${UpdateUrls.DIRECT_HOST}:8443$path").forEach {
-            UpdateUrls.validateApk(it, manifest.version, manifest.apk)
+        UpdateUrls.validateApk("https://${UpdateUrls.HOST}$path", manifest.version, manifest.apk)
+        UpdateUrls.validateDirectApk("https://${UpdateUrls.DIRECT_HOST}:8443$path", manifest.version, manifest.apk)
+        assertThrows(IllegalArgumentException::class.java) {
+            UpdateUrls.validateApk("https://${UpdateUrls.DIRECT_HOST}:8443$path", manifest.version, manifest.apk)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            UpdateUrls.validateDirectApk(manifest.url, manifest.version, manifest.apk)
         }
         listOf(
             "http://${UpdateUrls.HOST}$path", "http://${UpdateUrls.DIRECT_HOST}:8443$path",
@@ -45,21 +50,21 @@ class UpdateManifestTest {
             "https://${UpdateUrls.DIRECT_HOST}:8443/android/stable/another.apk"
         ).forEach { url ->
             assertThrows("Must reject $url", IllegalArgumentException::class.java) {
-                UpdateUrls.validateApk(url, manifest.version, manifest.apk)
+                UpdateUrls.validateMirror(url, manifest.version, manifest.apk)
             }
         }
     }
 
-    @Test fun `mirrors round trip preserve candidate order and identity`() {
+    @Test fun `explicit direct mirror stays separate from the preferred manifest URL`() {
         val base = UpdateManifest.parse(fixture)
         val direct = base.url.replace(UpdateUrls.HOST, "${UpdateUrls.DIRECT_HOST}:8443")
         val manifest = UpdateManifest.parse(add("\"mirrors\": [\"$direct\", \"${base.url}\"]"))
-        assertEquals(listOf(base.url, direct, base.url), updateDownloadCandidates(manifest))
-        assertEquals(listOf(base.url), updateDownloadCandidates(base))
+        assertEquals(base.url, manifest.url)
+        assertEquals(direct, UpdateUrls.directDownload(manifest))
+        assertNull(UpdateUrls.directDownload(base))
         assertEquals(base.identity, manifest.identity)
         assertEquals(manifest, UpdateManifest.parse(manifest.encode()))
-        assertEquals("Cloudflare", updateDownloadSource(base.url))
-        assertEquals("直连", updateDownloadSource(direct))
+        invalid(fixture.replace(base.url, direct))
     }
 
     @Test fun `mirrors reject wrong field types non strings and untrusted URLs`() {
@@ -109,6 +114,14 @@ class UpdateManifestTest {
             manifest.url.replace(UpdateUrls.HOST, "evil.example"),
             manifest.url.replace(UpdateUrls.HOST, "${UpdateUrls.HOST}:443"),
             manifest.url.replace(UpdateUrls.HOST, "user@${UpdateUrls.HOST}"),
+            manifest.url.replace(UpdateUrls.HOST, "${UpdateUrls.HOST}.evil.example"),
+            manifest.url.replace(UpdateUrls.HOST, "18.162.102.13"),
+            manifest.url.replace("https:", "intent:"),
+            manifest.url.replace("https:", "file:"),
+            manifest.url.replace("https:", "javascript:"),
+            manifest.url.replace("/android/stable/", "/android/beta/"),
+            manifest.url.replace("blood-pressure", "%62lood-pressure"),
+            manifest.url.replace("release.apk", "release.apk/extra"),
             manifest.url.replace("/android/stable/", "/android/stable/../"),
             manifest.url.replace("/android/stable/", "/android/stable/%2e%2e/"),
             manifest.url + "?token=123", manifest.url + "#download",
@@ -116,6 +129,21 @@ class UpdateManifestTest {
             manifest.url.replace("/android/stable/", "/android/%GG/")
         ).forEach { invalid(fixture.replace(manifest.url, it)) }
         invalid(fixture.replace("/yy611185/blood-pressure-record/", "/another/repository/"))
+    }
+
+    @Test fun `fixed GitHub fallback is valid without a manifest and rejects lookalikes`() {
+        UpdateUrls.validateRelease(UpdateUrls.RELEASES_URL)
+        listOf(
+            UpdateUrls.RELEASES_URL.replace("https:", "http:"),
+            UpdateUrls.RELEASES_URL.replace("github.com", "github.com.evil.example"),
+            UpdateUrls.RELEASES_URL.replace("github.com", "user@github.com"),
+            UpdateUrls.RELEASES_URL.replace("github.com", "github.com:443"),
+            UpdateUrls.RELEASES_URL.replace("github.com", "github.com:"),
+            UpdateUrls.RELEASES_URL + "?next=evil", UpdateUrls.RELEASES_URL + "#download",
+            UpdateUrls.RELEASES_URL.replace("/releases", "/issues")
+        ).forEach { url ->
+            assertThrows("Must reject $url", IllegalArgumentException::class.java) { UpdateUrls.validateRelease(url) }
+        }
     }
 
     @Test fun `invalid publication time and oversized JSON are rejected`() {

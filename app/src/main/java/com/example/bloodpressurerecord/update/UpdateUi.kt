@@ -40,18 +40,13 @@ fun UpdateDialog(
     state: UpdateUiState,
     currentVersion: String,
     onDownload: () -> Unit,
-    onRetry: () -> Unit,
-    onCancel: () -> Unit,
-    onInstall: () -> Unit,
     onSnooze: () -> Unit,
     onSkip: () -> Unit,
     onDismiss: () -> Unit,
-    onOpenReleases: (String) -> Unit
+    onOpenReleases: () -> Unit,
+    onOpenDirectDownload: (() -> Unit)? = null
 ) {
     val manifest = state.manifest ?: return
-    val hasTask = state.download.phase != UpdateDownloadPhase.IDLE
-    val taskMatchesLatest = hasTask && state.download.manifest?.identity == manifest.identity
-    val otherTask = state.download.manifest?.takeIf { hasTask && it.identity != manifest.identity }
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.85f).dp
 
     Dialog(onDismissRequest = onDismiss) {
@@ -66,44 +61,36 @@ fun UpdateDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = if (state.required) "需要更新" else "发现新版本",
+                    text = if (state.required) "建议尽快更新" else "发现新版本",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.semantics { heading() }
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("最新版本 ${manifest.version}", style = MaterialTheme.typography.titleMedium)
-                    SecondaryText("当前版本 $currentVersion · 安装包 ${formatUpdateFileSize(manifest.size)}")
-                    SecondaryText("下载完成后，再由您确认安装。")
+                    SecondaryText("当前版本 $currentVersion")
+                    SecondaryText("发布时间：${formatUpdatePublishedTime(manifest.publishedAt)}")
                     if (state.required) {
-                        Text(
-                            "当前版本低于建议的最低支持版本。您仍可继续记录血压、查看历史、使用提醒和备份。",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        SecondaryText("当前版本低于建议的最低支持版本。您仍可继续记录血压、查看历史、使用提醒和备份。")
                     }
                 }
                 UpdateNotes(manifest.notes)
-                if (taskMatchesLatest) {
-                    UpdateDownloadContent(state.download, onRetry, onCancel, onInstall)
-                    AppSecondaryButton("稍后查看", onDismiss, Modifier.fillMaxWidth())
-                } else {
-                    otherTask?.let {
-                        SecondaryText("另有版本 ${it.version} 的安装包；下载此版本将替换旧任务。")
+                SecondaryText(EXTERNAL_INSTALL_HINT)
+                state.checkMessage?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+                AppPrimaryButton("前往浏览器下载更新", onDownload, Modifier.fillMaxWidth())
+                AppSecondaryButton("72 小时后提醒", onSnooze, Modifier.fillMaxWidth())
+                if (state.required) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text("继续使用")
                     }
-                    AppPrimaryButton("下载并安装", onDownload, Modifier.fillMaxWidth())
-                    if (state.required) {
-                        AppSecondaryButton("继续使用", onDismiss, Modifier.fillMaxWidth())
-                    } else {
-                        AppSecondaryButton("72 小时后提醒", onSnooze, Modifier.fillMaxWidth())
-                        TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                            Text("跳过此版本")
-                        }
+                } else {
+                    TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text("跳过此版本")
                     }
                 }
-                TextButton(
-                    onClick = { onOpenReleases(manifest.releasesUrl) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                ) { Text("前往 GitHub 查看发布说明") }
+                ExternalDownloadLinks(onOpenReleases, onOpenDirectDownload)
             }
         }
     }
@@ -116,13 +103,9 @@ fun UpdateSettingsContent(
     currentVersion: String,
     onCheck: () -> Unit,
     onAutoCheckChanged: (Boolean) -> Unit,
-    onAutoDownloadChanged: (Boolean) -> Unit,
-    onWifiOnlyChanged: (Boolean) -> Unit,
     onDownload: () -> Unit,
-    onRetry: () -> Unit,
-    onCancel: () -> Unit,
-    onInstall: () -> Unit,
-    onOpenReleases: (String) -> Unit
+    onOpenReleases: () -> Unit,
+    onOpenDirectDownload: (() -> Unit)? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(
@@ -153,63 +136,60 @@ fun UpdateSettingsContent(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     UpdateCheckState.FAILED -> Text(
-                        state.checkMessage ?: "检查失败，请稍后重试。您可以继续正常使用应用。",
+                        state.checkMessage ?: "检查失败，请稍后重试。您可以继续正常使用应用，也可访问备用下载。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error
                     )
                 }
-                if (state.checkState != UpdateCheckState.FAILED && state.checkState != UpdateCheckState.CURRENT) {
-                    state.checkMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+                if (state.checkState != UpdateCheckState.FAILED) {
+                    state.checkMessage?.takeIf { it.isNotBlank() && it != "已是最新版本" }?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            UpdatePreferenceSwitch(
-                "自动检查更新", "打开应用或返回前台时检查，成功后 24 小时内不再检查。",
-                state.settings.autoCheckEnabled, onAutoCheckChanged
-            )
-            UpdatePreferenceSwitch(
-                "自动下载安装包", "发现更新后下载；安装前仍需您确认。",
-                state.settings.autoDownloadEnabled, onAutoDownloadChanged
-            )
-            UpdatePreferenceSwitch(
-                "仅 Wi-Fi 下载", "只在可用且非计费的 Wi-Fi 网络下载；关闭后允许使用移动数据。",
-                state.settings.wifiOnly, onWifiOnlyChanged
-            )
-        }
-        if (state.download.phase != UpdateDownloadPhase.IDLE) {
-            DataCard {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "安装包${state.download.manifest?.version?.let { " $it" }.orEmpty()}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    UpdateDownloadContent(state.download, onRetry, onCancel, onInstall)
-                }
-            }
-        }
+        UpdatePreferenceSwitch(
+            "自动检查更新", "打开应用或返回前台时检查，成功后 24 小时内不再检查。",
+            state.settings.autoCheckEnabled, onAutoCheckChanged
+        )
         state.manifest?.let { manifest ->
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("最新发布 ${manifest.version}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    SecondaryText("安装包 ${formatUpdateFileSize(manifest.size)}")
+                    Text(
+                        "${if (state.checkState == UpdateCheckState.FAILED) "上次获取的发布" else "最新发布"} ${manifest.version}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.semantics { heading() }
+                    )
+                    SecondaryText("发布时间：${formatUpdatePublishedTime(manifest.publishedAt)}")
                     UpdateNotes(manifest.notes)
-                    val hasTask = state.download.phase != UpdateDownloadPhase.IDLE
-                    val taskMatchesLatest = hasTask && state.download.manifest?.identity == manifest.identity
-                    if (manifest.versionCode > BuildConfig.VERSION_CODE.toLong() && !taskMatchesLatest) {
-                        state.download.manifest?.takeIf { hasTask }?.let {
-                            SecondaryText("另有版本 ${it.version} 的安装包；下载此版本将替换旧任务。")
-                        }
-                        AppPrimaryButton("下载此版本", onDownload, Modifier.fillMaxWidth())
-                    }
-                    TextButton(onClick = { onOpenReleases(manifest.releasesUrl) }) {
-                        Text("前往 GitHub 查看发布说明")
+                    if (manifest.versionCode > BuildConfig.VERSION_CODE.toLong()) {
+                        SecondaryText(EXTERNAL_INSTALL_HINT)
+                        AppPrimaryButton("前往浏览器下载更新", onDownload, Modifier.fillMaxWidth())
                     }
                 }
             }
         }
-        SecondaryText("检查与下载软件更新时会联网；健康记录、个人资料和备份文件不会上传。")
+        // The fixed Releases fallback remains available even without a valid manifest.
+        ExternalDownloadLinks(onOpenReleases, onOpenDirectDownload)
+        SecondaryText("检查更新会联网；下载由外部浏览器处理。健康记录、个人资料和备份文件不会上传。")
+    }
+}
+
+@Composable
+private fun ExternalDownloadLinks(
+    onOpenReleases: () -> Unit,
+    onOpenDirectDownload: (() -> Unit)?
+) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        onOpenDirectDownload?.let { openDirectDownload ->
+            TextButton(onClick = openDirectDownload, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text("外部下载备用渠道（直连）")
+            }
+        }
+        TextButton(onClick = onOpenReleases, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text("GitHub Releases 备用下载")
+        }
     }
 }
 
@@ -222,6 +202,7 @@ private fun UpdatePreferenceSwitch(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth()
+            .heightIn(min = 48.dp)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -245,78 +226,22 @@ private fun UpdateNotes(notes: String) {
 }
 
 @Composable
-private fun UpdateDownloadContent(
-    download: UpdateDownloadState,
-    onRetry: () -> Unit,
-    onCancel: () -> Unit,
-    onInstall: () -> Unit
-) {
-    val total = download.manifest?.size ?: 0L
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            when (download.phase) {
-                UpdateDownloadPhase.IDLE -> "尚未下载"
-                UpdateDownloadPhase.WAITING_NETWORK -> "等待可用网络"
-                UpdateDownloadPhase.DOWNLOADING -> "正在下载安装包"
-                UpdateDownloadPhase.PAUSED -> "下载已暂停"
-                UpdateDownloadPhase.VERIFYING -> "正在检查安装包"
-                UpdateDownloadPhase.READY -> "安装包已准备好"
-                UpdateDownloadPhase.FAILED -> "下载或检查失败"
-            },
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-        download.source?.let { SecondaryText("下载来源：$it") }
-        if (download.phase == UpdateDownloadPhase.DOWNLOADING || download.phase == UpdateDownloadPhase.PAUSED ||
-            download.phase == UpdateDownloadPhase.WAITING_NETWORK) {
-            if (total > 0L) {
-                val progress = (download.downloadedBytes.toDouble() / total).coerceIn(0.0, 1.0).toFloat()
-                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                SecondaryText("${formatUpdateFileSize(download.downloadedBytes)} / ${formatUpdateFileSize(total)} · ${(progress * 100).toInt()}%")
-            }
-        }
-        if (download.phase == UpdateDownloadPhase.VERIFYING) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-        download.message?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (download.phase == UpdateDownloadPhase.FAILED) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        when (download.phase) {
-            UpdateDownloadPhase.READY -> {
-                SecondaryText("点击后由 Android 系统安装。请在系统页面确认更新；取消后可回来继续安装。")
-                AppPrimaryButton("安装更新", onInstall, Modifier.fillMaxWidth())
-                AppSecondaryButton("删除安装包", onCancel, Modifier.fillMaxWidth())
-            }
-            UpdateDownloadPhase.FAILED, UpdateDownloadPhase.PAUSED -> {
-                AppPrimaryButton("继续下载或重试", onRetry, Modifier.fillMaxWidth())
-                AppSecondaryButton("取消下载", onCancel, Modifier.fillMaxWidth())
-            }
-            UpdateDownloadPhase.WAITING_NETWORK, UpdateDownloadPhase.DOWNLOADING -> {
-                AppSecondaryButton("取消下载", onCancel, Modifier.fillMaxWidth())
-            }
-            UpdateDownloadPhase.VERIFYING -> AppSecondaryButton("取消下载", onCancel, Modifier.fillMaxWidth())
-            UpdateDownloadPhase.IDLE -> Unit
-        }
-    }
-}
-
-@Composable
 private fun SecondaryText(text: String) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-internal fun formatUpdateFileSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024L -> String.format(Locale.CHINA, "%.1f MB", bytes / (1024.0 * 1024.0))
-    bytes >= 1024L -> String.format(Locale.CHINA, "%.1f KB", bytes / 1024.0)
-    else -> "${bytes.coerceAtLeast(0)} B"
+private const val EXTERNAL_INSTALL_HINT = "下载后打开 APK，按照系统提示覆盖安装，无需卸载旧版。"
+
+private fun formatUpdatePublishedTime(timestamp: String): String = try {
+    formatUpdateInstant(Instant.parse(timestamp))
+} catch (_: java.time.DateTimeException) {
+    "未知"
 }
 
 private fun formatUpdateCheckTime(timestamp: Long?): String = timestamp?.let {
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.CHINA)
-        .withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(it))
+    formatUpdateInstant(Instant.ofEpochMilli(it))
 } ?: "尚未成功检查"
+
+private fun formatUpdateInstant(instant: Instant): String =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
+        .withZone(ZoneId.systemDefault()).format(instant)

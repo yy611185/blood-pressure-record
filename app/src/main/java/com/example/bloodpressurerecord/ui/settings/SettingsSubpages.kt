@@ -513,8 +513,9 @@ fun SettingsInfoScreen(
     onOpenAppGuide: () -> Unit,
     onOpenReleaseNotes: () -> Unit,
     updateViewModel: UpdateViewModel,
-    onInstallUpdate: () -> Unit,
-    onOpenReleases: (String) -> Unit
+    onDownloadUpdate: () -> Unit,
+    onOpenReleases: () -> Unit,
+    onOpenDirectDownload: (() -> Unit)?
 ) {
     val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
     SettingsSubPageShell("应用说明与更新说明", onBack) {
@@ -523,13 +524,9 @@ fun SettingsInfoScreen(
             currentVersion = BuildConfig.VERSION_NAME,
             onCheck = updateViewModel::checkManually,
             onAutoCheckChanged = updateViewModel::setAutoCheckEnabled,
-            onAutoDownloadChanged = updateViewModel::setAutoDownloadEnabled,
-            onWifiOnlyChanged = updateViewModel::setWifiOnly,
-            onDownload = updateViewModel::download,
-            onRetry = updateViewModel::retryDownload,
-            onCancel = updateViewModel::cancelDownload,
-            onInstall = onInstallUpdate,
-            onOpenReleases = onOpenReleases
+            onDownload = onDownloadUpdate,
+            onOpenReleases = onOpenReleases,
+            onOpenDirectDownload = onOpenDirectDownload
         )
         SettingListItem(
             title = "应用说明",

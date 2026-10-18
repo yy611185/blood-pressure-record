@@ -83,7 +83,7 @@ data class UpdateManifest(
                 array.map { item ->
                     val mirror = item as? JsonPrimitive
                     require(mirror != null && mirror.isString) { "更新清单字段 mirrors 必须为字符串数组" }
-                    mirror.content.also { UpdateUrls.validateApk(it, version, apk) }
+                    mirror.content.also { UpdateUrls.validateMirror(it, version, apk) }
                 }
             }.orEmpty()
             val release = string("releasesUrl")
@@ -113,19 +113,34 @@ object UpdateUrls {
     const val HOST = "updates.0u0w0u0.com"
     const val DIRECT_HOST = "dl.0u0w0u0.com"
     const val MANIFEST_URL = "https://updates.0u0w0u0.com/android/stable/latest.json"
+    const val RELEASES_URL = "https://github.com/yy611185/blood-pressure-record/releases"
     const val MAX_APK_BYTES = 256L * 1024 * 1024
 
     fun validateApk(url: String, version: String, apk: String) {
+        validateApkEndpoint(url, version, apk, HOST)
+    }
+
+    fun validateDirectApk(url: String, version: String, apk: String) {
+        validateApkEndpoint(url, version, apk, "$DIRECT_HOST:8443")
+    }
+
+    fun validateMirror(url: String, version: String, apk: String) {
+        if (parseUri(url).host == DIRECT_HOST) validateDirectApk(url, version, apk)
+        else validateApk(url, version, apk)
+    }
+
+    /** Only an explicitly advertised, independently validated direct mirror gets a separate action. */
+    fun directDownload(manifest: UpdateManifest): String? = manifest.mirrors.firstOrNull { url ->
+        runCatching { validateDirectApk(url, manifest.version, manifest.apk) }.isSuccess
+    }
+
+    private fun validateApkEndpoint(url: String, version: String, apk: String, authority: String) {
         val expected = "blood-pressure-record-v$version-release.apk"
         require(apk == expected && Regex("[A-Za-z0-9.-]+\\.apk").matches(apk)) { "安装包文件名无效" }
         val uri = parseUri(url)
-        // Explicit port spelling is part of the whitelist, including rejection of :443.
-        val endpoint = uri.host to uri.port
-        require(uri.scheme == "https" && endpoint in APK_ENDPOINTS &&
-            uri.rawAuthority == when (endpoint) {
-                HOST to -1 -> HOST
-                else -> "$DIRECT_HOST:8443"
-            } && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
+        // Exact authority also rejects alternate port spellings, user info and encoded hosts.
+        require(uri.scheme == "https" && uri.rawAuthority == authority &&
+            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
             "更新地址必须为可信 HTTPS 地址"
         }
         require(uri.rawPath == "/android/stable/$expected") { "安装包地址超出可信范围" }
@@ -140,24 +155,14 @@ object UpdateUrls {
 
     private fun trustedUri(url: String, host: String): URI {
         val uri = parseUri(url)
-        require(uri.scheme == "https" && uri.host == host && uri.port == -1 &&
+        require(uri.scheme == "https" && uri.rawAuthority == host && uri.host == host && uri.port == -1 &&
             uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
             "更新地址必须为可信 HTTPS 地址"
         }
         return uri
     }
 
-    private val APK_ENDPOINTS = setOf(HOST to -1, DIRECT_HOST to 8443)
-
     private fun parseUri(url: String): URI = try { URI(url) } catch (error: URISyntaxException) {
         throw IllegalArgumentException("更新地址格式错误", error)
     }
-}
-
-internal fun updateDownloadCandidates(manifest: UpdateManifest): List<String> = listOf(manifest.url) + manifest.mirrors
-
-internal fun updateDownloadSource(url: String): String = when (URI(url).host) {
-    UpdateUrls.HOST -> "Cloudflare"
-    UpdateUrls.DIRECT_HOST -> "直连"
-    else -> URI(url).authority.orEmpty()
 }

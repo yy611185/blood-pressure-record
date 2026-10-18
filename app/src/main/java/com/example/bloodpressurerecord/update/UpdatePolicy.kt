@@ -28,9 +28,5 @@ object UpdatePolicy {
         }
     }
 
-    fun shouldAutoDownload(manifest: UpdateManifest, currentVersionCode: Long, settings: UpdateSettings, now: Long): Boolean =
-        settings.autoDownloadEnabled && settings.cancelledAutoDownloadVersionCode != manifest.versionCode &&
-            shouldPrompt(manifest, currentVersionCode, settings, now)
-
     private fun expired(deadline: Long?, now: Long): Boolean = deadline == null || now >= deadline
 }
