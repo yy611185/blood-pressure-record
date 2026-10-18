@@ -50,12 +50,36 @@ class UpdatePolicyTest {
         assertTrue(UpdatePolicy.shouldPrompt(required, 43, settings, now, manual = true))
     }
 
-    @Test fun `automatic downloads require opt in and honor reminder and cancel policy`() {
-        assertFalse(UpdatePolicy.shouldAutoDownload(manifest, 43, UpdateSettings(), now))
-        val enabled = UpdateSettings(autoDownloadEnabled = true)
-        assertTrue(UpdatePolicy.shouldAutoDownload(manifest, 43, enabled, now))
-        assertFalse(UpdatePolicy.shouldAutoDownload(manifest, 43, enabled.copy(cancelledAutoDownloadVersionCode = 44), now))
-        assertFalse(UpdatePolicy.shouldAutoDownload(manifest, 43, enabled.copy(skippedVersionCode = 44), now))
-        assertTrue(UpdatePolicy.shouldAutoDownload(manifest.copy(versionCode = 45), 43, enabled.copy(cancelledAutoDownloadVersionCode = 44), now))
+    @Test fun `opening browser postpones optional and necessary reminders for seventy two hours`() {
+        val settings = browserOpenedSettings()
+        val required = manifest.copy(minSupportedVersionCode = 44)
+        listOf(manifest, required).forEach { update ->
+            assertFalse(UpdatePolicy.shouldPrompt(update, 43, settings, now))
+            assertFalse(UpdatePolicy.shouldPrompt(update, 43, settings, now + UpdatePolicy.SNOOZE_MS - 1))
+            assertTrue(UpdatePolicy.shouldPrompt(update, 43, settings, now + UpdatePolicy.SNOOZE_MS))
+        }
     }
+
+    @Test fun `manual check and higher version bypass browser reminder postponement`() {
+        val settings = browserOpenedSettings()
+        listOf(manifest, manifest.copy(minSupportedVersionCode = 44)).forEach { update ->
+            assertTrue(UpdatePolicy.shouldPrompt(update, 43, settings, now, manual = true))
+            assertTrue(UpdatePolicy.shouldPrompt(update.copy(versionCode = 45), 43, settings, now))
+        }
+    }
+
+    @Test fun `opening browser does not change installed version decision`() {
+        val settings = browserOpenedSettings()
+        assertEquals(UpdateDecision.OPTIONAL, UpdatePolicy.decision(manifest, 43))
+        assertEquals(UpdateDecision.REQUIRED, UpdatePolicy.decision(manifest.copy(minSupportedVersionCode = 44), 43))
+        assertEquals(UpdateDecision.CURRENT, UpdatePolicy.decision(manifest, manifest.versionCode))
+        assertFalse(UpdatePolicy.shouldPrompt(manifest, manifest.versionCode, settings, now, manual = true))
+    }
+
+    private fun browserOpenedSettings() = UpdateSettings(
+        snoozedVersionCode = manifest.versionCode,
+        snoozedUntil = now + UpdatePolicy.SNOOZE_MS,
+        requiredDismissedVersionCode = manifest.versionCode,
+        requiredDismissedUntil = now + UpdatePolicy.SNOOZE_MS
+    )
 }

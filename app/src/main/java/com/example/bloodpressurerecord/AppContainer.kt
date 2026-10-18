@@ -21,9 +21,6 @@ import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
 import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
 import com.example.bloodpressurerecord.update.UpdatePreferences
 import com.example.bloodpressurerecord.update.UpdateRepository
-import com.example.bloodpressurerecord.update.UpdateDownloadManager
-import com.example.bloodpressurerecord.update.UpdateVerifier
-import com.example.bloodpressurerecord.update.UpdateInstaller
 import com.example.bloodpressurerecord.update.UpdatePromptGate
 import com.example.bloodpressurerecord.data.repository.ReportRepository
 import com.example.bloodpressurerecord.data.repository.DefaultReportRepository
@@ -43,8 +40,6 @@ interface AppContainer {
     val sessionDraftRepository: SessionDraftRepository
     val updatePreferences: UpdatePreferences
     val updateRepository: UpdateRepository
-    val updateDownloadManager: UpdateDownloadManager
-    val updateInstaller: UpdateInstaller
     val updatePromptGate: UpdatePromptGate
     val reportRepository: ReportRepository
     val reportCache: ReportCache
@@ -57,11 +52,6 @@ class DefaultAppContainer(context: Context) : AppContainer {
     private val appSettingsStore by lazy { AppSettingsStore(appContext) }
     override val updatePreferences by lazy { UpdatePreferences(appContext) }
     override val updateRepository by lazy { UpdateRepository(updatePreferences) }
-    private val updateVerifier by lazy { UpdateVerifier(appContext) }
-    override val updateDownloadManager by lazy {
-        UpdateDownloadManager(appContext, updatePreferences, updateVerifier)
-    }
-    override val updateInstaller by lazy { UpdateInstaller(appContext, updateVerifier) }
     override val updatePromptGate = UpdatePromptGate()
     override val reportRepository: ReportRepository by lazy { DefaultReportRepository(database) }
     override val reportCache by lazy { ReportCache(File(appContext.cacheDir, "reports")) }

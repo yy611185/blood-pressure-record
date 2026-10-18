@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -198,12 +200,12 @@ private fun DateTimePillButton(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .heightIn(min = AppDimensions.minimumTouchTarget)
             .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.large)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
@@ -224,6 +226,7 @@ private fun DateTimePillButton(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MeasurementReadingCard(
     index: Int,
@@ -322,22 +325,24 @@ fun MeasurementReadingCard(
             // 只有数值有效（低压 < 高压）时才给出分级，避免出现乐观的错误提示。
             if (systolic != null && diastolic != null && !relationError) {
                 val category = CategoryCalculator.calculate(systolic, diastolic)
-                Row(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
                 ) {
                     Text(
                         "本组：$systolic / $diastolic mmHg",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.align(Alignment.CenterVertically)
                     )
                     StatusChip(
                         text = CategoryPresentation.label(category.name),
-                        isAbnormal = category != BloodPressureCategory.NORMAL
+                        isAbnormal = category != BloodPressureCategory.NORMAL,
+                        modifier = Modifier.align(Alignment.CenterVertically)
                     )
                 }
             }
@@ -415,7 +420,7 @@ private fun CompactNumberField(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(AppDimensions.numberFieldHeight)
+                .heightIn(min = AppDimensions.numberFieldHeight)
                 .semantics { contentDescription = accessibleLabel }
         )
         Text(

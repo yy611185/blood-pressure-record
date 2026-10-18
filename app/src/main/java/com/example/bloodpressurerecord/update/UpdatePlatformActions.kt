@@ -1,106 +1,80 @@
 package com.example.bloodpressurerecord.update
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.net.toUri
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 class UpdatePlatformActions(
-    val install: () -> Unit,
-    val openReleases: (String) -> Unit
+    val download: () -> Unit,
+    val openReleases: () -> Unit,
+    val openDirectDownload: (() -> Unit)?
 )
 
-/** 只有用户点击安装才进入来源授权；安装器返回不等于升级成功。 */
+/** Opens a browser only. Returning from it never changes the installed-version check. */
 @Composable
 fun rememberUpdatePlatformActions(
     viewModel: UpdateViewModel,
-    installer: UpdateInstaller,
-    promptAllowed: Boolean,
     snackbar: SnackbarHostState
 ): UpdatePlatformActions {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var permissionPending by rememberSaveable { mutableStateOf(false) }
-    var installRequested by rememberSaveable { mutableStateOf(false) }
-    var preparing by remember { mutableStateOf(false) }
-    val installLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        scope.launch {
-            snackbar.showSnackbar("已返回应用；如果尚未完成安装，可再次点击安装。")
-        }
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        if (permissionPending) {
-            permissionPending = false
-            if (installer.canInstallPackages()) {
-                installRequested = true
-            } else {
-                scope.launch {
-                    snackbar.showSnackbar("未获得安装来源授权，更新包已保留，可稍后重试。")
-                }
-            }
-        }
+    val state by viewModel.uiState.collectAsState()
+    val directUrl = state.manifest?.let(UpdateUrls::directDownload)
+
+    fun reportFailure(message: String) {
+        viewModel.onBrowserOpenFailed(message)
+        scope.launch { snackbar.showSnackbar(message) }
     }
 
-    LaunchedEffect(installRequested, promptAllowed) {
-        if (installRequested && promptAllowed && !preparing) {
-            installRequested = false
-            preparing = true
-            try {
-                val manifest = viewModel.uiState.value.download.manifest
-                    ?: error("没有可安装的更新包，请重新下载。")
-                val file = viewModel.verifiedFile()
-                    ?: error("更新包尚未通过校验，请重新下载。")
-                val intent = installer.installIntent(file, manifest)
-                installLauncher.launch(intent)
-                viewModel.dismissDialog()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                snackbar.showSnackbar(error.message ?: "无法打开系统安装器，请稍后重试。")
-            } finally {
-                preparing = false
+    fun openBrowser(url: String, validate: () -> Unit, onOpened: () -> Unit = {}) {
+        try {
+            validate()
+            // Resolve only browser apps, including when GitHub app links are enabled.
+            val intent = Intent(Intent.ACTION_VIEW, url.toUri()).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                selector = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER)
             }
+            context.startActivity(intent)
+            onOpened()
+        } catch (_: IllegalArgumentException) {
+            reportFailure("下载地址未通过安全检查，请使用 GitHub Releases 备用下载。")
+        } catch (_: ActivityNotFoundException) {
+            reportFailure("未找到可用的外部浏览器，请安装或启用浏览器后重试。")
+        } catch (_: SecurityException) {
+            reportFailure("无法打开外部浏览器，请检查系统设置后重试。")
         }
     }
 
     return UpdatePlatformActions(
-        install = {
-            if (!preparing && !permissionPending && !installRequested) {
-                if (installer.canInstallPackages()) {
-                    installRequested = true
-                } else {
-                    try {
-                        permissionPending = true
-                        permissionLauncher.launch(installer.permissionIntent())
-                    } catch (_: Exception) {
-                        permissionPending = false
-                        scope.launch { snackbar.showSnackbar("无法打开安装来源设置，请在系统设置中授权。") }
-                    }
-                }
+        download = {
+            viewModel.uiState.value.manifest?.let { manifest ->
+                openBrowser(manifest.url,
+                    validate = { UpdateUrls.validateApk(manifest.url, manifest.version, manifest.apk) },
+                    onOpened = { viewModel.onBrowserOpened(manifest.versionCode) })
             }
         },
-        openReleases = { url ->
-            try {
-                UpdateUrls.validateRelease(url)
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            } catch (_: Exception) {
-                scope.launch { snackbar.showSnackbar("无法打开版本发布页面。") }
+        openReleases = {
+            // Fixed fallback remains reachable even when the manifest cannot be fetched or parsed.
+            openBrowser(UpdateUrls.RELEASES_URL,
+                validate = { UpdateUrls.validateRelease(UpdateUrls.RELEASES_URL) },
+                onOpened = {
+                    viewModel.uiState.value.manifest?.let { viewModel.onBrowserOpened(it.versionCode) }
+                })
+        },
+        openDirectDownload = directUrl?.let { url ->
+            {
+                viewModel.uiState.value.manifest?.let { manifest ->
+                    openBrowser(url,
+                        validate = { UpdateUrls.validateDirectApk(url, manifest.version, manifest.apk) },
+                        onOpened = { viewModel.onBrowserOpened(manifest.versionCode) })
+                }
             }
         }
     )

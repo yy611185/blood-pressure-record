@@ -3,7 +3,6 @@ package com.example.bloodpressurerecord.update
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.BuildConfig
-import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -22,7 +21,6 @@ data class UpdateUiState(
     val manifest: UpdateManifest? = null,
     val checkState: UpdateCheckState = UpdateCheckState.IDLE,
     val checkMessage: String? = null,
-    val download: UpdateDownloadState = UpdateDownloadState(),
     val dialogVisible: Boolean = false,
     val required: Boolean = false
 )
@@ -30,7 +28,6 @@ data class UpdateUiState(
 class UpdateViewModel(
     private val repository: UpdateRepository,
     private val preferences: UpdatePreferences,
-    private val downloadManager: UpdateDownloadManager,
     private val currentVersionCode: Long = BuildConfig.VERSION_CODE.toLong(),
     private val clock: () -> Long = System::currentTimeMillis
 ) : ViewModel() {
@@ -43,24 +40,28 @@ class UpdateViewModel(
     private var checkJob: Job? = null
     private var reminderJob: Job? = null
     private var manualRequested = false
+    private var browserOpenedDuringCheckVersionCode: Long? = null
     private var pendingManualPrompt = false
     private var activeManualDialogIdentity: String? = null
     private var promptedIdentity: String? = null
     private var deferredDialogIdentity: String? = null
     private var policySuppressedIdentity: String? = null
     private var failedAt: Long? = null
-    private var autoStartedIdentity: String? = null
-    private var policyPausedIdentity: String? = null
-    private var explicitAutoDownloadRequest = false
+    private var pendingBrowserDeferral: Pair<Long, Long>? = null
 
     init {
         viewModelScope.launch {
             preferences.settings.collect { settings ->
-                mutableState.update { it.copy(settings = settings) }
-                downloadManager.setWifiOnly(settings.wifiOnly)
-                if (!settings.autoDownloadEnabled) {
-                    downloadManager.pauseAutomatic()
+                val browserDeferral = pendingBrowserDeferral
+                val effectiveSettings = if (browserDeferral == null) settings else {
+                    val (versionCode, until) = browserDeferral
+                    if (settings.snoozedVersionCode == versionCode && settings.snoozedUntil == until &&
+                        settings.requiredDismissedVersionCode == versionCode && settings.requiredDismissedUntil == until) {
+                        pendingBrowserDeferral = null
+                    }
+                    settings.withBrowserDeferral(versionCode, until)
                 }
+                mutableState.update { it.copy(settings = effectiveSettings) }
                 if (!initialized) {
                     val cached = repository.cachedManifest()
                     if (cached != null) {
@@ -77,22 +78,10 @@ class UpdateViewModel(
                 evaluateReminder()
             }
         }
-        viewModelScope.launch {
-            downloadManager.state.collect { download ->
-                val previousPhase = mutableState.value.download.phase
-                mutableState.update { it.copy(download = download) }
-                if (download.phase != previousPhase && download.phase in setOf(
-                        UpdateDownloadPhase.IDLE, UpdateDownloadPhase.READY, UpdateDownloadPhase.FAILED
-                    )) {
-                    evaluateReminder()
-                }
-            }
-        }
     }
 
     fun onForegroundChanged(value: Boolean) {
         foreground = value
-        downloadManager.setForeground(value)
         if (value) {
             if (initialized) {
                 requestCheck(manual = false)
@@ -127,6 +116,7 @@ class UpdateViewModel(
         if (checkJob?.isActive == true) {
             if (manual) {
                 manualRequested = true
+                browserOpenedDuringCheckVersionCode = null
             }
             return
         }
@@ -137,13 +127,15 @@ class UpdateViewModel(
             return
         }
         manualRequested = manual
+        browserOpenedDuringCheckVersionCode = null
         checkJob = viewModelScope.launch {
             mutableState.update { it.copy(checkState = UpdateCheckState.CHECKING, checkMessage = null) }
             try {
                 val manifest = repository.check(clock)
                 failedAt = null
                 acceptManifest(manifest)
-                pendingManualPrompt = manualRequested && UpdatePolicy.decision(manifest, currentVersionCode) != UpdateDecision.CURRENT
+                pendingManualPrompt = manualRequested && browserOpenedDuringCheckVersionCode != manifest.versionCode &&
+                    UpdatePolicy.decision(manifest, currentVersionCode) != UpdateDecision.CURRENT
                 evaluateReminder()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -205,28 +197,6 @@ class UpdateViewModel(
             pendingManualPrompt = false
             deferredDialogIdentity = null
         }
-        // A failed task is retried only by an explicit user action, never in a preference emission loop.
-        val canAutoDownload = (state.settings.autoCheckEnabled || manualPrompt || explicitAutoDownloadRequest) &&
-            UpdatePolicy.shouldAutoDownload(manifest, currentVersionCode, state.settings, now)
-        val canReplaceOldTask = state.download.manifest?.identity != manifest.identity &&
-            state.download.phase in setOf(UpdateDownloadPhase.READY, UpdateDownloadPhase.FAILED)
-        if (canAutoDownload && autoStartedIdentity != manifest.identity &&
-            (state.download.phase == UpdateDownloadPhase.IDLE || canReplaceOldTask)) {
-            autoStartedIdentity = manifest.identity
-            explicitAutoDownloadRequest = false
-            downloadAction {
-                try { downloadManager.start(manifest, automatic = true) }
-                finally {
-                    if (downloadManager.state.value.manifest?.identity != manifest.identity) {
-                        autoStartedIdentity = null
-                    }
-                }
-            }
-        } else if (canAutoDownload &&
-            policyPausedIdentity == manifest.identity && state.download.phase == UpdateDownloadPhase.PAUSED) {
-            policyPausedIdentity = null
-            downloadAction { downloadManager.start(manifest, automatic = true) }
-        }
         val deadline = when (UpdatePolicy.decision(manifest, currentVersionCode)) {
             UpdateDecision.OPTIONAL -> state.settings.snoozedUntil.takeIf { state.settings.snoozedVersionCode == manifest.versionCode }
             UpdateDecision.REQUIRED -> state.settings.requiredDismissedUntil.takeIf { state.settings.requiredDismissedVersionCode == manifest.versionCode }
@@ -236,33 +206,28 @@ class UpdateViewModel(
             reminderJob = viewModelScope.launch {
                 delay(deadline - now)
                 promptedIdentity = null
-                downloadManager.setForeground(foreground)
                 evaluateReminder()
             }
         }
     }
 
-    fun download() {
-        val manifest = mutableState.value.manifest ?: return
-        policyPausedIdentity = null
-        downloadAction { downloadManager.start(manifest, automatic = false) }
-    }
-
-    fun retryDownload() { policyPausedIdentity = null; downloadAction { downloadManager.retry() } }
-    fun cancelDownload() { policyPausedIdentity = null; downloadAction { downloadManager.cancel() } }
-    suspend fun verifiedFile(): File? = downloadManager.verifiedFile()
-
     fun snooze() {
         val manifest = mutableState.value.manifest ?: return
-        if (mutableState.value.required) {
-            dismissDialog()
-            return
-        }
+        val required = mutableState.value.required
+        val until = clock() + UpdatePolicy.SNOOZE_MS
         hidePrompt()
         policySuppressedIdentity = manifest.identity
-        policyPausedIdentity = manifest.identity
-        downloadManager.pauseAutomatic()
-        preferenceAction { preferences.snooze(manifest.versionCode, clock() + UpdatePolicy.SNOOZE_MS) }
+        mutableState.update {
+            it.copy(settings = if (required) {
+                it.settings.copy(requiredDismissedVersionCode = manifest.versionCode, requiredDismissedUntil = until)
+            } else {
+                it.settings.copy(snoozedVersionCode = manifest.versionCode, snoozedUntil = until)
+            })
+        }
+        preferenceAction {
+            if (required) preferences.dismissRequired(manifest.versionCode, until)
+            else preferences.snooze(manifest.versionCode, until)
+        }
     }
 
     fun skip() {
@@ -272,8 +237,7 @@ class UpdateViewModel(
         }
         hidePrompt()
         policySuppressedIdentity = manifest.identity
-        policyPausedIdentity = manifest.identity
-        downloadManager.pauseAutomatic()
+        mutableState.update { it.copy(settings = it.settings.copy(skippedVersionCode = manifest.versionCode)) }
         preferenceAction { preferences.skip(manifest.versionCode) }
     }
 
@@ -285,10 +249,42 @@ class UpdateViewModel(
         }
         hidePrompt()
         policySuppressedIdentity = manifest.identity
-        policyPausedIdentity = manifest.identity
-        downloadManager.pauseAutomatic()
-        preferenceAction { preferences.dismissRequired(manifest.versionCode, clock() + UpdatePolicy.CHECK_INTERVAL_MS) }
+        val until = clock() + UpdatePolicy.CHECK_INTERVAL_MS
+        mutableState.update {
+            it.copy(settings = it.settings.copy(requiredDismissedVersionCode = manifest.versionCode, requiredDismissedUntil = until))
+        }
+        preferenceAction { preferences.dismissRequired(manifest.versionCode, until) }
     }
+
+    /** Called only after ACTION_VIEW succeeds, including for an external fallback channel. */
+    fun onBrowserOpened(versionCode: Long) {
+        if (versionCode <= currentVersionCode) return
+        if (checkJob?.isActive == true) {
+            // Consume the in-flight manual prompt for this version, while allowing a newer result.
+            browserOpenedDuringCheckVersionCode = versionCode
+        }
+        val until = clock() + UpdatePolicy.SNOOZE_MS
+        pendingBrowserDeferral = versionCode to until
+        if (mutableState.value.manifest?.versionCode == versionCode) {
+            hidePrompt()
+            policySuppressedIdentity = mutableState.value.manifest?.identity
+        }
+        // Apply immediately so a foreground event cannot race the asynchronous DataStore write.
+        mutableState.update {
+            it.copy(settings = it.settings.withBrowserDeferral(versionCode, until), checkMessage = null)
+        }
+        preferenceAction { preferences.recordBrowserOpened(versionCode, until) }
+        evaluateReminder()
+    }
+
+    fun onBrowserOpenFailed(message: String) {
+        mutableState.update { it.copy(checkMessage = message) }
+    }
+
+    private fun UpdateSettings.withBrowserDeferral(versionCode: Long, until: Long) = copy(
+        snoozedVersionCode = versionCode, snoozedUntil = until,
+        requiredDismissedVersionCode = versionCode, requiredDismissedUntil = until
+    )
 
     private fun hidePrompt() {
         pendingManualPrompt = false
@@ -308,22 +304,6 @@ class UpdateViewModel(
         }
     }
 
-    fun setAutoDownloadEnabled(value: Boolean) {
-        if (!value) {
-            downloadManager.pauseAutomatic()
-        }
-        if (value) {
-            autoStartedIdentity = null
-            explicitAutoDownloadRequest = true
-        }
-        preferenceAction { preferences.setAutoDownloadEnabled(value) }
-    }
-
-    fun setWifiOnly(value: Boolean) {
-        downloadManager.setWifiOnly(value)
-        preferenceAction { preferences.setWifiOnly(value) }
-    }
-
     private fun preferenceAction(action: suspend () -> Unit) {
         viewModelScope.launch {
             try { action() } catch (cancelled: CancellationException) { throw cancelled }
@@ -331,10 +311,4 @@ class UpdateViewModel(
         }
     }
 
-    private fun downloadAction(action: suspend () -> Unit) {
-        viewModelScope.launch {
-            try { action() } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(checkMessage = "下载操作失败，请稍后重试") } }
-        }
-    }
 }
