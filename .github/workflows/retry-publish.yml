@@ -1,0 +1,115 @@
+name: Retry Publish Signed APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag or version name (e.g. v2.3.5 or 2.3.5, empty for latest stable release)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  publish_retry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release assets from GitHub Release
+        id: release_info
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_VERSION}" ]; then
+            TAG="${INPUT_VERSION}"
+            [[ "${TAG}" == v* ]] || TAG="v${TAG}"
+          else
+            TAG=$(gh release view --json tagName -q .tagName)
+          fi
+
+          echo "Target Release Tag: ${TAG}"
+          test -n "${TAG}" || { echo "::error::Could not determine release tag."; exit 1; }
+
+          VERSION_NAME="${TAG#v}"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "TAG_NAME=${TAG}" >> "$GITHUB_ENV"
+
+          OUTPUT_DIR="app/build/outputs"
+          mkdir -p "${OUTPUT_DIR}/apk/release"
+
+          gh release download "${TAG}" \
+            -p "blood-pressure-record-${TAG}-release.apk" \
+            -p "release-sha256.txt" \
+            --dir "${OUTPUT_DIR}"
+
+          # Move APK to expected path
+          mv "${OUTPUT_DIR}/blood-pressure-record-${TAG}-release.apk" \
+             "${OUTPUT_DIR}/apk/release/blood-pressure-record-${TAG}-release.apk"
+
+          # Verify SHA-256 against release-sha256.txt
+          APK="${OUTPUT_DIR}/apk/release/blood-pressure-record-${TAG}-release.apk"
+          test -s "${APK}" || { echo "::error::Downloaded APK not found: ${APK}"; exit 1; }
+
+          ACTUAL_SHA=$(sha256sum "${APK}" | cut -d' ' -f1)
+          EXPECTED_SHA=$(awk -v f="app/build/outputs/apk/release/blood-pressure-record-${TAG}-release.apk" '$2 == f {print $1}' "${OUTPUT_DIR}/release-sha256.txt" || true)
+          if [ -z "${EXPECTED_SHA}" ]; then
+            EXPECTED_SHA=$(grep "${ACTUAL_SHA}" "${OUTPUT_DIR}/release-sha256.txt" | head -1 | cut -d' ' -f1 || true)
+          fi
+
+          test "${ACTUAL_SHA}" = "${EXPECTED_SHA}" || { echo "::error::Downloaded APK SHA-256 mismatch (${ACTUAL_SHA} != ${EXPECTED_SHA})"; exit 1; }
+          echo "SHA=${ACTUAL_SHA}" >> "$GITHUB_ENV"
+
+          # Extract versionCode from gradle file at tagged commit
+          VERSION_CODE=$(git show "${TAG}:app/build.gradle.kts" | grep -m1 'versionCode' | sed 's/[^0-9]//g')
+          test -n "${VERSION_CODE}" || { echo "::error::Could not read versionCode from tag ${TAG}"; exit 1; }
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+
+      - name: Publish signed APK to update server
+        shell: bash
+        env:
+          BP_UPDATE_SSH_KEY: ${{ secrets.BP_UPDATE_SSH_KEY }}
+          BP_UPDATE_HOST_KEY: ${{ secrets.BP_UPDATE_HOST_KEY }}
+          BP_UPDATE_HOST: ${{ secrets.BP_UPDATE_HOST }}
+          BP_UPDATE_USER: ${{ secrets.BP_UPDATE_USER }}
+        run: |
+          set -euo pipefail
+
+          test -n "${BP_UPDATE_SSH_KEY}" || { echo "::error::Missing secret BP_UPDATE_SSH_KEY (dedicated deploybp deploy key)."; exit 1; }
+          test -n "${BP_UPDATE_HOST_KEY}" || { echo "::error::Missing secret BP_UPDATE_HOST_KEY (pinned SSH host key of the update server)."; exit 1; }
+          test -n "${BP_UPDATE_HOST}" || { echo "::error::Missing secret BP_UPDATE_HOST (update server IP)."; exit 1; }
+          test -n "${BP_UPDATE_USER}" || { echo "::error::Missing secret BP_UPDATE_USER (deploybp)."; exit 1; }
+
+          APK="app/build/outputs/apk/release/blood-pressure-record-v${VERSION_NAME}-release.apk"
+          test -s "${APK}" || { echo "::error::Release APK not found: ${APK}"; exit 1; }
+
+          NOTES_FILE="docs/release-v${VERSION_NAME}.md"
+          if [ -f "${NOTES_FILE}" ]; then
+            NOTES_B64="$(base64 -w0 "${NOTES_FILE}")"
+          else
+            NOTES_B64="$(gh release view "${TAG_NAME}" --json body -q .body | base64 -w0)"
+          fi
+
+          SSH_DIR="${RUNNER_TEMP}/bp-deploy"
+          mkdir -p "${SSH_DIR}" && chmod 700 "${SSH_DIR}"
+          printf '%s\n' "${BP_UPDATE_SSH_KEY}" > "${SSH_DIR}/key" && chmod 600 "${SSH_DIR}/key"
+          printf '%s\n' "${BP_UPDATE_HOST_KEY}" > "${SSH_DIR}/known_hosts"
+
+          ssh -i "${SSH_DIR}/key" \
+              -o IdentitiesOnly=yes \
+              -o UserKnownHostsFile="${SSH_DIR}/known_hosts" \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              "${BP_UPDATE_USER}@${BP_UPDATE_HOST}" \
+              "publish --version ${VERSION_NAME} --version-code ${VERSION_CODE} --sha256 ${SHA} --releases-url ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME} --notes-b64 ${NOTES_B64} --file -" \
+              < "${APK}"
+
+          rm -f "${SSH_DIR}/key"
