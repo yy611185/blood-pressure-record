@@ -129,7 +129,10 @@ object UpdateUrls {
         else validateApk(url, version, apk)
     }
 
-    /** Only an explicitly advertised, independently validated direct mirror gets a separate action. */
+    /** Prefer an explicitly advertised, independently validated direct mirror for browser downloads. */
+    fun preferredDownload(manifest: UpdateManifest): String = directDownload(manifest) ?: manifest.url
+
+    /** Only explicitly advertised mirrors passing the exact direct endpoint checks are eligible. */
     fun directDownload(manifest: UpdateManifest): String? = manifest.mirrors.firstOrNull { url ->
         runCatching { validateDirectApk(url, manifest.version, manifest.apk) }.isSuccess
     }

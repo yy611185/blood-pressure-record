@@ -55,8 +55,9 @@ fun rememberUpdatePlatformActions(
     return UpdatePlatformActions(
         download = {
             viewModel.uiState.value.manifest?.let { manifest ->
-                openBrowser(manifest.url,
-                    validate = { UpdateUrls.validateApk(manifest.url, manifest.version, manifest.apk) },
+                val url = UpdateUrls.preferredDownload(manifest)
+                openBrowser(url,
+                    validate = { UpdateUrls.validateMirror(url, manifest.version, manifest.apk) },
                     onOpened = { viewModel.onBrowserOpened(manifest.versionCode) })
             }
         },

@@ -111,6 +111,14 @@ object AppReleaseNotes {
     val notes = listOf(
         ReleaseNote(
             version = AppInfoContent.CURRENT_VERSION,
+            summary = "更新下载优先使用香港直连镜像，改善国内下载速度。",
+            changes = listOf(
+                "点击「前往浏览器下载更新」时，优先使用清单中通过安全校验的香港直连镜像。",
+                "没有可信直连镜像时继续使用原主下载地址；GitHub Releases 备用下载入口保持可用。"
+            )
+        ),
+        ReleaseNote(
+            version = "2.3.7",
             summary = "趋势新增 180 天和 365 天，方便回看长期血压变化。",
             changes = listOf(
                 "趋势范围扩展为 7 天、30 天、180 天、365 天和全部，普通页面与横屏全屏均可切换。",

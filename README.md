@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册，健康数据保存在手机里。App 仅为检查软件更新联网，安装包交由外部浏览器下载。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.7-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.8-orange)
 
 ---
 
@@ -94,7 +94,7 @@
 
 - “我的 → 应用说明与更新说明”可手动检查最新版本，查看最近更新说明及上次成功检查时间。
 - 自动检查默认开启；成功后 24 小时内不重复自动请求。可选更新可以延后 72 小时或跳过该版本，手动检查不受这些设置限制。
-- 发现新版本后，点击“前往浏览器下载更新”；App 验证版本清单中的 HTTPS 下载地址后打开外部浏览器。下载完成后打开 APK，按 Android 系统提示覆盖安装，无需卸载旧版。
+- 发现新版本后，点击“前往浏览器下载更新”；App 优先打开清单中通过安全校验的香港直连镜像，没有可信直连镜像时回退原主下载地址。下载完成后打开 APK，按 Android 系统提示覆盖安装，无需卸载旧版。
 - 成功打开浏览器后关闭提示，并将该版本提醒延后 72 小时；立即返回或重启 App 不会再次自动弹出相同版本，手动检查及更高版本不受影响。是否已更新始终根据实际安装的 versionCode 判断。
 - 版本检查失败会显示失败及重试入口，不显示“已是最新版本”；[GitHub Releases 备用下载](https://github.com/yy611185/blood-pressure-record/releases) 在接口失败时仍可访问。
 - 必要更新提示不会阻止离线记录、历史、提醒或备份。录入、编辑及备份等操作期间会暂缓自动弹窗。
@@ -186,6 +186,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 2.3.8 | 2026-10-23 | 浏览器更新优先香港直连镜像，保留安全校验与原地址回退 |
 | 2.3.7 | 2026-10-23 | 趋势新增180天和365天，图表与统计同步更新，适配小屏与大字体 |
 | 2.3.6 | 2026-10-18 | 外部浏览器下载更新，改进发布分发与同步重试 |
 | 2.3.5 | 2026-10-13 | 首页大字布局、星期标记、时间选择与对比度优化 |
@@ -218,7 +219,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ---
 
-*最后更新：2026-10 · 版本 2.3.7 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
+*最后更新：2026-10 · 版本 2.3.8 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
 
 - `BP_RELEASE_STORE_FILE`：签名库路径
 - `BP_RELEASE_STORE_PASSWORD`：签名库密码
@@ -264,6 +265,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 2.3.8 | 2026-10-23 | 浏览器更新优先香港直连镜像，保留安全校验与原地址回退 |
 | 2.3.7 | 2026-10-23 | 趋势新增180天和365天，图表与统计同步更新，适配小屏与大字体 |
 | 2.3.6 | 2026-10-18 | 外部浏览器下载更新，改进发布分发与同步重试 |
 | 2.3.5 | 2026-10-13 | 首页大字布局、星期标记、时间选择与对比度优化 |

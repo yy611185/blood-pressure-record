@@ -55,16 +55,59 @@ class UpdateManifestTest {
         }
     }
 
-    @Test fun `explicit direct mirror stays separate from the preferred manifest URL`() {
+    @Test fun `explicit direct mirror is preferred without changing manifest URL or identity`() {
         val base = UpdateManifest.parse(fixture)
         val direct = base.url.replace(UpdateUrls.HOST, "${UpdateUrls.DIRECT_HOST}:8443")
         val manifest = UpdateManifest.parse(add("\"mirrors\": [\"$direct\", \"${base.url}\"]"))
         assertEquals(base.url, manifest.url)
         assertEquals(direct, UpdateUrls.directDownload(manifest))
+        assertEquals(direct, UpdateUrls.preferredDownload(manifest))
         assertNull(UpdateUrls.directDownload(base))
         assertEquals(base.identity, manifest.identity)
         assertEquals(manifest, UpdateManifest.parse(manifest.encode()))
         invalid(fixture.replace(base.url, direct))
+    }
+
+    @Test fun `browser download falls back to primary URL without a direct mirror`() {
+        val base = UpdateManifest.parse(fixture)
+        listOf(base, base.copy(mirrors = listOf(base.url))).forEach { manifest ->
+            val url = UpdateUrls.preferredDownload(manifest)
+            assertEquals(base.url, url)
+            UpdateUrls.validateMirror(url, manifest.version, manifest.apk)
+        }
+    }
+
+    @Test fun `browser download finds trusted direct mirror regardless of mirror order`() {
+        val base = UpdateManifest.parse(fixture)
+        val direct = base.url.replace(UpdateUrls.HOST, "${UpdateUrls.DIRECT_HOST}:8443")
+        listOf(listOf(direct, base.url), listOf(base.url, direct)).forEach { mirrors ->
+            val manifest = base.copy(mirrors = mirrors)
+            val url = UpdateUrls.preferredDownload(manifest)
+            assertEquals(direct, url)
+            UpdateUrls.validateDirectApk(url, manifest.version, manifest.apk)
+        }
+    }
+
+    @Test fun `browser download never prefers invalid direct mirrors`() {
+        val base = UpdateManifest.parse(fixture)
+        val direct = base.url.replace(UpdateUrls.HOST, "${UpdateUrls.DIRECT_HOST}:8443")
+        listOf(
+            direct.replace("https:", "http:"),
+            direct.replace(UpdateUrls.DIRECT_HOST, "${UpdateUrls.DIRECT_HOST}.evil.example"),
+            direct.replace(":8443", ""), direct.replace(":8443", ":443"),
+            direct.replace(":8443", ":8444"), direct.replace(":8443", ":08443"),
+            direct.replace(UpdateUrls.DIRECT_HOST, "user@${UpdateUrls.DIRECT_HOST}"),
+            direct.replace("/android/stable/", "/android/beta/"),
+            direct.replace("/android/stable/", "/android/stable/../"),
+            direct.replace("blood-pressure", "%62lood-pressure"),
+            direct.replace("2.3.3", "2.3.4"), direct.replace("release.apk", "release.apk/extra"),
+            "$direct?token=1", "$direct#download", "not a URL"
+        ).forEach { invalid ->
+            val manifest = base.copy(mirrors = listOf(invalid))
+            assertNull(UpdateUrls.directDownload(manifest))
+            assertEquals(base.url, UpdateUrls.preferredDownload(manifest))
+            assertEquals(direct, UpdateUrls.preferredDownload(manifest.copy(mirrors = listOf(invalid, direct))))
+        }
     }
 
     @Test fun `mirrors reject wrong field types non strings and untrusted URLs`() {
