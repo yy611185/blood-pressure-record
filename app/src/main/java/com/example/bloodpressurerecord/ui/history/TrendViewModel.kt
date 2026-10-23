@@ -131,7 +131,7 @@ class TrendViewModel(
     )
 
     // 查询边界随“今天”滚动：上界取当天结束（半开区间），
-    // 打开页面后新增的记录能实时进入折线，跨零点后 7/30 天窗口自动前移。
+    // 打开页面后新增的记录能实时进入折线，跨零点后各固定天数窗口自动前移。
     private val seriesState = combine(
         selectedRange,
         selectedAggregation,
@@ -492,6 +492,8 @@ class TrendViewModel(
         val days = when (range) {
             TrendRange.DAYS_7 -> 7L
             TrendRange.DAYS_30 -> 30L
+            TrendRange.DAYS_180 -> 180L
+            TrendRange.DAYS_365 -> 365L
             TrendRange.ALL -> return null
         }
         return Instant.ofEpochMilli(currentStart).atZone(zoneId)

@@ -14,6 +14,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -31,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
+import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -42,6 +45,56 @@ import org.junit.Test
 class TrendReadoutAccessibilityTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun fiveRangesFitNormalPhoneWidth() {
+        renderRangeControl(width = 280.dp, fontScale = 1f, dark = false)
+        TrendRange.entries.forEach { range ->
+            composeRule.onNodeWithText(range.label).assertIsDisplayed()
+        }
+        captureIfRequested("trend-ranges-normal")
+        assertRangesAreReachable()
+    }
+
+    @Test
+    fun fiveRangesStayReadableAndReachableWithLargeFont() {
+        renderRangeControl(width = 280.dp, fontScale = 2f, dark = true)
+        captureIfRequested("trend-ranges-small-large-dark")
+        assertRangesAreReachable()
+    }
+
+    private fun renderRangeControl(width: Dp, fontScale: Float, dark: Boolean) {
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                BloodPressureRecordTheme(darkTheme = dark) {
+                    val selected = androidx.compose.runtime.remember { mutableStateOf(TrendRange.DAYS_30) }
+                    Surface(Modifier.width(width).testTag("readout")) {
+                        TrendRangeControl(selected.value, { selected.value = it })
+                    }
+                }
+            }
+        }
+    }
+
+    private fun assertRangesAreReachable() {
+        TrendRange.entries.forEach { range ->
+            val node = composeRule.onNodeWithText(range.label)
+            node.performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
+                .performClick().assertIsSelected()
+            val layouts = mutableListOf<TextLayoutResult>()
+            composeRule.onNodeWithText(range.label, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            layouts.forEach { layout ->
+                assertEquals(1, layout.lineCount)
+                assertTrue("Text exceeds width: ${layout.layoutInput.text}",
+                    layout.getLineRight(0) - layout.getLineLeft(0) <= layout.size.width + 1f)
+                assertTrue("Text exceeds height: ${layout.layoutInput.text}",
+                    layout.getLineBottom(0) <= layout.size.height + 1f)
+                assertFalse(layout.isLineEllipsized(0))
+            }
+        }
+    }
 
     private val points = (0..2).map { index ->
         TrendPoint(

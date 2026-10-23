@@ -16,6 +16,36 @@ class TrendSeriesCalculatorTest {
     private val now = millis("2026-07-23", 12)
 
     @Test
+    fun longRangesRespectNaturalDayBoundariesAcrossLeapYearAndDaylightSaving() {
+        val today = LocalDate.of(2024, 3, 10)
+        for (testZone in listOf(zone, ZoneId.of("America/New_York"))) {
+            val testNow = today.atTime(12, 0).atZone(testZone).toInstant().toEpochMilli()
+            for ((range, days) in listOf(TrendRange.DAYS_180 to 180L, TrendRange.DAYS_365 to 365L)) {
+                val start = today.minusDays(days - 1).atStartOfDay(testZone).toInstant().toEpochMilli()
+                val records = listOf(
+                    record("outside", start - 1, 200, 100),
+                    record("boundary", start, 120, 80),
+                    record("same-day", start + 3_600_000, 140, 90),
+                    record("latest", testNow, 130, 85),
+                    record("future", testNow + 1, 200, 100)
+                )
+                for (aggregation in listOf(TrendAggregation.RAW, TrendAggregation.DAILY)) {
+                    val series = TrendAggregationCalculator.build(records, range, testNow, testZone, aggregation)
+                    assertEquals(start, series.windowStart)
+                    assertEquals(start, series.rangeStart)
+                    assertEquals(testNow, series.rangeEnd)
+                    assertEquals(3, series.rawRecordCount)
+                    assertEquals(130, series.averageSystolic)
+                    assertEquals(85, series.averageDiastolic)
+                    assertEquals(70, series.averagePulse)
+                    assertEquals(listOf("boundary", "same-day", "latest"), series.points.flatMap { it.sourceRecordIds })
+                    assertEquals(if (aggregation == TrendAggregation.RAW) 3 else 2, series.points.size)
+                }
+            }
+        }
+    }
+
+    @Test
     fun sevenDays_preservesEveryMeasurementAndRealTimestamp() {
         val records = listOf(
             record("a", millis("2026-07-20", 7), 120, 80),

@@ -60,7 +60,8 @@ class TrendFullscreenLayoutTest {
     }
 
     private fun render(dark: Boolean, fontScale: Float) {
-        val series = TrendSeriesCalculator.build(records, TrendRange.DAYS_30, now, zone)
+        val range = if (dark) TrendRange.DAYS_365 else TrendRange.DAYS_180
+        val series = TrendSeriesCalculator.build(records, range, now, zone)
         composeRule.setContent {
             val density = LocalDensity.current
             val vm = remember { TrendViewModel(FixtureRepository(), fixtureSettings(), { now }, zone) }
@@ -68,7 +69,7 @@ class TrendFullscreenLayoutTest {
                 BloodPressureRecordTheme(darkTheme = dark) {
                     Surface {
                         TrendFullscreenScreen(
-                            TrendUiState(series = series, selectedPointId = "fixture-26", fullscreen = true),
+                            TrendUiState(range = range, series = series, selectedPointId = "fixture-26", fullscreen = true),
                             vm,
                             onOpenRecord = {}
                         )
@@ -117,6 +118,7 @@ class TrendFullscreenLayoutTest {
     ) { _, method, _ ->
         when (method.name) {
             "observeSettings" -> flowOf(SettingsBundle())
+            "observeTrendAggregationPreference" -> flowOf(null)
             "toString" -> "FixtureSettingsRepository"
             else -> error("Unexpected settings call: ${method.name}")
         }

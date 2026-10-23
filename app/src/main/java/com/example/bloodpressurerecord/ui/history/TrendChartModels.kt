@@ -38,7 +38,7 @@ internal enum class ChartDragIntent { WAIT, PAN, YIELD }
  * - 边界夹取退化成一次 `coerceIn(0.0, 1.0 - span)`，没有「域起点/终点」特判；
  * - 默认视野与当前视野是同一套坐标，双击复位不需要换算。
  *
- * 域 = [domainStartMillis, domainEndMillis]：7/30 天是自然周期窗口，
+ * 域 = [domainStartMillis, domainEndMillis]：固定天数范围是自然周期窗口，
  * 「全部」是首条记录到当前时刻，因此夹取到域内就等价于「不拖出真实数据范围」。
  *
  * `zoom` 始终由实际窗口跨度计算；最小时间跨度与屏幕像素密度无关。
@@ -377,7 +377,7 @@ object TrendChartMath {
     fun minDefaultViewportSpan(range: TrendRange): Long = when (range) {
         TrendRange.DAYS_7 -> 2L * HOUR_MILLIS
         TrendRange.DAYS_30 -> 3L * DAY_MILLIS
-        TrendRange.ALL -> 14L * DAY_MILLIS
+        TrendRange.DAYS_180, TrendRange.DAYS_365, TrendRange.ALL -> 14L * DAY_MILLIS
     }
 
     /**
