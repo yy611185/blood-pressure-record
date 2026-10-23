@@ -2,7 +2,7 @@
 
 > 一个**本地优先**的血压记录 Android 应用——为家庭成员（尤其是中老年人）设计：不注册，健康数据保存在手机里。App 仅为检查软件更新联网，安装包交由外部浏览器下载。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.5-orange)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE) ![minSdk](https://img.shields.io/badge/minSdk-26%20(Android%208.0)-blue) ![targetSdk](https://img.shields.io/badge/targetSdk-36-blue) ![Version](https://img.shields.io/badge/version-2.3.7-orange)
 
 ---
 
@@ -31,7 +31,7 @@
 | 📝 一次记多组 | 一次测量可录入多组收缩压/舒张压/脉搏，自动计算全部有效组的平均值，输入后可直接保存 |
 | 🏷 自动分级 | 按《中国高血压防治指南》成人诊室标准分级：正常 / 正常高值 / 1–3 级 + 偏低提示 |
 | 📅 历史日历 | 按月查看、详情、编辑、删除、**撤销** |
-| 📈 趋势图 | 7/30 天/全部自由切换每次测量与每日平均，记住粒度偏好；提供横屏全屏、联动十字线、缩放、明细追溯和期间/早晚/昼夜平均 |
+| 📈 趋势图 | 7/30/180/365 天/全部自由切换每次测量与每日平均，记住粒度偏好；提供横屏全屏、联动十字线、缩放、明细追溯和期间/早晚/昼夜平均 |
 | 💊 服药提醒 | 晨/晚提醒 + 每日打卡 + 可选写入系统日历（需授权） |
 | 📲 桌面小部件 | 不打开 App 也能看到最新血压与今日进度 |
 | 💾 Excel 导入导出 | v6 完整备份测量、补充情况、设置和用药数据，兼容读取 v2–v5 |
@@ -186,6 +186,8 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| 2.3.7 | 2026-10-23 | 趋势新增180天和365天，图表与统计同步更新，适配小屏与大字体 |
+| 2.3.6 | 2026-10-18 | 外部浏览器下载更新，改进发布分发与同步重试 |
 | 2.3.5 | 2026-10-13 | 首页大字布局、星期标记、时间选择与对比度优化 |
 | 2.3.4 | 2026-10-12 | 应用内更新自动版本发布流程 |
 | 2.3.2 | 2026-10-11 | 首页血压区间示意条、本地自定义范围、深浅色与无障碍支持 |
@@ -216,7 +218,7 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 ---
 
-*最后更新：2026-10 · 版本 2.3.5 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
+*最后更新：2026-10 · 版本 2.3.7 · 本 README 随 `RELEASE_NOTES.md` 同步维护*
 
 - `BP_RELEASE_STORE_FILE`：签名库路径
 - `BP_RELEASE_STORE_PASSWORD`：签名库密码
@@ -262,6 +264,8 @@ app/src/main/java/com/example/bloodpressurerecord/
 
 | 版本 | 日期 | 主要更新 |
 |------|------|---------|
+| 2.3.7 | 2026-10-23 | 趋势新增180天和365天，图表与统计同步更新，适配小屏与大字体 |
+| 2.3.6 | 2026-10-18 | 外部浏览器下载更新，改进发布分发与同步重试 |
 | 2.3.5 | 2026-10-13 | 首页大字布局、星期标记、时间选择与对比度优化 |
 | 2.3.4 | 2026-10-12 | 应用内更新自动版本发布流程 |
 | 2.3.2 | 2026-10-11 | 首页血压区间示意条、本地自定义范围、深浅色与无障碍支持 |

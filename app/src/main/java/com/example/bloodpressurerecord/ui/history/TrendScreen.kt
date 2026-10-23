@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -50,6 +52,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -135,10 +139,8 @@ fun TrendScreen(
             TextButton(onClick = { viewModel.setFullscreen(true) }) { Text("全屏") }
         }
 
-        SegmentedControl(
-            items = TrendRange.entries,
+        TrendRangeControl(
             selected = uiState.range,
-            label = { it.label },
             onSelected = viewModel::setRange
         )
         TrendAggregationControl(
@@ -756,6 +758,29 @@ internal fun trendPointPulseText(point: TrendPoint): String {
 }
 
 @Composable
+internal fun TrendRangeControl(
+    selected: TrendRange,
+    onSelected: (TrendRange) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+    val widestLabelPx = TrendRange.entries.maxOf { textMeasurer.measure(it.label, labelStyle).size.width }
+    val itemWidth = maxOf(48.dp, with(LocalDensity.current) { widestLabelPx.toDp() } + 8.dp)
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        // 常规宽度等分展示；小屏或大字体时横向滚动，保留完整文字和触控宽度。
+        val contentWidth = maxOf(maxWidth, itemWidth * TrendRange.entries.size + 26.dp)
+        SegmentedControl(
+            items = TrendRange.entries,
+            selected = selected,
+            label = { it.label },
+            onSelected = onSelected,
+            modifier = Modifier.horizontalScroll(rememberScrollState()).width(contentWidth)
+        )
+    }
+}
+
+@Composable
 internal fun TrendAggregationControl(
     selected: TrendAggregation,
     onSelected: (TrendAggregation) -> Unit,
@@ -888,7 +913,7 @@ internal fun TrendDayDetailsContent(details: TrendDayDetails, onOpenRecord: (Str
 }
 /**
  * 当日明细的副标题：加载完成后用真实记录数与该日平均，
- * 避免「7/30 天单次测量节点」显示成「当日 1 次」而掩盖同一天的其他记录。
+ * 避免单次测量节点显示成「当日 1 次」而掩盖同一天的其他记录。
  */
 private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
     if (details.loading) return "正在读取当天记录"

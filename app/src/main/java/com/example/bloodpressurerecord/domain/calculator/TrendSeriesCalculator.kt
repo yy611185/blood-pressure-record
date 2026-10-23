@@ -38,6 +38,8 @@ object TrendSeriesCalculator {
         return when (range) {
             TrendRange.DAYS_7 -> today.minusDays(6).atStartOfDay(zoneId).toInstant().toEpochMilli()
             TrendRange.DAYS_30 -> today.minusDays(29).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            TrendRange.DAYS_180 -> today.minusDays(179).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            TrendRange.DAYS_365 -> today.minusDays(364).atStartOfDay(zoneId).toInstant().toEpochMilli()
             TrendRange.ALL -> 0L
         }
     }

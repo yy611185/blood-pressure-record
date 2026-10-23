@@ -187,7 +187,7 @@ class TrendViewModelTest {
     }
 
     @Test
-    fun `六种范围粒度组合复用Session统计且主动偏好跨页面保留`() = runTest {
+    fun `所有范围粒度组合复用Session统计且主动偏好跨页面保留`() = runTest {
         val today = LocalDate.of(2026, 7, 25)
         val now = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
         val previous = today.minusDays(1).atTime(8, 0).atZone(zone).toInstant().toEpochMilli()
@@ -481,6 +481,52 @@ class TrendViewModelTest {
         assertEquals(128 to 82, vm.uiState.value.insights.periodAverage)
     }
 
+    @Test
+    fun `长期范围同步统计前期比较跨日滚动与筛选恢复`() = runTest {
+        for ((range, days) in listOf(TrendRange.DAYS_180 to 180L, TrendRange.DAYS_365 to 365L)) {
+            val today = LocalDate.of(2026, 7, 25)
+            val ticks = MutableStateFlow(today)
+            var now = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+            val startDate = today.minusDays(days - 1)
+            val start = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
+            val previousStart = startDate.minusDays(days).atStartOfDay(zone).toInstant().toEpochMilli()
+            val repo = FakeTrendRepository().apply {
+                records.value = listOf(
+                    record("too-old", previousStart - 1),
+                    record("previous", previousStart).copy(systolic = 160, diastolic = 100),
+                    record("boundary", start).copy(systolic = 120, diastolic = 80),
+                    record("today", now).copy(systolic = 130, diastolic = 84),
+                    record("future", now + 1)
+                )
+            }
+            val settings = FakeSettingsRepository(UserProfile(targetSystolic = 135, targetDiastolic = 85))
+            val handle = SavedStateHandle(mapOf("trend.range" to range.name))
+            val vm = TrendViewModel(repo, settings, { now }, zone,
+                UnconfinedTestDispatcher(testScheduler), ticks, handle)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+            advanceUntilIdle()
+            val state = vm.uiState.value
+            assertEquals(range, state.range)
+            assertEquals(TrendAggregation.DAILY, state.aggregation)
+            assertEquals(start, state.series.windowStart)
+            assertEquals(listOf("boundary", "today"), state.series.points.flatMap { it.sourceRecordIds })
+            assertEquals(125 to 82, state.insights.periodAverage)
+            assertEquals(DayNightAverage(130, 84, 1, 1), state.insights.daytimeAverage)
+            assertEquals(DayNightAverage(120, 80, 1, 1), state.insights.nighttimeAverage)
+            assertEquals(100, state.insights.targetRate)
+            assertEquals(0, state.insights.previousTargetRate)
+
+            repo.records.value = repo.records.value.filterNot { it.id == "future" }
+            now = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            ticks.value = today.plusDays(1)
+            advanceUntilIdle()
+            assertEquals(startDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(), vm.uiState.value.series.windowStart)
+            assertEquals(listOf("today"), vm.uiState.value.series.points.flatMap { it.sourceRecordIds })
+            assertEquals(130 to 84, vm.uiState.value.insights.periodAverage)
+            assertEquals(100, vm.uiState.value.insights.previousTargetRate)
+        }
+    }
+
     private class FakeTrendRepository : TrendRepository {
         val records = MutableStateFlow<List<TrendRecord>>(emptyList())
         var extraDetailRecords: List<TrendRecord> = emptyList()
@@ -506,7 +552,7 @@ class TrendViewModelTest {
         }
     }
 
-    private class FakeSettingsRepository : SettingsRepository {
+    private class FakeSettingsRepository(private val profile: UserProfile = UserProfile()) : SettingsRepository {
         val aggregationPreference = MutableStateFlow<TrendAggregation?>(null)
         var preferenceGate: CompletableDeferred<Unit>? = null
         override fun observeTrendAggregationPreference(): Flow<TrendAggregation?> = flow {
@@ -517,7 +563,7 @@ class TrendViewModelTest {
         override suspend fun setTrendAggregationPreference(aggregation: TrendAggregation) {
             aggregationPreference.value = aggregation
         }
-        override fun observeSettings(): Flow<SettingsBundle> = flowOf(SettingsBundle())
+        override fun observeSettings(): Flow<SettingsBundle> = flowOf(SettingsBundle(userProfile = profile))
         override suspend fun setLargeTextEnabled(enabled: Boolean) = Unit
         override suspend fun setHighRiskAlertEnabled(enabled: Boolean) = Unit
         override suspend fun setShowTrendChart(enabled: Boolean) = Unit

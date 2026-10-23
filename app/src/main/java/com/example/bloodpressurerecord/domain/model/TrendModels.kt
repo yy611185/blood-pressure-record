@@ -3,6 +3,8 @@ package com.example.bloodpressurerecord.domain.model
 enum class TrendRange(val label: String, val title: String) {
     DAYS_7("7天", "最近7天"),
     DAYS_30("30天", "最近30天"),
+    DAYS_180("180天", "最近180天"),
+    DAYS_365("365天", "最近365天"),
     ALL("全部", "全部记录")
 }
 

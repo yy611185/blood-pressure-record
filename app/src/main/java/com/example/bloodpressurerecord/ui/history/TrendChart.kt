@@ -149,7 +149,7 @@ fun SessionTimeSeriesDualLineChart(
     val diaPath = remember { Path() }
     val haptics = LocalHapticFeedback.current
 
-    // 数据域：7/30 天是自然周期窗口，「全部」是首条记录到当前时刻。
+    // 数据域：固定天数范围是自然周期窗口，「全部」是首条记录到当前时刻。
     // 视窗夹取在域内，因此平移天然不会拖出真实数据。
     val domainStart = series.rangeStart
     val domainEnd = series.rangeEnd
