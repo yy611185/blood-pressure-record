@@ -2,6 +2,16 @@
     <string name="app_name">家庭血压记录</string>
     <string name="back">返回</string>
     <string name="history_title">历史记录</string>
+    <string name="note_search_title">搜索历史备注</string>
+    <string name="note_search_input">输入关键词</string>
+    <string name="note_search_clear">清空搜索</string>
+    <string name="note_search_loading">正在搜索备注…</string>
+    <string name="note_search_empty">没有找到匹配的备注。</string>
+    <string name="note_search_error">暂时无法搜索备注，请重试。</string>
+    <string name="note_search_retry">重试</string>
+    <string name="note_search_average">平均 %1$d/%2$d mmHg</string>
+    <string name="note_search_locating">正在定位测量记录…</string>
+    <string name="note_search_location_unavailable">这条测量记录已删除或暂时无法定位。</string>
     <string name="history_mode_calendar">日历</string>
     <string name="history_mode_recent">近期</string>
     <string name="history_period_week">本周</string>

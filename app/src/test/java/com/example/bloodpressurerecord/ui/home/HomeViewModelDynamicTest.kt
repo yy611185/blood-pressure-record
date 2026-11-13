@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.ui.home
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.CalendarSessionSummary
 import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
+import com.example.bloodpressurerecord.data.repository.NoteSearchResult
 import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.data.repository.SessionRecord
@@ -258,6 +259,7 @@ class HomeViewModelDynamicTest {
 
         override fun observeSession(sessionId: String): Flow<SessionRecord?> = flowOf(null)
         override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = flowOf(null)
+        override fun observeNoteSearchResults(keyword: String): Flow<List<NoteSearchResult>> = flowOf(emptyList())
         override fun observeCalendarSessionSummaries(
             startInclusive: Long,
             endExclusive: Long

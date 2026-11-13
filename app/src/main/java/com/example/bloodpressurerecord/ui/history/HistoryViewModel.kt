@@ -25,12 +25,15 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 data class HistoryUiState(
@@ -80,6 +83,13 @@ data class RecentSummary(
     val highRiskCount: Int
 )
 
+internal sealed interface HistoryLocation {
+    data object Idle : HistoryLocation
+    data object Loading : HistoryLocation
+    data object Unavailable : HistoryLocation
+    data class Pending(val sessionId: String, val date: LocalDate) : HistoryLocation
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class HistoryViewModel(
     private val repository: BloodPressureRepository,
@@ -116,6 +126,12 @@ class HistoryViewModel(
     private val dayRefresh = MutableStateFlow(0)
     private val recentRefresh = MutableStateFlow(0)
     private var pendingRequestedDate: LocalDate? = null
+    private val locationSessionId = savedStateHandle.get<String>("sessionId")
+        ?.takeUnless { savedStateHandle.get<Boolean>(KEY_LOCATION_CANCELLED) == true }
+    private val mutableLocation = MutableStateFlow<HistoryLocation>(
+        if (locationSessionId == null) HistoryLocation.Idle else HistoryLocation.Loading
+    )
+    internal val location: StateFlow<HistoryLocation> = mutableLocation
 
     private val monthResult: Flow<MonthResult> = combine(
         displayedMonth,
@@ -292,7 +308,9 @@ class HistoryViewModel(
             return@onEach
         }
         if (state.selectedDate != null &&
-            (YearMonth.from(state.selectedDate) != state.displayedMonth || state.selectedDate.isAfter(todayProvider()))) {
+            (YearMonth.from(state.selectedDate) != state.displayedMonth ||
+                (state.selectedDate.isAfter(todayProvider()) &&
+                    state.selectedDate.toString() != savedStateHandle.get<String>(KEY_LOCATION_DATE)))) {
             setSelectedDate(null)
         }
     }.stateIn(
@@ -305,6 +323,50 @@ class HistoryViewModel(
             selectedDate = selectedDate.value
         )
     )
+
+    private val locationJob = locationSessionId?.let { sessionId ->
+        viewModelScope.launch {
+            flow { emitAll(repository.observeSession(sessionId)) }
+                .map { it?.measuredAt?.toLocalDate(zoneId) }
+                .distinctUntilChanged()
+                .catch { emit(null) }
+                .collect { date ->
+                    if (date == null) {
+                        savedStateHandle.remove<String>(KEY_LOCATION_DATE)
+                        mutableLocation.value = HistoryLocation.Unavailable
+                        return@collect
+                    }
+                    if (date.toString() != savedStateHandle.get<String>(KEY_LOCATION_DATE)) {
+                        setViewMode(HistoryViewMode.CALENDAR)
+                        showMonth(YearMonth.from(date))
+                        savedStateHandle[KEY_LOCATION_DATE] = date.toString()
+                        savedStateHandle[KEY_LOCATION_CONSUMED] = false
+                        setSelectedDate(date)
+                    }
+                    mutableLocation.value =
+                        if (savedStateHandle.get<Boolean>(KEY_LOCATION_CONSUMED) == true) {
+                            HistoryLocation.Idle
+                        } else {
+                            HistoryLocation.Pending(sessionId, date)
+                        }
+                }
+        }
+    }
+
+    internal fun finishLocation(target: HistoryLocation.Pending, found: Boolean): Boolean {
+        if (mutableLocation.value != target) return false
+        savedStateHandle[KEY_LOCATION_CONSUMED] = found
+        mutableLocation.value = if (found) HistoryLocation.Idle else HistoryLocation.Unavailable
+        return true
+    }
+
+    internal fun cancelLocation() {
+        if (locationJob != null) {
+            savedStateHandle[KEY_LOCATION_CANCELLED] = true
+            locationJob.cancel()
+            mutableLocation.value = HistoryLocation.Idle
+        }
+    }
 
     fun setViewMode(mode: HistoryViewMode) {
         viewMode.value = mode
@@ -430,6 +492,9 @@ class HistoryViewModel(
         private const val KEY_RECENT_PERIOD = "history.recentPeriod"
         private const val KEY_MONTH = "history.displayedMonth"
         private const val KEY_SELECTED_DATE = "history.selectedDate"
+        private const val KEY_LOCATION_DATE = "history.locationDate"
+        private const val KEY_LOCATION_CONSUMED = "history.locationConsumed"
+        private const val KEY_LOCATION_CANCELLED = "history.locationCancelled"
     }
 }
 

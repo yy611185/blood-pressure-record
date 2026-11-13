@@ -51,6 +51,8 @@ import com.example.bloodpressurerecord.ui.history.HistoryDetailViewModel
 import com.example.bloodpressurerecord.ui.history.HistoryScreen
 import com.example.bloodpressurerecord.ui.history.HistoryDetailScreen
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
+import com.example.bloodpressurerecord.ui.history.NoteSearchScreen
+import com.example.bloodpressurerecord.ui.history.NoteSearchViewModel
 import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardScreen
 import com.example.bloodpressurerecord.ui.home.DashboardViewModel
@@ -288,8 +290,42 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     HistoryScreen(
                         viewModel = historyVm,
                         onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
+                        onOpenSearch = {
+                            if (navController.currentBackStackEntry == backStack) {
+                                navController.navigate(AppDestination.NoteSearch.route)
+                            }
+                        },
                         onOpenDetail = { sessionId ->
                             navController.navigate(AppDestination.HistoryDetail.route(sessionId))
+                        }
+                    )
+                }
+                composable(AppDestination.NoteSearch.route) { backStack ->
+                    val searchVm: NoteSearchViewModel = viewModel(factory = factory)
+                    NoteSearchScreen(
+                        viewModel = searchVm,
+                        onBack = {
+                            if (navController.currentBackStackEntry == backStack) navController.popBackStack()
+                        },
+                        onOpenSession = { sessionId ->
+                            if (navController.currentBackStackEntry == backStack) {
+                                navController.navigate(AppDestination.HistoryLocation.route(sessionId))
+                            }
+                        }
+                    )
+                }
+                composable(AppDestination.HistoryLocation.route) { backStack ->
+                    val historyVm: HistoryViewModel = viewModel(factory = factory)
+                    HistoryScreen(
+                        viewModel = historyVm,
+                        onBack = {
+                            if (navController.currentBackStackEntry == backStack) navController.popBackStack()
+                        },
+                        onAddMeasurement = { navController.navigate(AppDestination.AddMeasurement.route) },
+                        onOpenDetail = { sessionId ->
+                            if (navController.currentBackStackEntry == backStack) {
+                                navController.navigate(AppDestination.HistoryDetail.route(sessionId))
+                            }
                         }
                     )
                 }
@@ -314,8 +350,14 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     HistoryDetailScreen(
                         viewModel = vm,
                         sessionId = sessionId,
-                        onBack = { navController.popBackStack() },
-                        onEdit = { id -> navController.navigate(AppDestination.HistoryEdit.route(id)) }
+                        onBack = {
+                            if (navController.currentBackStackEntry == backStack) navController.popBackStack()
+                        },
+                        onEdit = { id ->
+                            if (navController.currentBackStackEntry == backStack) {
+                                navController.navigate(AppDestination.HistoryEdit.route(id))
+                            }
+                        }
                     )
                 }
                 composable(AppDestination.HistoryEdit.route) { backStack ->
@@ -331,9 +373,16 @@ fun BloodPressureAppRoot(showTrendChart: Boolean = true) {
                     EditSessionScreen(
                         viewModel = vm,
                         onSaved = {
-                            navController.navigate(AppDestination.Measure.route) {
-                                popUpTo(navController.graph.findStartDestination().id)
-                                launchSingleTop = true
+                            val openedFromSearch = runCatching {
+                                navController.getBackStackEntry(AppDestination.HistoryLocation.route)
+                            }.isSuccess
+                            if (openedFromSearch) {
+                                navController.popBackStack()
+                            } else {
+                                navController.navigate(AppDestination.Measure.route) {
+                                    popUpTo(navController.graph.findStartDestination().id)
+                                    launchSingleTop = true
+                                }
                             }
                         },
                         onBack = { navController.popBackStack() }

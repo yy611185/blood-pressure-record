@@ -1,11 +1,13 @@
 package com.example.bloodpressurerecord.navigation
 
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -30,11 +32,16 @@ sealed class AppDestination(
     data object SettingsInfoAppGuide : AppDestination("settings/info/app-guide", "应用说明", Icons.Outlined.Settings)
     data object SettingsInfoReleaseNotes : AppDestination("settings/info/release-notes", "更新说明", Icons.Outlined.Settings)
 
+    data object NoteSearch : AppDestination("history/search", "搜索备注", Icons.Outlined.Search)
+    data object HistoryLocation : AppDestination("history/location/{sessionId}", "定位记录", Icons.Outlined.CalendarMonth) {
+        fun route(sessionId: String): String = "history/location/${Uri.encode(sessionId)}"
+    }
+
     data object HistoryDetail : AppDestination("history/detail/{sessionId}", "详情", Icons.Outlined.CalendarMonth) {
-        fun route(sessionId: String): String = "history/detail/$sessionId"
+        fun route(sessionId: String): String = "history/detail/${Uri.encode(sessionId)}"
     }
 
     data object HistoryEdit : AppDestination("history/edit/{sessionId}", "编辑", Icons.Outlined.CalendarMonth) {
-        fun route(sessionId: String): String = "history/edit/$sessionId"
+        fun route(sessionId: String): String = "history/edit/${Uri.encode(sessionId)}"
     }
 }

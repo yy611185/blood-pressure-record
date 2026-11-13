@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.CalendarSessionSummary
 import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
+import com.example.bloodpressurerecord.data.repository.NoteSearchResult
 import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
 import com.example.bloodpressurerecord.data.repository.SessionRecord
@@ -310,6 +311,57 @@ class HistoryViewModelTest {
         assertEquals(nextMonday, vm.uiState.value.recentSummary?.startDate)
     }
 
+    @Test
+    fun `定位以当前记录时间跨月选择并只消费目标记录一次`() = runTest {
+        val today = LocalDate.of(2026, 7, 25)
+        val date = LocalDate.of(2026, 5, 24)
+        val repo = FakeRepository().apply {
+            records.value = listOf(record("other", epoch(date, 12)), record("target", epoch(date, 8)))
+            summaries.value = listOf(CalendarSessionSummary(epoch(date, 8), "备注", false))
+        }
+        val handle = SavedStateHandle(mapOf("sessionId" to "target", "history.viewMode" to "RECENT"))
+        val vm = HistoryViewModel(repo, handle, zone, todayProvider = { today })
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        assertEquals(HistoryViewMode.CALENDAR, vm.uiState.value.viewMode)
+        assertEquals(YearMonth.from(date), vm.uiState.value.displayedMonth)
+        assertEquals(date, vm.uiState.value.selectedDate)
+        assertEquals(listOf("other", "target"), vm.uiState.value.selectedDayRecords.map { it.id })
+        val target = HistoryLocation.Pending("target", date)
+        assertEquals(target, vm.location.value)
+        assertEquals(false, vm.finishLocation(target.copy(sessionId = "other"), found = true))
+        assertTrue(vm.finishLocation(target, found = true))
+        assertEquals(false, vm.finishLocation(target, found = true))
+
+        val restored = HistoryViewModel(repo, handle, zone, todayProvider = { today })
+        advanceUntilIdle()
+        assertEquals(HistoryLocation.Idle, restored.location.value)
+    }
+
+    @Test
+    fun `定位跟随目标日期的更新并识别已删除记录`() = runTest {
+        val first = LocalDate.of(2026, 5, 24)
+        val moved = LocalDate.of(2026, 6, 8)
+        val repo = FakeRepository().apply {
+            records.value = listOf(record("target", epoch(first, 8)))
+        }
+        val vm = HistoryViewModel(
+            repo, SavedStateHandle(mapOf("sessionId" to "target")), zone, todayProvider = { moved }
+        )
+        advanceUntilIdle()
+        assertEquals(HistoryLocation.Pending("target", first), vm.location.value)
+
+        repo.records.value = listOf(record("target", epoch(moved, 8)))
+        advanceUntilIdle()
+        assertEquals(HistoryLocation.Pending("target", moved), vm.location.value)
+        assertEquals(false, vm.finishLocation(HistoryLocation.Pending("target", first), found = true))
+
+        repo.records.value = emptyList()
+        advanceUntilIdle()
+        assertEquals(HistoryLocation.Unavailable, vm.location.value)
+    }
+
     private fun epoch(date: LocalDate, hour: Int): Long =
         date.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
 
@@ -347,7 +399,9 @@ class HistoryViewModelTest {
         val summaryRecordsByStart =
             mutableMapOf<Long, MutableStateFlow<List<SessionSummary>>>()
         val statistics = MutableStateFlow(PeriodStatistics())
-        override fun observeSession(sessionId: String): Flow<SessionRecord?> = flowOf(null)
+        override fun observeSession(sessionId: String): Flow<SessionRecord?> =
+            records.map { values -> values.firstOrNull { it.id == sessionId } }
+        override fun observeNoteSearchResults(keyword: String): Flow<List<NoteSearchResult>> = flowOf(emptyList())
         override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = flowOf(null)
         override fun observeCalendarSessionSummaries(
             startInclusive: Long,

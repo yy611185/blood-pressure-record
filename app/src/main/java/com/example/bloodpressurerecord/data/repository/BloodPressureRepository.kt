@@ -21,6 +21,16 @@ data class SessionSummary(
     val containsHighRiskReading: Boolean
 )
 
+data class NoteSearchResult(
+    val id: String,
+    val measuredAt: Long,
+    val avgSystolic: Int,
+    val avgDiastolic: Int,
+    val note: String?,
+    val symptomNote: String?,
+    val factorNote: String?
+)
+
 data class LatestSessionSummary(
     val id: String,
     val measuredAt: Long,
@@ -101,6 +111,7 @@ interface BloodPressureRepository {
         startInclusive: Long,
         endExclusive: Long
     ): Flow<List<SessionSummary>>
+    fun observeNoteSearchResults(keyword: String): Flow<List<NoteSearchResult>>
     fun observePeriodStatistics(
         startInclusive: Long,
         endExclusive: Long

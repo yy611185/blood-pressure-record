@@ -39,6 +39,16 @@ data class SessionSummaryRow(
     val containsHighRiskReading: Boolean
 )
 
+data class NoteSearchResultRow(
+    val id: String,
+    val measuredAt: Long,
+    val avgSystolic: Int,
+    val avgDiastolic: Int,
+    val note: String?,
+    val symptomNote: String?,
+    val factorNote: String?
+)
+
 data class LatestSessionSummaryRow(
     val id: String,
     val measuredAt: Long,
@@ -155,6 +165,18 @@ interface MeasurementSessionDao {
         startInclusive: Long,
         endExclusive: Long
     ): Flow<List<SessionSummaryRow>>
+
+    @Query(
+        """
+        SELECT id, measuredAt, avgSystolic, avgDiastolic, note, symptomNote, factorNote
+        FROM measurement_sessions
+        WHERE COALESCE(note, '') LIKE :pattern ESCAPE '\'
+           OR COALESCE(symptomNote, '') LIKE :pattern ESCAPE '\'
+           OR COALESCE(factorNote, '') LIKE :pattern ESCAPE '\'
+        ORDER BY measuredAt DESC, id ASC
+        """
+    )
+    fun observeNoteSearchResults(pattern: String): Flow<List<NoteSearchResultRow>>
 
     @Query(
         """

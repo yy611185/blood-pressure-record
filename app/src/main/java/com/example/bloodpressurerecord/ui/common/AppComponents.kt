@@ -139,6 +139,7 @@ fun AppDangerButton(
 fun DataCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
     content: @Composable () -> Unit
 ) {
     val clickModifier = if (onClick != null) {
@@ -168,7 +169,8 @@ fun DataCard(
             .then(clickModifier),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = containerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {

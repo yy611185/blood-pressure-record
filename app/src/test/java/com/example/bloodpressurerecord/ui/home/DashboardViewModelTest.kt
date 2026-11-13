@@ -5,6 +5,7 @@ import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
 import com.example.bloodpressurerecord.data.repository.CalendarSessionSummary
 import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
+import com.example.bloodpressurerecord.data.repository.NoteSearchResult
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.MedicationSlot
 import com.example.bloodpressurerecord.data.repository.PeriodStatistics
@@ -375,6 +376,7 @@ class DashboardViewModelTest {
         override fun observeSession(sessionId: String): Flow<SessionRecord?> =
             sessionFlows[sessionId] ?: flowOf(null)
         override fun observeLatestSessionSummary(): Flow<LatestSessionSummary?> = latestFlow
+        override fun observeNoteSearchResults(keyword: String): Flow<List<NoteSearchResult>> = flowOf(emptyList())
         override fun observeCalendarSessionSummaries(
             startInclusive: Long,
             endExclusive: Long

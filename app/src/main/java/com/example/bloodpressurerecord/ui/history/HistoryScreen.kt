@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +60,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +87,7 @@ import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.common.StatusChip
@@ -104,23 +108,36 @@ import com.example.bloodpressurerecord.ui.theme.WarmTextFaint
 import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import androidx.compose.ui.graphics.luminance
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val calendarSelectionHalf = tween<Float>(AppMotion.Fast / 2, easing = FastOutSlowInEasing)
+
+private enum class CalendarHeader { MODE, MONTH, DAY }
+
+private fun calendarSessionKey(sessionId: String) = "history:session:$sessionId"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
     viewModel: HistoryViewModel,
     onOpenDetail: (String) -> Unit,
-    onAddMeasurement: () -> Unit
+    onAddMeasurement: () -> Unit,
+    onOpenSearch: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val location by viewModel.location.collectAsStateWithLifecycle()
     var showMonthPicker by remember { mutableStateOf(false) }
     val today = remember { LocalDate.now() }
     // 双击带备注红点的日期：选中后等当天记录加载完成，滚动到第一条带备注的记录卡片。
@@ -137,6 +154,7 @@ fun HistoryScreen(
                     onClick = {
                         pickerState.selectedDateMillis?.let {
                             val date = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()
+                            viewModel.cancelLocation()
                             viewModel.showMonth(YearMonth.from(date))
                         }
                         showMonthPicker = false
@@ -153,6 +171,66 @@ fun HistoryScreen(
 
     val topBarScroll = rememberHideOnScrollState()
     val listState = rememberLazyListState()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var highlightedTarget by remember { mutableStateOf<HistoryLocation.Pending?>(null) }
+    val showCalendarRecords = uiState.viewMode == HistoryViewMode.CALENDAR &&
+        uiState.monthState == CalendarLoadingState.CONTENT && uiState.monthHasRecords &&
+        uiState.selectedDate != null && uiState.dayState != CalendarLoadingState.ERROR
+    val calendarHeaders = remember(uiState.viewMode, showCalendarRecords) {
+        buildList {
+            add(CalendarHeader.MODE)
+            if (uiState.viewMode == HistoryViewMode.CALENDAR) add(CalendarHeader.MONTH)
+            if (showCalendarRecords) add(CalendarHeader.DAY)
+        }
+    }
+    val calendarRecords = if (showCalendarRecords) uiState.selectedDayRecords else emptyList()
+    val target = location as? HistoryLocation.Pending
+    val targetIndex = target?.let { pending ->
+        calendarRecords.indexOfFirst { it.id == pending.sessionId }
+            .takeIf { it >= 0 }?.plus(calendarHeaders.size)
+    } ?: -1
+    val locationReady = target != null && uiState.viewMode == HistoryViewMode.CALENDAR &&
+        uiState.selectedDate == target.date && uiState.displayedMonth == YearMonth.from(target.date) &&
+        uiState.monthState == CalendarLoadingState.CONTENT && uiState.dayState == CalendarLoadingState.CONTENT
+    // Read the current layout and location again after scrolling. A Room update can move or remove a card.
+    val currentTarget by rememberUpdatedState(target)
+    val currentTargetIndex by rememberUpdatedState(targetIndex)
+    LaunchedEffect(lifecycle, target, targetIndex, locationReady) {
+        if (target == null || !locationReady) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            // Let the independently observed day and record queries settle after an edit or deletion.
+            val found = if (targetIndex < 0) {
+                delay(2_000)
+                false
+            } else {
+                withTimeoutOrNull(2_000) {
+                    snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > targetIndex }
+                    val targetKey = calendarSessionKey(target.sessionId)
+                    var visible: Boolean
+                    do {
+                        listState.scrollToItem(targetIndex)
+                        visible = listState.layoutInfo.visibleItemsInfo.any { it.key == targetKey }
+                        if (!visible) withFrameNanos {}
+                    } while (!visible && currentTarget == target && currentTargetIndex == targetIndex)
+                    visible
+                } ?: false
+            }
+            if (currentTarget == target && currentTargetIndex == targetIndex) {
+                if (viewModel.finishLocation(target, found) && found) highlightedTarget = target
+            }
+        }
+    }
+    val highlight = highlightedTarget
+    LaunchedEffect(lifecycle, highlight) {
+        if (highlight == null) return@LaunchedEffect
+        try {
+            withTimeoutOrNull(2_000) {
+                lifecycle.currentStateFlow.first { !it.isAtLeast(Lifecycle.State.RESUMED) }
+            }
+        } finally {
+            if (highlightedTarget == highlight) highlightedTarget = null
+        }
+    }
     // 日历卡较高，快速回滚到列表顶部时部分设备不会再派发足够的反向滚动量。
     // 以列表真实位置兜底复位，确保“历史记录”标题一定能重新显示。
     LaunchedEffect(listState.canScrollBackward) {
@@ -160,27 +238,24 @@ fun HistoryScreen(
     }
     LaunchedEffect(
         pendingNoteScrollDate,
+        uiState.viewMode,
         uiState.selectedDate,
         uiState.dayState,
-        uiState.selectedDayRecords
+        calendarHeaders,
+        calendarRecords
     ) {
         val targetDate = pendingNoteScrollDate ?: return@LaunchedEffect
         if (uiState.viewMode != HistoryViewMode.CALENDAR ||
             uiState.selectedDate != targetDate ||
             uiState.dayState != CalendarLoadingState.CONTENT ||
-            uiState.selectedDayRecords.isEmpty()
+            calendarRecords.isEmpty()
         ) {
             return@LaunchedEffect
         }
-        // 列表固定前缀：模式切换(1) + 鼓励条(有记录时 1) + 日历卡(1) + 当天摘要(1)。
-        val itemsBeforeRecords = 1 +
-            (if (uiState.daySummaries.isNotEmpty()) 1 else 0) +
-            1 + // 日历卡
-            1   // 当天摘要
-        val notedIndex = uiState.selectedDayRecords
-            .indexOfFirst { it.noteSummary != HistoryViewModel.NO_NOTE_TEXT }
-        val targetIndex = itemsBeforeRecords + notedIndex.coerceAtLeast(0)
-        listState.animateScrollToItem(targetIndex)
+        val notedIndex = calendarRecords.indexOfFirst {
+            it.noteSummary != HistoryViewModel.NO_NOTE_TEXT
+        }.coerceAtLeast(0)
+        listState.animateScrollToItem(calendarHeaders.size + notedIndex)
         pendingNoteScrollDate = null
     }
     Column(
@@ -188,48 +263,100 @@ fun HistoryScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .padding(top = statusBarTopPadding())
-            .nestedScroll(topBarScroll.nestedScrollConnection)
+            .then(if (onBack == null) Modifier.nestedScroll(topBarScroll.nestedScrollConnection) else Modifier)
     ) {
-        AppTopBar(title = stringResource(R.string.history_title), hideOnScroll = topBarScroll)
+        AppTopBar(
+            title = stringResource(R.string.history_title),
+            onBack = onBack,
+            hideOnScroll = topBarScroll.takeIf { onBack == null },
+            actions = {
+                if (onOpenSearch != null) {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.note_search_title))
+                    }
+                }
+            }
+        )
+        val locationMessage = when (location) {
+            HistoryLocation.Loading -> R.string.note_search_locating
+            HistoryLocation.Unavailable -> R.string.note_search_location_unavailable
+            is HistoryLocation.Pending -> when {
+                uiState.monthState == CalendarLoadingState.ERROR || uiState.dayState == CalendarLoadingState.ERROR ->
+                    R.string.note_search_location_unavailable
+                else -> R.string.note_search_locating
+            }
+            HistoryLocation.Idle -> null
+        }
+        if (locationMessage != null) {
+            Box(Modifier.padding(horizontal = AppDimensions.pageHorizontalPadding)) {
+                CalendarMessage(stringResource(locationMessage))
+            }
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = AppDimensions.pageHorizontalPadding,
                 end = AppDimensions.pageHorizontalPadding,
-                bottom = dockContentBottomPadding()
+                bottom = if (onBack == null) dockContentBottomPadding() else pageContentBottomPadding()
             ),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
         ) {
-            item {
-                HistoryModeSelector(
-                    selected = uiState.viewMode,
-                    onSelected = viewModel::setViewMode
-                )
-            }
-
-            if (uiState.viewMode == HistoryViewMode.CALENDAR) {
-                item {
-                DataCard {
-                    CalendarMonth(
-                        month = uiState.displayedMonth,
-                        summaries = uiState.daySummaries,
-                        targetSystolic = uiState.targetSystolic,
-                        targetDiastolic = uiState.targetDiastolic,
-                        selectedDate = uiState.selectedDate,
-                        today = today,
-                        onPreviousMonth = viewModel::showPreviousMonth,
-                        onNextMonth = viewModel::showNextMonth,
-                        onChooseMonth = { showMonthPicker = true },
-                        onDateSelected = viewModel::selectDate,
-                        onDateDoubleClick = { date ->
-                            pendingNoteScrollDate = date
-                            viewModel.selectDate(date)
+            calendarHeaders.forEach { header ->
+                when (header) {
+                    CalendarHeader.MODE -> item(key = "history:mode") {
+                        HistoryModeSelector(
+                            selected = uiState.viewMode,
+                            onSelected = {
+                                viewModel.cancelLocation()
+                                viewModel.setViewMode(it)
+                            }
+                        )
+                    }
+                    CalendarHeader.MONTH -> item(key = "history:month") {
+                        DataCard {
+                            CalendarMonth(
+                                month = uiState.displayedMonth,
+                                summaries = uiState.daySummaries,
+                                targetSystolic = uiState.targetSystolic,
+                                targetDiastolic = uiState.targetDiastolic,
+                                selectedDate = uiState.selectedDate,
+                                today = today,
+                                onPreviousMonth = {
+                                    viewModel.cancelLocation()
+                                    viewModel.showPreviousMonth()
+                                },
+                                onNextMonth = {
+                                    viewModel.cancelLocation()
+                                    viewModel.showNextMonth()
+                                },
+                                onChooseMonth = { showMonthPicker = true },
+                                onDateSelected = {
+                                    viewModel.cancelLocation()
+                                    viewModel.selectDate(it)
+                                },
+                                onDateDoubleClick = { date ->
+                                    viewModel.cancelLocation()
+                                    pendingNoteScrollDate = date
+                                    viewModel.selectDate(date)
+                                }
+                            )
                         }
-                    )
+                    }
+                    CalendarHeader.DAY -> item(key = "history:day") {
+                        SelectedDaySummary(uiState)
+                    }
                 }
             }
-
+            items(calendarRecords, key = { calendarSessionKey(it.id) }) { session ->
+                HistorySessionCard(
+                    session = session,
+                    highlighted = highlight?.sessionId == session.id &&
+                        highlight.date == uiState.selectedDate && location == HistoryLocation.Idle,
+                    onClick = { onOpenDetail(session.id) }
+                )
+            }
+            if (uiState.viewMode == HistoryViewMode.CALENDAR) {
                 when (uiState.monthState) {
                     CalendarLoadingState.LOADING -> item {
                         CalendarMessage("正在加载本月记录…")
@@ -255,24 +382,12 @@ fun HistoryScreen(
                                 )
                             }
                             else -> {
-                                item {
-                                    SelectedDaySummary(uiState)
-                                }
                                 if (uiState.selectedDayRecords.isEmpty()) {
                                     item {
                                         DataCard {
                                             Text("这天没有测量记录。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
-                                }
-                                items(
-                                    items = uiState.selectedDayRecords,
-                                    key = { it.id }
-                                ) { session ->
-                                    HistorySessionCard(
-                                        session = session,
-                                        onClick = { onOpenDetail(session.id) }
-                                    )
                                 }
                             }
                         }
@@ -821,11 +936,18 @@ private fun SelectedDaySummary(state: HistoryUiState) {
 fun HistorySessionCard(
     session: HistorySessionItemUi,
     onClick: () -> Unit,
-    showDate: Boolean = false
+    showDate: Boolean = false,
+    highlighted: Boolean = false
 ) {
     val visualStatus = bloodPressureVisualStatus(category = session.category, containsHighRiskReading = false)
     val riskStatus = bloodPressureVisualStatus(category = session.category, containsHighRiskReading = true)
-    DataCard(onClick = onClick) {
+    val colors = MaterialTheme.colorScheme
+    val background by animateColorAsState(
+        targetValue = if (highlighted) lerp(colors.surface, colors.primaryContainer, 0.65f) else colors.surface,
+        animationSpec = AppMotion.colorFast,
+        label = "historySessionHighlight"
+    )
+    DataCard(onClick = onClick, containerColor = background) {
         Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -11,6 +11,7 @@ import com.example.bloodpressurerecord.domain.model.ReadingValue
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
 import com.example.bloodpressurerecord.domain.time.MeasurementPeriod
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import java.util.UUID
@@ -62,6 +63,23 @@ class DefaultBloodPressureRepository(
     ): Flow<List<SessionSummary>> {
         return sessionDao.observeSessionSummariesInRange(startInclusive, endExclusive)
             .map { rows -> rows.map(::toSummary) }
+    }
+
+    override fun observeNoteSearchResults(keyword: String): Flow<List<NoteSearchResult>> {
+        val pattern = noteSearchLikePattern(keyword) ?: return flowOf(emptyList())
+        return sessionDao.observeNoteSearchResults(pattern).map { rows ->
+            rows.map { row ->
+                NoteSearchResult(
+                    id = row.id,
+                    measuredAt = row.measuredAt,
+                    avgSystolic = row.avgSystolic,
+                    avgDiastolic = row.avgDiastolic,
+                    note = row.note,
+                    symptomNote = row.symptomNote,
+                    factorNote = row.factorNote
+                )
+            }
+        }
     }
 
     override fun observePeriodStatistics(
@@ -327,5 +345,18 @@ class DefaultBloodPressureRepository(
 
     private fun String.toAverageStrategy(): AverageStrategy {
         return AverageStrategy.entries.firstOrNull { it.name == this } ?: AverageStrategy.ALL
+    }
+}
+
+internal fun noteSearchLikePattern(keyword: String): String? {
+    val trimmed = keyword.trim()
+    if (trimmed.isEmpty()) return null
+    return buildString {
+        append('%')
+        for (character in trimmed) {
+            if (character == '\\' || character == '%' || character == '_') append('\\')
+            append(character)
+        }
+        append('%')
     }
 }

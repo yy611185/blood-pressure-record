@@ -8,6 +8,7 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.bloodpressurerecord.domain.time.dayTicks
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
+import com.example.bloodpressurerecord.ui.history.NoteSearchViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardViewModel
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
@@ -68,6 +69,10 @@ class AppViewModelFactory(
                     todayTicks = dayTicks(),
                     settingsRepository = container.settingsRepository
                 ) as T
+            }
+
+            NoteSearchViewModel::class.java -> {
+                NoteSearchViewModel(container.bloodPressureRepository, savedStateHandle) as T
             }
 
             SettingsViewModel::class.java -> {
