@@ -3,20 +3,25 @@ package com.example.bloodpressurerecord.ui.history
 import android.graphics.Bitmap
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.bloodpressurerecord.data.repository.PeriodStatistics
 import com.example.bloodpressurerecord.data.repository.SettingsBundle
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.TrendRepository
-import com.example.bloodpressurerecord.domain.calculator.TrendSeriesCalculator
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
@@ -25,11 +30,12 @@ import java.lang.reflect.Proxy
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.flowOf
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-/** 在横屏设备上验证主图占比和读数位置，截图只使用固定测试记录。 */
+/** 在横屏设备上验证主图占比、右上角读数位置以及外露工具栏查数交互。 */
 class TrendFullscreenLayoutTest {
     @get:Rule val composeRule = createComposeRule()
     private val zone = ZoneId.systemDefault()
@@ -46,6 +52,7 @@ class TrendFullscreenLayoutTest {
             category = "NORMAL_HIGH"
         )
     }
+    private lateinit var activeViewModel: TrendViewModel
 
     @Test fun landscapeChartDominatesAndReadoutStaysAtTopRight() {
         render(dark = false, fontScale = 1f)
@@ -61,21 +68,32 @@ class TrendFullscreenLayoutTest {
 
     private fun render(dark: Boolean, fontScale: Float) {
         val range = if (dark) TrendRange.DAYS_365 else TrendRange.DAYS_180
-        val series = TrendSeriesCalculator.build(records, range, now, zone)
         composeRule.setContent {
             val density = LocalDensity.current
-            val vm = remember { TrendViewModel(FixtureRepository(), fixtureSettings(), { now }, zone) }
+            val vm = remember {
+                TrendViewModel(FixtureRepository(), fixtureSettings(), { now }, zone).also {
+                    it.setRange(range)
+                    it.setAggregation(TrendAggregation.RAW)
+                    it.setFullscreen(true)
+                    activeViewModel = it
+                }
+            }
+            val uiState by vm.uiState.collectAsStateWithLifecycle()
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 BloodPressureRecordTheme(darkTheme = dark) {
                     Surface {
                         TrendFullscreenScreen(
-                            TrendUiState(range = range, series = series, selectedPointId = "fixture-26", fullscreen = true),
-                            vm,
+                            uiState = uiState,
+                            viewModel = vm,
                             onOpenRecord = {}
                         )
                     }
                 }
             }
+        }
+        composeRule.waitUntil(5_000) { activeViewModel.uiState.value.series.points.size == 27 }
+        composeRule.runOnIdle {
+            activeViewModel.selectPoint(activeViewModel.uiState.value.series.points.last())
         }
         composeRule.waitForIdle()
     }
@@ -91,8 +109,15 @@ class TrendFullscreenLayoutTest {
         assertTrue("Readout stays above the plot", readout.bottom <= chart.top + 1f)
         assertTrue("Readout must fit inside the screen", readout.right <= screen.right + 1f)
         composeRule.onNodeWithText("每日范围").assertDoesNotExist()
-        composeRule.onNodeWithText("上一条").assertDoesNotExist()
         composeRule.onNodeWithText("恢复").assertDoesNotExist()
+
+        listOf("上一条", "下一条", "明细").forEach { action ->
+            composeRule.onNodeWithText(action).performScrollTo().assertIsDisplayed()
+        }
+        composeRule.onNodeWithText("上一条").performScrollTo().performClick()
+        composeRule.runOnIdle {
+            assertEquals("fixture-25", activeViewModel.uiState.value.selectedPointId)
+        }
     }
 
     private fun capture(name: String) {
@@ -119,6 +144,7 @@ class TrendFullscreenLayoutTest {
         when (method.name) {
             "observeSettings" -> flowOf(SettingsBundle())
             "observeTrendAggregationPreference" -> flowOf(null)
+            "setTrendAggregationPreference" -> Unit
             "toString" -> "FixtureSettingsRepository"
             else -> error("Unexpected settings call: ${method.name}")
         }

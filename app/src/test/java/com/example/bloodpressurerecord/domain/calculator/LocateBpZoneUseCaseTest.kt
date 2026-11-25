@@ -44,9 +44,10 @@ class LocateBpZoneUseCaseTest {
     @Test
     fun `exactly every systolic cut enters the higher zone at its left edge`() {
         // 等于分界点时必须归入右侧（更高一级），不是左侧区间末端。
+        // 舒张压取正常下界 60，避免单轴舒张压偏低抢占「正常」区间。
         listOf(90 to BpZone.NORMAL, 120 to BpZone.ELEVATED, 140 to BpZone.HIGH)
             .forEach { (cut, zone) ->
-                val position = requireNotNull(locate(cut, 1, default))
+                val position = requireNotNull(locate(cut, 60, default))
                 assertEquals(zone, position.zone)
                 assertEquals(0f, position.offset, 0f)
                 assertEquals(zone.ordinal * 25f, position.percent, 0f)
@@ -55,14 +56,37 @@ class LocateBpZoneUseCaseTest {
 
     @Test
     fun `exactly every diastolic cut enters the higher zone at its left edge`() {
-        // 同一边界规则也独立适用于舒张压。
+        // 同一边界规则也独立适用于舒张压；收缩压取正常下界 90。
         listOf(60 to BpZone.NORMAL, 80 to BpZone.ELEVATED, 90 to BpZone.HIGH)
             .forEach { (cut, zone) ->
-                val position = requireNotNull(locate(1, cut, default))
+                val position = requireNotNull(locate(90, cut, default))
                 assertEquals(zone, position.zone)
                 assertEquals(0f, position.offset, 0f)
                 assertEquals(zone.ordinal * 25f, position.percent, 0f)
             }
+    }
+
+    @Test
+    fun `single axis low overrides normal while elevated and high override low`() {
+        // UX-01: 严重度排序 HIGH > ELEVATED > LOW > NORMAL
+        val lowDia = requireNotNull(locate(115, 55, default))
+        assertEquals(BpZone.LOW, lowDia.zone)
+        assertTrue(lowDia.percent < 25f)
+
+        val lowSys = requireNotNull(locate(85, 75, default))
+        assertEquals(BpZone.LOW, lowSys.zone)
+        assertTrue(lowSys.percent < 25f)
+
+        val elevatedOverLow = requireNotNull(locate(125, 55, default))
+        assertEquals(BpZone.ELEVATED, elevatedOverLow.zone)
+
+        val highOverLow = requireNotNull(locate(145, 55, default))
+        assertEquals(BpZone.HIGH, highOverLow.zone)
+
+        // 双轴均偏低时取更偏低（offset 更小）的一侧
+        val bothLow = requireNotNull(locate(75, 58, default))
+        assertEquals(BpZone.LOW, bothLow.zone)
+        assertEquals(5f / 20f, bothLow.offset, 0.0001f)
     }
 
     @Test

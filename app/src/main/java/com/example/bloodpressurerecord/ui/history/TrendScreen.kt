@@ -1,6 +1,8 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,7 +44,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
@@ -65,14 +70,19 @@ import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendRecord
 import com.example.bloodpressurerecord.domain.model.TrendSeries
 import com.example.bloodpressurerecord.domain.model.displayLabel
-import com.example.bloodpressurerecord.ui.common.AppBackButton
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.common.AppBackIconButton
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
-import com.example.bloodpressurerecord.ui.theme.AppMotion
+import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import com.example.bloodpressurerecord.ui.common.ExpandableSection
+import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
+import com.example.bloodpressurerecord.ui.theme.LocalBpGradePalette
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -89,6 +99,7 @@ fun TrendScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val chartController = viewModel.chartController
+    BindTrendChartController(chartController)
     // 上一条 / 下一条在当前图表的 Session 代表值节点之间移动。
     // 不能按日期 ±1 天推算——有些日期根本没有记录。
     val displayPoints = uiState.series.points
@@ -112,53 +123,53 @@ fun TrendScreen(
     }
 
     val series = uiState.series
+    val hasData = series.points.isNotEmpty()
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = AppDimensions.pageHorizontalPadding)
             .padding(
-                // 标题必须落在状态栏下方：顶部安全区取自 WindowInsets（刘海/挖孔屏
-                // 已包含在 statusBars 内），不写任何机型专用的固定高度。
                 top = statusBarTopPadding(extra = 12.dp),
-                // 底部一次给足：导航栏安全区 + 悬浮 Dock 胶囊 + 胶囊下边距 + 收尾间距。
-                // 页面内容因此总能完整滚到 Dock 上方，且不会多出一大块空白。
                 bottom = maxOf(dockContentBottomPadding(), AppDimensions.dockMinContentClearance)
             ),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
-                AppBackButton(onClick = onBack)
+                AppBackIconButton(onClick = onBack)
             }
             Text(
                 text = "血压趋势",
                 style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.weight(1f).padding(start = if (onBack != null) 4.dp else 0.dp)
+                modifier = Modifier.weight(1f).padding(start = if (onBack != null) 8.dp else 0.dp)
             )
-            TextButton(onClick = { viewModel.setFullscreen(true) }) { Text("全屏") }
+            if (hasData) {
+                TextButton(onClick = { viewModel.setFullscreen(true) }) { Text("全屏") }
+            }
         }
 
         TrendRangeControl(
             selected = uiState.range,
             onSelected = viewModel::setRange
         )
+
+        // UX-16 & 模块四：无数据时仅保留范围选择与单张引导卡，隐藏无效工具栏与空壳折叠统计
+        if (!hasData) {
+            TrendEmptySection(range = uiState.range, onAddMeasurement = onAddMeasurement)
+            return
+        }
+
         TrendAggregationControl(
             selected = uiState.aggregation,
             onSelected = viewModel::setAggregation
         )
 
-        if (series.points.isEmpty()) {
-            TrendEmptySection(range = uiState.range, onAddMeasurement = onAddMeasurement)
-        }
-
-        // 顶部只展示周期与样本摘要，平均值集中在下方统计区。
-        if (series.points.isNotEmpty()) {
-            TrendCompactSummary(
-                series = series,
-                insights = uiState.insights
-            )
-        }
+        TrendCompactSummary(
+            series = series,
+            insights = uiState.insights
+        )
 
         ExpandableSection(
             title = "血压趋势",
@@ -356,28 +367,41 @@ private fun TrendPeriodOverview(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                val reducedMotion = LocalReducedMotion.current
+                val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                val progressColor = MaterialTheme.colorScheme.secondary
+                val animatedSweep by animateFloatAsState(
+                    targetValue = (insights.targetRate ?: 0) * 3.6f,
+                    animationSpec = AppMotion.springGentle(reducedMotion),
+                    label = "target_rate_sweep"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) {},
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
                     Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
                         Canvas(Modifier.fillMaxSize()) {
-                            val sweep = (insights.targetRate ?: 0) * 3.6f
                             drawArc(
-                                color = Color(0xFFDDE8DF),
+                                color = trackColor,
                                 startAngle = -90f,
                                 sweepAngle = 360f,
                                 useCenter = false,
                                 style = Stroke(width = 11.dp.toPx())
                             )
                             drawArc(
-                                color = Color(0xFF70B78D),
+                                color = progressColor,
                                 startAngle = -90f,
-                                sweepAngle = sweep,
+                                sweepAngle = animatedSweep,
                                 useCenter = false,
                                 style = Stroke(width = 11.dp.toPx())
                             )
                         }
                         Text(
                             insights.targetRate?.let { "$it%" } ?: "—",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TabularFeatureSettings),
                             fontFamily = NumberFontFamily,
                             fontWeight = FontWeight.Bold
                         )
@@ -496,7 +520,7 @@ private fun TrendStatCell(title: String, value: String, supporting: String, modi
             Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 value,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = TabularFeatureSettings),
                 fontFamily = NumberFontFamily,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1
@@ -506,14 +530,9 @@ private fun TrendStatCell(title: String, value: String, supporting: String, modi
     }
 }
 
-private fun trendGradeColor(category: BloodPressureCategory): Color = when (category) {
-    BloodPressureCategory.NORMAL -> Color(0xFF70B78D)
-    BloodPressureCategory.HIGH_NORMAL -> Color(0xFFB0BE70)
-    BloodPressureCategory.STAGE1 -> Color(0xFFE9C16F)
-    BloodPressureCategory.STAGE2 -> Color(0xFFEE9B63)
-    BloodPressureCategory.STAGE3 -> Color(0xFFE47674)
-    BloodPressureCategory.LOW -> Color(0xFF7AA9D4)
-}
+@Composable
+private fun trendGradeColor(category: BloodPressureCategory): Color =
+    LocalBpGradePalette.current.forCategory(category.name).mid
 
 private fun trendCategoryLabel(category: BloodPressureCategory): String = when (category) {
     BloodPressureCategory.NORMAL -> "正常"
@@ -574,6 +593,12 @@ private fun TrendCard(
                 onSelected = onMetricChange,
                 accent = true
             )
+            // UX-15: 显式双指标颜色图例 + 虚线区分说明
+            TrendChartLegendRow(
+                showSystolic = metric != TrendMetricType.DIASTOLIC,
+                showDiastolic = metric != TrendMetricType.SYSTOLIC,
+                hasTarget = targetSystolic != null || targetDiastolic != null
+            )
             SessionTimeSeriesDualLineChart(
                 series = series,
                 selectedPoint = selectedPoint,
@@ -586,6 +611,39 @@ private fun TrendCard(
                 emptyTitle = "${series.range.title} 暂无数据"
             )
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TrendChartLegendRow(
+    showSystolic: Boolean,
+    showDiastolic: Boolean,
+    hasTarget: Boolean
+) {
+    val palette = trendChartPalette()
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (showSystolic) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Box(Modifier.size(9.dp).background(palette.systolic, CircleShape))
+                Text("高压（收缩压）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (showDiastolic) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Box(Modifier.size(9.dp).background(palette.diastolic, CircleShape))
+                Text("低压（舒张压）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(
+            if (hasTarget) "-- 参考 140/90 · ·· 个人目标" else "-- 参考 140/90",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -672,27 +730,37 @@ internal fun TrendSelectionReadout(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     "${if (displayed.aggregation == TrendAggregation.RAW) "" else "平均 "}${displayed.systolic}/${displayed.diastolic} mmHg",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TabularFeatureSettings),
                     fontFamily = NumberFontFamily,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+                StatusChip(
+                    text = CategoryPresentation.label(displayed.category),
+                    isAbnormal = !displayed.category.equals("NORMAL", ignoreCase = true),
+                    modifier = Modifier.align(Alignment.CenterVertically)
                 )
                 Text(
                     trendPointPulseText(displayed),
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TabularFeatureSettings),
+                    modifier = Modifier.align(Alignment.CenterVertically)
                 )
                 if (displayed.aggregation != TrendAggregation.RAW) Text(
-                    "${displayed.recordCount} 次测量", style = MaterialTheme.typography.bodyMedium
+                    "${displayed.recordCount} 次测量",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.align(Alignment.CenterVertically)
                 )
                 if (displayed.containsHighRiskReading) Text(
                     if (displayed.aggregation == TrendAggregation.RAW) "含高风险读数" else "当天含高风险记录",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.align(Alignment.CenterVertically)
                 )
             }
         }
@@ -765,10 +833,10 @@ internal fun TrendRangeControl(
 ) {
     val textMeasurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-    val widestLabelPx = TrendRange.entries.maxOf { textMeasurer.measure(it.label, labelStyle).size.width }
-    val itemWidth = maxOf(48.dp, with(LocalDensity.current) { widestLabelPx.toDp() } + 8.dp)
+    val widestLabelPx = TrendRange.entries.maxOf { textMeasurer.measure(it.label, labelStyle, softWrap = false).size.width }
+    val itemWidth = maxOf(48.dp, with(LocalDensity.current) { widestLabelPx.toDp() } + 16.dp)
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        // 常规宽度等分展示；小屏或大字体时横向滚动，保留完整文字和触控宽度。
+        // 常规宽度等分展示；小屏或大字体时横向滚动，保留完整单行文字和触控宽度。
         val contentWidth = maxOf(maxWidth, itemWidth * TrendRange.entries.size + 26.dp)
         SegmentedControl(
             items = TrendRange.entries,
@@ -805,66 +873,73 @@ private fun <T> SegmentedControl(
     accent: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // 暖阳设计：选中态统一用暖色 primaryContainer（不再出现深色块），
-    // 未选中的指标分段保留 surface + 轻投影的悬浮感。
-    Row(
+    if (items.isEmpty()) return
+    val reducedMotion = LocalReducedMotion.current
+    val colors = MaterialTheme.colorScheme
+    val selectedIndex = items.indexOf(selected).coerceAtLeast(0)
+    val animatedIndexState = animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = AppMotion.springSnappy(reducedMotion),
+        label = "trend_segment_slider"
+    )
+    val sliderColor = if (accent) colors.primaryContainer else colors.surface
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-                MaterialTheme.shapes.large
-            )
-            .padding(5.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .background(colors.surfaceContainerHighest, MaterialTheme.shapes.large)
+            .padding(5.dp)
     ) {
-        items.forEach { item ->
-            val isSelected = item == selected
-            val background by animateColorAsState(
-                targetValue = when {
-                    isSelected && accent -> MaterialTheme.colorScheme.primaryContainer
-                    isSelected -> MaterialTheme.colorScheme.surface
-                    else -> Color.Transparent
-                },
-                animationSpec = AppMotion.colorFast,
-                label = "trendSegmentBackground"
-            )
-            val textColor by animateColorAsState(
-                targetValue = when {
-                    isSelected && accent -> MaterialTheme.colorScheme.onPrimaryContainer
-                    isSelected -> MaterialTheme.colorScheme.onSurface
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                animationSpec = AppMotion.colorFast,
-                label = "trendSegmentText"
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .shadow(
-                        if (isSelected && !accent) 2.dp else 0.dp,
-                        MaterialTheme.shapes.large,
-                        clip = false
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    val count = items.size
+                    val gapPx = 4.dp.toPx()
+                    val itemWidth = ((size.width - gapPx * (count - 1)).coerceAtLeast(0f)) / count
+                    val currentIndex = if (reducedMotion) selectedIndex.toFloat() else animatedIndexState.value
+                    val x = (itemWidth + gapPx) * currentIndex
+                    val radiusPx = 16.dp.toPx()
+                    drawRoundRect(
+                        color = sliderColor,
+                        topLeft = Offset(x, 0f),
+                        size = Size(itemWidth, size.height),
+                        cornerRadius = CornerRadius(radiusPx, radiusPx)
                     )
-                    .background(
-                        background,
-                        MaterialTheme.shapes.large
-                    )
-                    .semantics {
-                        role = Role.RadioButton
-                        this.selected = isSelected
-                    }
-                    .clickable { onSelected(item) },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = label(item),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = textColor,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                },
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items.forEach { item ->
+                val isSelected = item == selected
+                val textColor by animateColorAsState(
+                    targetValue = when {
+                        isSelected && accent -> colors.onPrimaryContainer
+                        isSelected -> colors.onSurface
+                        else -> colors.onSurfaceVariant
+                    },
+                    animationSpec = AppMotion.colorSpec(reducedMotion),
+                    label = "trendSegmentText"
                 )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .semantics {
+                            role = Role.RadioButton
+                            this.selected = isSelected
+                        }
+                        .clickable { onSelected(item) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label(item),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = textColor,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                }
             }
         }
     }

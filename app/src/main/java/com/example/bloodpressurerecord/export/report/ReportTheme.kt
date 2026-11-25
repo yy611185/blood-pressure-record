@@ -148,8 +148,9 @@ object ReportTheme {
     const val ZEBRA = 0xFFF6F8FA.toInt()
     const val TABLE_HEADER = 0xFFEEF2F6.toInt()
     const val HIGH_BACKGROUND = 0xFFFCE9DC.toInt()
-    const val SYSTOLIC = 0xFF1F5FA8.toInt()
-    const val DIASTOLIC = 0xFFD9622B.toInt()
+    // UX-13: 与端内趋势图及小部件统一配色——收缩压暖橙、舒张压深蓝
+    const val SYSTOLIC = 0xFFC4513E.toInt()
+    const val DIASTOLIC = 0xFF1F5FA8.toInt()
     const val REFERENCE = 0xFF8A95A1.toInt()
     const val PROGRESS_BACKGROUND = 0xFFEEF1F4.toInt()
     const val ADHERENCE = 0xFF4C8C6B.toInt()

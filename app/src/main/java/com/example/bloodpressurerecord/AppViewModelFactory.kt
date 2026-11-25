@@ -9,13 +9,14 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.bloodpressurerecord.domain.time.dayTicks
 import com.example.bloodpressurerecord.ui.history.HistoryViewModel
 import com.example.bloodpressurerecord.ui.history.NoteSearchViewModel
+import com.example.bloodpressurerecord.ui.history.TrendViewModel
 import com.example.bloodpressurerecord.ui.home.DashboardViewModel
 import com.example.bloodpressurerecord.ui.home.HomeViewModel
-import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
-import com.example.bloodpressurerecord.ui.history.TrendViewModel
-import kotlinx.coroutines.flow.map
-import com.example.bloodpressurerecord.update.UpdateViewModel
 import com.example.bloodpressurerecord.ui.report.ReportViewModel
+import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
+import com.example.bloodpressurerecord.update.UpdateViewModel
+import java.time.ZoneId
+import kotlinx.coroutines.flow.map
 
 class AppViewModelFactory(
     private val application: Application
@@ -36,19 +37,34 @@ class AppViewModelFactory(
         savedStateHandle: SavedStateHandle
     ): T {
         val container = (application as BloodPressureApplication).appContainer
+        val liveDayTicks = {
+            dayTicks(
+                zoneProvider = ZoneId::systemDefault,
+                externalTrigger = container.systemTimeChangeSignal
+            )
+        }
         // 用精确类型匹配而非 isAssignableFrom：后者方向容易写反，
         // 请求 ViewModel 基类时会错误命中第一个分支。
         return when (modelClass) {
             ReportViewModel::class.java -> {
-                ReportViewModel(container.reportRepository, container.reportGenerator) as T
+                ReportViewModel(
+                    repository = container.reportRepository,
+                    generator = container.reportGenerator,
+                    zoneProvider = ZoneId::systemDefault,
+                    todayTicks = liveDayTicks(),
+                    timeChangeSignal = container.systemTimeChangeSignal,
+                    updatePromptGate = container.updatePromptGate
+                ) as T
             }
+
             HomeViewModel::class.java -> {
                 HomeViewModel(
                     repository = container.bloodPressureRepository,
                     highRiskAlertEnabled = container.settingsRepository.observeSettings()
                         .map { it.appSettings.highRiskAlertEnabled },
                     savedStateHandle = savedStateHandle,
-                    draftRepository = container.sessionDraftRepository
+                    draftRepository = container.sessionDraftRepository,
+                    updatePromptGate = container.updatePromptGate
                 ) as T
             }
 
@@ -56,9 +72,11 @@ class AppViewModelFactory(
                 DashboardViewModel(
                     repository = container.bloodPressureRepository,
                     medicationRepository = container.medicationRepository,
-                    todayTicks = dayTicks(),
+                    todayTicks = liveDayTicks(),
                     settingsRepository = container.settingsRepository,
-                    zoneConfigRepository = container.bpZoneConfigRepository
+                    zoneConfigRepository = container.bpZoneConfigRepository,
+                    zoneProvider = ZoneId::systemDefault,
+                    timeChangeSignal = container.systemTimeChangeSignal
                 ) as T
             }
 
@@ -66,8 +84,10 @@ class AppViewModelFactory(
                 HistoryViewModel(
                     repository = container.bloodPressureRepository,
                     savedStateHandle = savedStateHandle,
-                    todayTicks = dayTicks(),
-                    settingsRepository = container.settingsRepository
+                    zoneProvider = ZoneId::systemDefault,
+                    todayTicks = liveDayTicks(),
+                    settingsRepository = container.settingsRepository,
+                    timeChangeSignal = container.systemTimeChangeSignal
                 ) as T
             }
 
@@ -80,7 +100,8 @@ class AppViewModelFactory(
                     repository = container.settingsRepository,
                     medicationRepository = container.medicationRepository,
                     zoneConfigRepository = container.bpZoneConfigRepository,
-                    updatePromptGate = container.updatePromptGate
+                    updatePromptGate = container.updatePromptGate,
+                    deletionUndoManager = container.deletionUndoManager
                 ) as T
             }
 
@@ -89,7 +110,9 @@ class AppViewModelFactory(
                     trendRepository = container.trendRepository,
                     settingsRepository = container.settingsRepository,
                     savedStateHandle = savedStateHandle,
-                    todayTicks = dayTicks()
+                    todayTicks = liveDayTicks(),
+                    zoneProvider = ZoneId::systemDefault,
+                    timeChangeSignal = container.systemTimeChangeSignal
                 ) as T
             }
 

@@ -1,6 +1,6 @@
 package com.example.bloodpressurerecord.ui.common
 
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,9 +32,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.theme.AppMotion
+import kotlin.math.roundToInt
 
-/** Keeps the content composed so folding a chart does not reset its interaction state. */
+/**
+ * 保持内容常驻组合（避免折叠图表丢失缩放/选中状态），
+ * 由单一 expandProgress 在布局与绘制阶段读取（不在组合阶段读取动画值），
+ * 开启减少动态效果时直接使用目标值实现 0ms 同帧落位。
+ */
 @Composable
 fun ExpandableSection(
     title: String,
@@ -44,17 +50,18 @@ fun ExpandableSection(
     stateKey: String = title,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val reducedMotion = LocalReducedMotion.current
     var expanded by rememberSaveable(stateKey) { mutableStateOf(initiallyExpanded) }
-    val arrowRotation = animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = AppMotion.floatFast,
-        label = "Section arrow"
+    val targetProgress = if (expanded) 1f else 0f
+    val expandProgressState = animateFloatAsState(
+        targetValue = targetProgress,
+        animationSpec = AppMotion.springGentle(reducedMotion),
+        label = "section_expand_progress"
     )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = AppMotion.sizeNormal)
             .clipToBounds()
     ) {
         Row(
@@ -80,7 +87,11 @@ fun ExpandableSection(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
-                if (!expanded) {
+                AnimatedVisibility(
+                    visible = !expanded,
+                    enter = AppMotion.expandVisibilityEnter(reducedMotion),
+                    exit = AppMotion.expandVisibilityExit(reducedMotion)
+                ) {
                     Text(
                         text = summary.ifBlank { "暂无数据" },
                         style = MaterialTheme.typography.bodySmall,
@@ -91,7 +102,16 @@ fun ExpandableSection(
             Icon(
                 imageVector = Icons.Default.ExpandMore,
                 contentDescription = null,
-                modifier = Modifier.size(24.dp).graphicsLayer { rotationZ = arrowRotation.value },
+                modifier = Modifier
+                    .size(24.dp)
+                    .graphicsLayer {
+                        val progress = if (reducedMotion) {
+                            targetProgress
+                        } else {
+                            expandProgressState.value.coerceIn(0f, 1f)
+                        }
+                        rotationZ = progress * 180f
+                    },
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -101,10 +121,20 @@ fun ExpandableSection(
                 .clipToBounds()
                 .then(if (expanded) Modifier else Modifier.clearAndSetSemantics { })
                 .layout { measurable, constraints ->
+                    val progress = if (reducedMotion) {
+                        targetProgress
+                    } else {
+                        expandProgressState.value.coerceIn(0f, 1f)
+                    }
                     val placeable = measurable.measure(constraints.copy(minHeight = 0))
-                    // Unplaced content cannot receive touches or expose hidden controls.
-                    layout(placeable.width, if (expanded) placeable.height else 0) {
-                        if (expanded) placeable.placeRelative(0, 0)
+                    val targetHeight = (placeable.height * progress).roundToInt()
+                    layout(placeable.width, targetHeight) {
+                        // 完全收起时不再放置子节点，彻底隔离触摸与无障碍焦点。
+                        if (targetHeight > 0) {
+                            placeable.placeRelativeWithLayer(0, 0) {
+                                alpha = progress
+                            }
+                        }
                     }
                 }
                 .padding(top = 8.dp),

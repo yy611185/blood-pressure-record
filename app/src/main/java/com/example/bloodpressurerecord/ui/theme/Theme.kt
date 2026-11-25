@@ -1,15 +1,21 @@
 package com.example.bloodpressurerecord.ui.theme
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.example.bloodpressurerecord.ui.LocalIsDarkTheme
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.rememberSystemReducedMotion
 
 // UIredesign 根目录原型：奶白背景、白色卡片、珊瑚橙操作。
 private val LightColors = lightColorScheme(
@@ -89,12 +95,57 @@ fun BloodPressureRecordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    CompositionLocalProvider(LocalBpRangeColors provides if (darkTheme) DarkBpRangeColors else LightBpRangeColors) {
+    val reducedMotion = LocalReducedMotion.current || rememberSystemReducedMotion()
+    val targetScheme = if (darkTheme) DarkColors else LightColors
+    val animatedScheme = animateColorScheme(targetScheme, reducedMotion)
+
+    CompositionLocalProvider(
+        LocalReducedMotion provides reducedMotion,
+        LocalIsDarkTheme provides darkTheme,
+        LocalBpRangeColors provides if (darkTheme) DarkBpRangeColors else LightBpRangeColors,
+        LocalBpGradePalette provides if (darkTheme) DarkBpGradePalette else LightBpGradePalette
+    ) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = animatedScheme,
             typography = AppTypography,
             shapes = AppShapes,
             content = content
         )
     }
+}
+
+@Composable
+private fun animateColorScheme(target: ColorScheme, reducedMotion: Boolean): ColorScheme {
+    if (reducedMotion) return target
+    val spec = AppMotion.colorThemeSpec(reducedMotion = false)
+    val background by animateColorAsState(target.background, spec, label = "theme_bg")
+    val onBackground by animateColorAsState(target.onBackground, spec, label = "theme_on_bg")
+    val surface by animateColorAsState(target.surface, spec, label = "theme_surface")
+    val onSurface by animateColorAsState(target.onSurface, spec, label = "theme_on_surface")
+    val surfaceVariant by animateColorAsState(target.surfaceVariant, spec, label = "theme_surface_var")
+    val onSurfaceVariant by animateColorAsState(target.onSurfaceVariant, spec, label = "theme_on_surface_var")
+    val primary by animateColorAsState(target.primary, spec, label = "theme_primary")
+    val onPrimary by animateColorAsState(target.onPrimary, spec, label = "theme_on_primary")
+    val primaryContainer by animateColorAsState(target.primaryContainer, spec, label = "theme_primary_c")
+    val onPrimaryContainer by animateColorAsState(target.onPrimaryContainer, spec, label = "theme_on_primary_c")
+    val surfaceContainerLow by animateColorAsState(target.surfaceContainerLow, spec, label = "theme_scl")
+    val surfaceContainer by animateColorAsState(target.surfaceContainer, spec, label = "theme_sc")
+    val surfaceContainerHigh by animateColorAsState(target.surfaceContainerHigh, spec, label = "theme_sch")
+    val surfaceContainerHighest by animateColorAsState(target.surfaceContainerHighest, spec, label = "theme_schh")
+    return target.copy(
+        primary = primary,
+        onPrimary = onPrimary,
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = onPrimaryContainer,
+        background = background,
+        onBackground = onBackground,
+        surface = surface,
+        onSurface = onSurface,
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = onSurfaceVariant,
+        surfaceContainerLow = surfaceContainerLow,
+        surfaceContainer = surfaceContainer,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceContainerHighest
+    )
 }

@@ -75,11 +75,17 @@ interface MeasurementSessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSession(session: MeasurementSessionEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSessionIfAbsent(session: MeasurementSessionEntity): Long
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSessions(sessions: List<MeasurementSessionEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReadings(readings: List<MeasurementReadingEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertReadingsStrict(readings: List<MeasurementReadingEntity>)
 
     @Update
     suspend fun updateSessionEntity(session: MeasurementSessionEntity): Int

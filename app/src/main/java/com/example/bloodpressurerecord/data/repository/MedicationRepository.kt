@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.data.repository
 
 import com.example.bloodpressurerecord.data.db.dao.MedicationDao
+import com.example.bloodpressurerecord.data.db.dao.MedicationFullSnapshot
 import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
 import com.example.bloodpressurerecord.data.db.entity.MedicationEntity
 import com.example.bloodpressurerecord.data.db.entity.MedicationIntakeLogEntity
@@ -20,6 +21,18 @@ data class MedicationSlot(
     val taken: Boolean
 )
 
+/** 已删除药品的完整可恢复快照（保留原主键、启用状态、停用时间点与全部历史打卡）。 */
+data class DeletedMedicationSnapshot(
+    val medication: MedicationEntity,
+    val times: List<MedicationTimeEntity>,
+    val logs: List<MedicationIntakeLogEntity>
+)
+
+enum class MarkMedicationTakenResult {
+    RECORDED,
+    EXPIRED_OR_REMOVED
+}
+
 interface MedicationRepository {
     fun observeMedicationsWithTimes(): Flow<List<MedicationWithTimes>>
 
@@ -33,6 +46,16 @@ interface MedicationRepository {
 
     suspend fun setTaken(medicationId: Long, timeId: Long, date: LocalDate, taken: Boolean)
 
+    /** 通知栏快捷“已服用”专用：安全区分正常打卡（幂等）、已删/停用过期通知与真实数据库异常。 */
+    suspend fun markTakenFromReminder(
+        medicationId: Long,
+        timeId: Long,
+        date: LocalDate
+    ): Result<MarkMedicationTakenResult> = runCatching {
+        setTaken(medicationId, timeId, date, taken = true)
+        MarkMedicationTakenResult.RECORDED
+    }
+
     suspend fun addMedication(name: String, dosage: String, times: List<String>): Result<Long>
 
     suspend fun updateMedication(
@@ -44,12 +67,22 @@ interface MedicationRepository {
     ): Result<Unit>
 
     suspend fun deleteMedication(id: Long): Result<Unit>
+
+    suspend fun deleteMedicationWithSnapshot(id: Long): Result<DeletedMedicationSnapshot> =
+        deleteMedication(id).map {
+            error("当前仓库未实现完整药品快照")
+        }
+
+    suspend fun restoreMedication(snapshot: DeletedMedicationSnapshot): Result<Unit> =
+        Result.failure(UnsupportedOperationException("当前仓库未实现完整药品恢复"))
 }
 
 class DefaultMedicationRepository(
     private val dao: MedicationDao,
     /** 数据变化后的回调（用于刷新桌面小部件、重排提醒等）。 */
-    private val onDataChanged: (() -> Unit)? = null
+    private val onDataChanged: (() -> Unit)? = null,
+    /** 时间点被删除或停用后清理对应系统通知。 */
+    private val onTimeIdsRemoved: (suspend (Collection<Long>) -> Unit)? = null
 ) : MedicationRepository {
 
     override fun observeMedicationsWithTimes(): Flow<List<MedicationWithTimes>> =
@@ -97,7 +130,7 @@ class DefaultMedicationRepository(
         taken: Boolean
     ) {
         if (taken) {
-            dao.insertLog(
+            val recorded = dao.insertLogIfSlotActive(
                 MedicationIntakeLogEntity(
                     medicationId = medicationId,
                     timeId = timeId,
@@ -105,10 +138,32 @@ class DefaultMedicationRepository(
                     takenAt = System.currentTimeMillis()
                 )
             )
+            if (!recorded) return
         } else {
             dao.deleteLog(timeId, date.toEpochDay())
         }
         onDataChanged?.invoke()
+    }
+
+    override suspend fun markTakenFromReminder(
+        medicationId: Long,
+        timeId: Long,
+        date: LocalDate
+    ): Result<MarkMedicationTakenResult> = runCatching {
+        val recorded = dao.insertLogIfSlotActive(
+            MedicationIntakeLogEntity(
+                medicationId = medicationId,
+                timeId = timeId,
+                epochDay = date.toEpochDay(),
+                takenAt = System.currentTimeMillis()
+            )
+        )
+        if (recorded) {
+            onDataChanged?.invoke()
+            MarkMedicationTakenResult.RECORDED
+        } else {
+            MarkMedicationTakenResult.EXPIRED_OR_REMOVED
+        }
     }
 
     override suspend fun addMedication(
@@ -141,7 +196,7 @@ class DefaultMedicationRepository(
         val existing = dao.getMedication(id) ?: error("药品不存在")
         val normalizedTimes = times.map(String::trim).filter(String::isNotEmpty).distinct().sorted()
         require(normalizedTimes.isNotEmpty()) { "请至少添加一个服药时间" }
-        dao.updateMedicationWithTimes(
+        val deactivatedTimeIds = dao.updateMedicationWithTimes(
             medication = existing.copy(
                 name = name.trim(),
                 dosage = dosage.trim(),
@@ -149,11 +204,42 @@ class DefaultMedicationRepository(
             ),
             timeTexts = normalizedTimes
         )
+        val notifyRemoved = if (!enabled) {
+            dao.getTimesForMedication(id).map { it.id }
+        } else {
+            deactivatedTimeIds
+        }
+        if (notifyRemoved.isNotEmpty()) {
+            runCatching { onTimeIdsRemoved?.invoke(notifyRemoved) }
+        }
         onDataChanged?.invoke()
     }
 
-    override suspend fun deleteMedication(id: Long): Result<Unit> = runCatching {
-        dao.deleteMedication(id)
+    override suspend fun deleteMedication(id: Long): Result<Unit> =
+        deleteMedicationWithSnapshot(id).map { }
+
+    override suspend fun deleteMedicationWithSnapshot(id: Long): Result<DeletedMedicationSnapshot> = runCatching {
+        val snapshot = dao.deleteMedicationReturningSnapshot(id) ?: error("药品不存在或已删除")
+        if (snapshot.times.isNotEmpty()) {
+            runCatching { onTimeIdsRemoved?.invoke(snapshot.times.map { it.id }) }
+        }
+        onDataChanged?.invoke()
+        DeletedMedicationSnapshot(
+            medication = snapshot.medication,
+            times = snapshot.times,
+            logs = snapshot.logs
+        )
+    }
+
+    override suspend fun restoreMedication(snapshot: DeletedMedicationSnapshot): Result<Unit> = runCatching {
+        val restored = dao.restoreMedicationSnapshot(
+            MedicationFullSnapshot(
+                medication = snapshot.medication,
+                times = snapshot.times,
+                logs = snapshot.logs
+            )
+        )
+        check(restored) { "同编号药品已存在，未覆盖现存数据" }
         onDataChanged?.invoke()
     }
 }

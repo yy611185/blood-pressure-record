@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.ui.report
 
 import androidx.lifecycle.ViewModelStore
+import com.example.bloodpressurerecord.update.UpdatePromptGate
 import com.example.bloodpressurerecord.data.repository.ReportRepository
 import com.example.bloodpressurerecord.domain.report.BpReport
 import com.example.bloodpressurerecord.domain.report.ReportLayoutPlanner
@@ -531,14 +532,39 @@ class ReportViewModelTest {
         assertSame(preview, generator.discarded.single())
     }
 
+    @Test
+    fun `SAF selection holds the gate and blocks changes until the matching result`() = runTest {
+        val gate = UpdatePromptGate()
+        val vm = model(updatePromptGate = gate)
+        vm.confirmAndGenerate()
+        advanceUntilIdle()
+        val artifact = requireNotNull(vm.uiState.value.artifact)
+
+        assertTrue(vm.beginOutputSelection(ReportOutputKind.PDF, artifact))
+        assertTrue(gate.busy.value)
+        assertFalse(vm.uiState.value.canExport)
+        vm.setIncludeNotes(false)
+        vm.returnToOptions()
+        vm.finishOutputSelection(ReportOutputKind.IMAGE, null)
+        assertSame(artifact, vm.uiState.value.artifact)
+        assertTrue(vm.uiState.value.options.includeNotes)
+        assertTrue(gate.busy.value)
+
+        vm.finishOutputSelection(ReportOutputKind.PDF, null)
+        assertFalse(gate.busy.value)
+        assertTrue(vm.uiState.value.canExport)
+    }
+
     private fun model(
         repository: FakeReportRepository = FakeReportRepository(),
         generator: FakeReportGenerator = FakeReportGenerator(),
-        testDispatcher: TestDispatcher = dispatcher
+        testDispatcher: TestDispatcher = dispatcher,
+        updatePromptGate: UpdatePromptGate? = null
     ): ReportViewModel = ReportViewModel(
         repository, generator, { now }, zone,
         calculationDispatcher = testDispatcher,
-        ioDispatcher = testDispatcher
+        ioDispatcher = testDispatcher,
+        updatePromptGate = updatePromptGate
     ).also { vm ->
         stores += ViewModelStore().apply { put("report", vm) }
     }

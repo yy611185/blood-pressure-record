@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.update
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,9 +27,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.bloodpressurerecord.BuildConfig
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -124,22 +127,31 @@ fun UpdateSettingsContent(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.checkState != UpdateCheckState.CHECKING
                 )
-                when (state.checkState) {
-                    UpdateCheckState.IDLE -> Unit
-                    UpdateCheckState.CHECKING -> {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        SecondaryText("正在获取最新版本信息")
+                val reducedMotion = LocalReducedMotion.current
+                AnimatedContent(
+                    targetState = state.checkState,
+                    transitionSpec = { AppMotion.fadeThrough(reducedMotion) },
+                    label = "updateCheckState"
+                ) { checkState ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        when (checkState) {
+                            UpdateCheckState.IDLE -> Unit
+                            UpdateCheckState.CHECKING -> {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                SecondaryText("正在获取最新版本信息")
+                            }
+                            UpdateCheckState.CURRENT -> Text("已是最新版本", style = MaterialTheme.typography.bodyMedium)
+                            UpdateCheckState.AVAILABLE -> Text(
+                                if (state.required) "当前版本低于最低支持版本，建议尽快更新" else "有新版本可用",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            UpdateCheckState.FAILED -> Text(
+                                state.checkMessage ?: "检查失败，请稍后重试。您可以继续正常使用应用，也可访问备用下载。",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
-                    UpdateCheckState.CURRENT -> Text("已是最新版本", style = MaterialTheme.typography.bodyMedium)
-                    UpdateCheckState.AVAILABLE -> Text(
-                        if (state.required) "当前版本低于最低支持版本，建议尽快更新" else "有新版本可用",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    UpdateCheckState.FAILED -> Text(
-                        state.checkMessage ?: "检查失败，请稍后重试。您可以继续正常使用应用，也可访问备用下载。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
                 }
                 if (state.checkState != UpdateCheckState.FAILED) {
                     state.checkMessage?.takeIf { it.isNotBlank() && it != "已是最新版本" }?.let {

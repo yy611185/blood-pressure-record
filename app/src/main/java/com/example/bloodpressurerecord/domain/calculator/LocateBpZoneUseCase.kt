@@ -15,9 +15,13 @@ class LocateBpZoneUseCase {
 
         val sysPosition = locateAxis(sys, config.sys)
         val diaPosition = locateAxis(dia, config.dia)
+        val sysSeverity = zoneSeverity(sysPosition.zone)
+        val diaSeverity = zoneSeverity(diaPosition.zone)
         val selected = when {
-            sysPosition.zone.ordinal > diaPosition.zone.ordinal -> sysPosition
-            sysPosition.zone.ordinal < diaPosition.zone.ordinal -> diaPosition
+            sysSeverity > diaSeverity -> sysPosition
+            sysSeverity < diaSeverity -> diaPosition
+            sysPosition.zone == BpZone.LOW ->
+                if (sysPosition.offset <= diaPosition.offset) sysPosition else diaPosition
             sysPosition.offset >= diaPosition.offset -> sysPosition
             else -> diaPosition
         }
@@ -26,6 +30,17 @@ class LocateBpZoneUseCase {
             offset = selected.offset,
             percent = ((selected.zone.ordinal + selected.offset) * 25f).coerceIn(2f, 98f)
         )
+    }
+
+    /**
+     * 与 BloodPressureRules.category() 严格一致的严重度优先级：
+     * 先按升高一侧（过高 > 偏高），两轴均未升高时任一轴偏低优先于正常。
+     */
+    private fun zoneSeverity(zone: BpZone): Int = when (zone) {
+        BpZone.NORMAL -> 0
+        BpZone.LOW -> 1
+        BpZone.ELEVATED -> 2
+        BpZone.HIGH -> 3
     }
 
     private fun locateAxis(value: Int, axis: BpAxisConfig): AxisPosition {

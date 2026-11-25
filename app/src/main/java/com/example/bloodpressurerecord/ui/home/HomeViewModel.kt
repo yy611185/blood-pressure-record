@@ -5,26 +5,37 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.SaveSessionInput
-import com.example.bloodpressurerecord.domain.time.MeasurementPeriod
-import com.example.bloodpressurerecord.ui.common.SessionFormLogic
-import com.example.bloodpressurerecord.ui.common.SessionDraftStore
-import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
-import com.example.bloodpressurerecord.ui.common.SessionFormDraft
-import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
+import com.example.bloodpressurerecord.domain.time.MeasurementPeriod
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
+import com.example.bloodpressurerecord.ui.common.SessionDraftRepository
+import com.example.bloodpressurerecord.ui.common.SessionDraftStore
+import com.example.bloodpressurerecord.ui.common.RemovedExtraReading
+import com.example.bloodpressurerecord.ui.common.RestoreExtraReadingResult
+import com.example.bloodpressurerecord.ui.common.SessionFormDraft
+import com.example.bloodpressurerecord.ui.common.SessionFormLogic
+import com.example.bloodpressurerecord.ui.common.SessionReadingInputUi
+import com.example.bloodpressurerecord.update.UpdatePromptGate
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+
+data class CompletedSessionSave(
+    val sessionId: String,
+    val avgSystolic: Int?,
+    val avgDiastolic: Int?,
+    val categoryLabel: String
+)
 
 data class HomeUiState(
     val measuredAtText: String = DateTimeInputFormatter.nowText(),
@@ -53,7 +64,8 @@ data class HomeUiState(
     val isSaving: Boolean = false,
     val canSave: Boolean = false,
     val saveDisabledReason: String = "把两组的高压和低压都填好，就可以保存啦",
-    val isDirty: Boolean = false
+    val isDirty: Boolean = false,
+    val restoredFromDraft: Boolean = false
 )
 
 class HomeViewModel(
@@ -61,7 +73,8 @@ class HomeViewModel(
     highRiskAlertEnabled: Flow<Boolean> = flowOf(true),
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     draftRepository: SessionDraftRepository? = null,
-    private val nowMillis: () -> Long = System::currentTimeMillis
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val updatePromptGate: UpdatePromptGate? = null
 ) : ViewModel() {
     private val highRiskAlertsEnabled = highRiskAlertEnabled.stateIn(
         scope = viewModelScope,
@@ -69,14 +82,27 @@ class HomeViewModel(
         initialValue = true
     )
     private val draftStore = SessionDraftStore(savedStateHandle, "add_session", draftRepository)
+    private var nextEditorId = 1L
     private val restoredDraft = draftStore.restore()
+    private val restoredSavedId = (savedStateHandle.get<String>("add_session.saved_id") ?: restoredDraft?.sessionId)
+        ?.takeIf { it.isNotBlank() }
     private val localState = MutableStateFlow(
         (restoredDraft?.toHomeUiState() ?: HomeUiState()).copy(
-            savedSessionId = savedStateHandle.get<String>("add_session.saved_id") ?: restoredDraft?.sessionId,
-            saved = savedStateHandle["add_session.completed"] ?: false,
+            savedSessionId = restoredSavedId,
+            saved = (savedStateHandle["add_session.completed"] ?: false) && restoredSavedId != null,
             completionDeadlineMillis = savedStateHandle["add_session.deadline"]
         )
     )
+    private var completedSave: CompletedSessionSave? = restoredSavedId?.takeIf {
+        savedStateHandle.get<Boolean>("add_session.completed") == true
+    }?.let { id ->
+        CompletedSessionSave(
+            sessionId = id,
+            avgSystolic = savedStateHandle.get<Int>("add_session.saved_sys") ?: localState.value.avgSystolic,
+            avgDiastolic = savedStateHandle.get<Int>("add_session.saved_dia") ?: localState.value.avgDiastolic,
+            categoryLabel = savedStateHandle.get<String>("add_session.saved_cat") ?: localState.value.categoryLabel
+        )
+    }
     private var pendingSaveInput: SaveSessionInput? = null
     private var pendingSaveContainsHighRisk: Boolean = false
 
@@ -84,22 +110,57 @@ class HomeViewModel(
 
     fun updateMeasuredAtText(value: String) = updateForm { state ->
         val period = DateTimeInputFormatter.parse(value)?.let { MeasurementPeriod.labelFor(it) }
-        state.copy(measuredAtText = value, scene = period ?: state.scene)
+        state.copy(measuredAtText = value, scene = period ?: state.scene, restoredFromDraft = false)
+    }
+
+    fun refreshMeasuredAtToNow() {
+        if (localState.value.isSaving) return
+        val now = nowMillis()
+        updateForm { state ->
+            state.copy(
+                measuredAtText = DateTimeInputFormatter.format(now),
+                scene = MeasurementPeriod.labelFor(now),
+                restoredFromDraft = false,
+                formMessage = ""
+            )
+        }
+    }
+
+    fun dismissRestoredDraftBanner() {
+        if (localState.value.isSaving) return
+        localState.update { it.copy(restoredFromDraft = false, formMessage = "") }
     }
 
     fun updateSymptomNote(value: String) = updateForm { it.copy(symptomNote = value) }
     fun updateFactorNote(value: String) = updateForm { it.copy(factorNote = value) }
 
     fun editSavedSession() {
-        if (localState.value.savedSessionId == null) return
+        if (localState.value.isSaving || localState.value.savedSessionId.isNullOrBlank()) return
+        completedSave = null
         savedStateHandle["add_session.completed"] = false
         savedStateHandle.remove<Long>("add_session.deadline")
         localState.update { it.copy(saved = false, completionDeadlineMillis = null, formMessage = "") }
     }
 
+    /** 原子消费一次保存完成结果，防止自动返回与手动返回重复消费或读取保存后被清空的字段。 */
+    fun consumeSavedSession(): CompletedSessionSave? {
+        val state = localState.value
+        if (!state.saved || state.isSaving) return null
+        val snapshot = completedSave ?: CompletedSessionSave(
+            sessionId = state.savedSessionId.orEmpty(),
+            avgSystolic = state.avgSystolic,
+            avgDiastolic = state.avgDiastolic,
+            categoryLabel = state.categoryLabel
+        )
+        closeSavedSession()
+        return snapshot
+    }
+
     fun closeSavedSession() {
+        if (localState.value.isSaving) return
+        completedSave = null
         draftStore.clear()
-        listOf("saved_id", "completed", "deadline").forEach {
+        listOf("saved_id", "completed", "deadline", "saved_sys", "saved_dia", "saved_cat").forEach {
             savedStateHandle.remove<Any>("add_session.$it")
         }
         localState.value = HomeUiState()
@@ -113,7 +174,8 @@ class HomeViewModel(
             )
         }
         state.copy(
-            extraReadings = state.extraReadings + SessionReadingInputUi()
+            extraReadings = state.extraReadings + SessionReadingInputUi(editorId = nextEditorId++),
+            formMessage = ""
         )
     }
 
@@ -123,22 +185,43 @@ class HomeViewModel(
     fun updateReading2Systolic(value: String) = updateReading { it.copy(reading2 = it.reading2.copy(systolic = value)) }
     fun updateReading2Diastolic(value: String) = updateReading { it.copy(reading2 = it.reading2.copy(diastolic = value)) }
     fun updateReading2Pulse(value: String) = updateReading { it.copy(reading2 = it.reading2.copy(pulse = value)) }
-    fun updateExtraReadingSystolic(index: Int, value: String) = updateReading { state ->
-        state.copy(extraReadings = state.extraReadings.updateAt(index) { it.copy(systolic = value) })
+    fun updateExtraReadingSystolic(editorId: Long, value: String) = updateReading { state ->
+        state.copy(extraReadings = state.extraReadings.updateById(editorId) { it.copy(systolic = value) })
     }
 
-    fun updateExtraReadingDiastolic(index: Int, value: String) = updateReading { state ->
-        state.copy(extraReadings = state.extraReadings.updateAt(index) { it.copy(diastolic = value) })
+    fun updateExtraReadingDiastolic(editorId: Long, value: String) = updateReading { state ->
+        state.copy(extraReadings = state.extraReadings.updateById(editorId) { it.copy(diastolic = value) })
     }
 
-    fun updateExtraReadingPulse(index: Int, value: String) = updateReading { state ->
-        state.copy(extraReadings = state.extraReadings.updateAt(index) { it.copy(pulse = value) })
+    fun updateExtraReadingPulse(editorId: Long, value: String) = updateReading { state ->
+        state.copy(extraReadings = state.extraReadings.updateById(editorId) { it.copy(pulse = value) })
     }
 
-    fun removeExtraReading(index: Int) = updateReading { state ->
-        state.copy(
-            extraReadings = state.extraReadings.filterIndexed { itemIndex, _ -> itemIndex != index }
-        )
+    fun removeExtraReading(editorId: Long): RemovedExtraReading? {
+        val state = localState.value
+        if (state.isSaving || state.saved) return null
+        val index = state.extraReadings.indexOfFirst { it.editorId == editorId }
+        if (index < 0) return null
+        val removed = state.extraReadings[index]
+        updateReading { it.copy(extraReadings = it.extraReadings.filterNot { row -> row.editorId == editorId }) }
+        return RemovedExtraReading(index, removed)
+    }
+
+    fun restoreExtraReading(removed: RemovedExtraReading): RestoreExtraReadingResult {
+        val current = localState.value
+        if (current.isSaving || current.saved) return RestoreExtraReadingResult.BUSY
+        if (current.extraReadings.any { it.editorId == removed.reading.editorId }) return RestoreExtraReadingResult.RESTORED
+        if (allReadings(current).size >= SessionFormLogic.UI_MAX_READING_COUNT) {
+            val reminder = "已达 ${SessionFormLogic.UI_MAX_READING_COUNT} 组读数上限，请先删除一组后再撤销恢复。"
+            localState.update { it.copy(formMessage = reminder, formMessageIsError = true) }
+            return RestoreExtraReadingResult.AT_LIMIT
+        }
+        updateReading { state ->
+            val restored = state.extraReadings.toMutableList()
+            restored.add(removed.index.coerceIn(0, restored.size), removed.reading)
+            state.copy(extraReadings = restored, formMessage = "", formMessageIsError = false)
+        }
+        return RestoreExtraReadingResult.RESTORED
     }
 
     fun onSaveClicked() {
@@ -192,6 +275,7 @@ class HomeViewModel(
     }
 
     fun confirmAbnormalAndContinue() {
+        if (localState.value.isSaving) return
         localState.update { it.copy(showAbnormalConfirmDialog = false, abnormalConfirmMessage = "") }
         if (pendingSaveInput == null) return
         if (highRiskAlertsEnabled.value && pendingSaveContainsHighRisk) {
@@ -202,39 +286,48 @@ class HomeViewModel(
     }
 
     fun dismissAbnormalDialog() {
+        if (localState.value.isSaving) return
         pendingSaveInput = null
         pendingSaveContainsHighRisk = false
         localState.update { it.copy(showAbnormalConfirmDialog = false, abnormalConfirmMessage = "") }
     }
 
     fun confirmHighRiskAndSave() {
+        if (localState.value.isSaving) return
         localState.update { it.copy(showHighRiskDialog = false) }
         savePendingInput()
     }
 
     fun dismissHighRiskDialog() {
+        if (localState.value.isSaving) return
         pendingSaveInput = null
         pendingSaveContainsHighRisk = false
         localState.update { it.copy(showHighRiskDialog = false) }
     }
 
     fun discardDraft() {
+        if (localState.value.isSaving) return
         closeSavedSession()
         pendingSaveInput = null
         pendingSaveContainsHighRisk = false
     }
 
     fun saveDraft(onSaved: () -> Unit) {
+        if (localState.value.isSaving || localState.value.saved) return
         val draft = currentDraft()
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { draftStore.persist(draft) }
-            result.onSuccess { onSaved() }.onFailure { throwable ->
-                localState.update {
-                    it.copy(
-                        formMessage = "草稿保存失败：${throwable.message ?: "请稍后重试"}",
-                        formMessageIsError = true
-                    )
-                }
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            localState.update { it.copy(isSaving = true) }
+            val release = updatePromptGate?.hold()
+            try {
+                draftStore.persist(draft, Dispatchers.IO)
+                    .onSuccess { onSaved() }
+                    .onFailure { throwable ->
+                        if (throwable is CancellationException) throw throwable
+                        localState.update { it.copy(formMessage = "草稿保存失败：${throwable.message ?: "请稍后重试"}", formMessageIsError = true) }
+                    }
+            } finally {
+                localState.update { it.copy(isSaving = false) }
+                release?.invoke()
             }
         }
     }
@@ -242,61 +335,102 @@ class HomeViewModel(
     private fun savePendingInput() {
         val input = pendingSaveInput ?: return
         if (localState.value.isSaving) return
-        localState.update {
-            it.copy(
-                isSaving = true,
-                formMessage = "正在保存...",
-                formMessageIsError = false
-            )
-        }
-        viewModelScope.launch {
-            val existingId = localState.value.savedSessionId
-            val result = if (existingId == null) {
-                repository.saveSession(input)
-            } else {
-                repository.updateSession(existingId, input).map { existingId }
+        val submittedDerived = SessionFormLogic.recomputeDerived(
+            readings = input.readings.map {
+                SessionReadingInputUi(
+                    systolic = it.systolic.toString(),
+                    diastolic = it.diastolic.toString(),
+                    pulse = it.pulse?.toString().orEmpty()
+                )
+            },
+            requiredCount = 2,
+            strategy = input.averageStrategy
+        )
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            localState.update {
+                it.copy(
+                    isSaving = true,
+                    formMessage = "正在保存...",
+                    formMessageIsError = false
+                )
             }
-            result.onSuccess { sessionId ->
-                val deadline = nowMillis() + 5_000
-                savedStateHandle["add_session.saved_id"] = sessionId
-                savedStateHandle["add_session.completed"] = true
-                savedStateHandle["add_session.deadline"] = deadline
-                localState.update {
-                    it.copy(
-                        saved = true,
-                        savedSessionId = sessionId,
-                        completionDeadlineMillis = deadline,
-                        isSaving = false,
-                        isDirty = false,
-                        formMessage = "",
-                        showHighRiskDialog = false,
-                        showAbnormalConfirmDialog = false
-                    )
+            val release = updatePromptGate?.hold()
+            try {
+                val existingId = localState.value.savedSessionId?.takeIf { it.isNotBlank() }
+                val result = if (existingId == null) {
+                    repository.saveSession(input)
+                } else {
+                    repository.updateSession(existingId, input).map { existingId }
                 }
-                draftStore.clear()
-                persistDraft()
-                pendingSaveInput = null
-                pendingSaveContainsHighRisk = false
-            }.onFailure { throwable ->
-                localState.update {
-                    it.copy(
-                        formMessage = "保存失败：${throwable.message ?: "请稍后重试"}",
-                        formMessageIsError = true,
-                        isSaving = false,
-                        showHighRiskDialog = false,
-                        showAbnormalConfirmDialog = false
+                result.onSuccess { sessionId ->
+                    val deadline = nowMillis() + 5_000
+                    val validId = sessionId.trim()
+                    val summary = CompletedSessionSave(
+                        sessionId = validId,
+                        avgSystolic = submittedDerived.avgSystolic,
+                        avgDiastolic = submittedDerived.avgDiastolic,
+                        categoryLabel = submittedDerived.categoryLabel
                     )
+                    completedSave = summary
+                    savedStateHandle["add_session.saved_id"] = validId
+                    savedStateHandle["add_session.completed"] = true
+                    savedStateHandle["add_session.deadline"] = deadline
+                    savedStateHandle["add_session.saved_sys"] = submittedDerived.avgSystolic
+                    savedStateHandle["add_session.saved_dia"] = submittedDerived.avgDiastolic
+                    savedStateHandle["add_session.saved_cat"] = submittedDerived.categoryLabel
+                    localState.update {
+                        it.copy(
+                            saved = true,
+                            savedSessionId = validId.takeIf { id -> id.isNotEmpty() },
+                            avgSystolic = submittedDerived.avgSystolic,
+                            avgDiastolic = submittedDerived.avgDiastolic,
+                            avgPulse = submittedDerived.avgPulse,
+                            averagedGroupCount = submittedDerived.averagedGroupCount,
+                            containsHighRiskReading = submittedDerived.containsHighRiskReading,
+                            categoryLabel = submittedDerived.categoryLabel,
+                            completionDeadlineMillis = deadline,
+                            isSaving = false,
+                            isDirty = false,
+                            formMessage = "",
+                            showHighRiskDialog = false,
+                            showAbnormalConfirmDialog = false
+                        )
+                    }
+                    draftStore.clear()
+                    persistDraft()
+                    pendingSaveInput = null
+                    pendingSaveContainsHighRisk = false
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    localState.update {
+                        it.copy(
+                            formMessage = "保存失败：${throwable.message ?: "请稍后重试"}",
+                            formMessageIsError = true,
+                            isSaving = false,
+                            showHighRiskDialog = false,
+                            showAbnormalConfirmDialog = false
+                        )
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                localState.update { it.copy(isSaving = false) }
+                throw cancelled
+            } finally {
+                release?.invoke()
             }
         }
     }
 
     private fun updateReading(transform: (HomeUiState) -> HomeUiState) {
+        if (localState.value.isSaving) return
+        if (localState.value.saved) return
         localState.update { state -> recomputeDerived(transform(state).copy(isDirty = true)) }
         persistDraft()
     }
 
     private fun updateForm(transform: (HomeUiState) -> HomeUiState) {
+        if (localState.value.isSaving) return
+        if (localState.value.saved) return
         localState.update { transform(it).copy(isDirty = true) }
         persistDraft()
     }
@@ -343,18 +477,17 @@ class HomeViewModel(
         return listOf(state.reading1, state.reading2) + state.extraReadings
     }
 
-    private fun List<SessionReadingInputUi>.updateAt(
-        index: Int,
+    private fun List<SessionReadingInputUi>.updateById(
+        editorId: Long,
         transform: (SessionReadingInputUi) -> SessionReadingInputUi
     ): List<SessionReadingInputUi> {
-        if (index !in indices) return this
-        return mapIndexed { i, item -> if (i == index) transform(item) else item }
+        return map { if (it.editorId == editorId) transform(it) else it }
     }
 
     private fun SessionFormDraft.toHomeUiState(): HomeUiState {
         val first = readings.getOrNull(0) ?: SessionReadingInputUi()
         val second = readings.getOrNull(1) ?: SessionReadingInputUi()
-        val extras = readings.drop(2)
+        val extras = readings.drop(2).map { it.copy(editorId = nextEditorId++) }
         return recomputeDerived(
             HomeUiState(
                 measuredAtText = measuredAtText,
@@ -366,8 +499,9 @@ class HomeViewModel(
                 legacySymptoms = symptoms,
                 symptomNote = symptomNote.orEmpty(),
                 factorNote = factorNote.orEmpty(),
-                formMessage = "已恢复未保存的测量草稿。",
-                isDirty = true
+                formMessage = "",
+                isDirty = true,
+                restoredFromDraft = true
             )
         )
     }

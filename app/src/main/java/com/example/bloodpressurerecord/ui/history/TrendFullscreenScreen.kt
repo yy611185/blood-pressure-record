@@ -5,6 +5,13 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +20,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -45,6 +54,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -52,36 +63,50 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendRange
-import com.example.bloodpressurerecord.domain.model.TrendAggregation
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
 
-/** 同一导航项内切换全屏，旋转与返回继续使用原趋势状态。 */
+/** 同一导航项内切换全屏，旋转与返回继续使用原趋势状态；根容器显式填充背景色防转场透底。 */
 @Composable
 internal fun TrendFullscreenScreen(
     uiState: TrendUiState,
     viewModel: TrendViewModel,
     onOpenRecord: (String) -> Unit
 ) {
+    val reducedMotion = LocalReducedMotion.current
+    BindTrendChartController(viewModel.chartController)
     BackHandler {
         if (uiState.dayDetails != null) viewModel.dismissDayDetails() else viewModel.setFullscreen(false)
     }
     val selected = uiState.series.points.firstOrNull { it.id == uiState.selectedPointId }
     val displayed = selected ?: uiState.series.points.lastOrNull()
     val fontScale = LocalDensity.current.fontScale
-    BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().testTag("fullscreenTrend")) {
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .safeDrawingPadding()
+            .testTag("fullscreenTrend")
+    ) {
         val sideDetails = maxWidth / fontScale >= 650.dp
         if (!sideDetails) uiState.dayDetails?.let { details ->
             TrendDayDetailsSheet(details, viewModel::dismissDayDetails, onOpenRecord)
         }
         Row(Modifier.fillMaxSize()) {
             Column(
-                Modifier.weight(1f).fillMaxSize().padding(horizontal = 8.dp),
+                Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 TrendFullscreenToolbar(uiState, viewModel, displayed)
-                // 主图直接使用余下高度；没有底部操作栏或最小高度滚动容器。
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val pulseHeight = if (uiState.fullscreenShowPulse) maxHeight * 0.26f else 0.dp
                     val pressureHeight = maxHeight - pulseHeight
@@ -99,7 +124,9 @@ internal fun TrendFullscreenScreen(
                             showHint = false,
                             showTimeLabels = uiState.showTimeLabels,
                             denseYAxis = true,
-                            modifier = Modifier.fillMaxWidth().height(pressureHeight)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(pressureHeight)
                                 .testTag("fullscreenPressureChart")
                         )
                         if (uiState.fullscreenShowPulse) {
@@ -111,28 +138,43 @@ internal fun TrendFullscreenScreen(
                                 controller = viewModel.chartController,
                                 chartHeight = (pulseHeight - 1.dp).coerceAtLeast(0.dp),
                                 showTimeLabels = uiState.showTimeLabels,
-                                modifier = Modifier.fillMaxWidth().height((pulseHeight - 1.dp).coerceAtLeast(0.dp))
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((pulseHeight - 1.dp).coerceAtLeast(0.dp))
                             )
                         }
                     }
                 }
             }
-            if (sideDetails) uiState.dayDetails?.let { details ->
-                Column(
-                    Modifier.width(320.dp).fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceContainer).padding(12.dp)
-                ) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("测量明细", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        IconButton(onClick = viewModel::dismissDayDetails) {
-                            Icon(Icons.Default.Close, contentDescription = "关闭明细")
+            AnimatedVisibility(
+                visible = sideDetails && uiState.dayDetails != null,
+                enter = if (reducedMotion) EnterTransition.None else {
+                    slideInHorizontally(initialOffsetX = { it }) + fadeIn(AppMotion.floatFast)
+                },
+                exit = if (reducedMotion) ExitTransition.None else {
+                    slideOutHorizontally(targetOffsetX = { it }) + fadeOut(AppMotion.floatFast)
+                }
+            ) {
+                uiState.dayDetails?.let { details ->
+                    Column(
+                        Modifier
+                            .width(320.dp)
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceContainer)
+                            .padding(12.dp)
+                    ) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("测量明细", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            IconButton(onClick = viewModel::dismissDayDetails) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭明细")
+                            }
                         }
-                    }
-                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                        TrendDayDetailsContent(
-                            details,
-                            onOpenRecord = { id -> viewModel.dismissDayDetails(); onOpenRecord(id) }
-                        )
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                            TrendDayDetailsContent(
+                                details,
+                                onOpenRecord = { id -> viewModel.dismissDayDetails(); onOpenRecord(id) }
+                            )
+                        }
                     }
                 }
             }
@@ -142,40 +184,76 @@ internal fun TrendFullscreenScreen(
 
 @Composable
 private fun TrendFullscreenToolbar(uiState: TrendUiState, viewModel: TrendViewModel, displayed: TrendPoint?) {
+    val points = uiState.series.points
+    val index = points.indexOfFirst { it.id == displayed?.id }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val readoutWidth = minOf(maxWidth * 0.46f, 360.dp * LocalDensity.current.fontScale)
+        val readoutWidth = minOf(maxWidth * 0.42f, 340.dp * LocalDensity.current.fontScale)
         Row(
-            Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             IconButton(onClick = { viewModel.setFullscreen(false) }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出全屏")
             }
             Row(
-                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 TrendMenu(uiState.range.label, TrendRange.entries, { it.label }, viewModel::setRange)
                 TrendAggregationControl(
                     selected = uiState.aggregation,
                     onSelected = viewModel::setAggregation,
-                    modifier = Modifier.width(200.dp * LocalDensity.current.fontScale)
+                    modifier = Modifier.width(196.dp * LocalDensity.current.fontScale)
                 )
                 TrendMenu(uiState.metric.label, TrendMetricType.entries, { it.label }, viewModel::setMetric)
-                if (uiState.aggregation == TrendAggregation.RAW) TextButton(
-                    onClick = { viewModel.setShowTimeLabels(!uiState.showTimeLabels) },
-                    modifier = Modifier.heightIn(min = 48.dp).semantics {
-                        contentDescription = "${if (uiState.showTimeLabels) "隐藏" else "显示"}横轴具体时分"
-                    }
-                ) {
-                    Text(
-                        "时分", style = MaterialTheme.typography.labelLarge,
-                        color = if (uiState.showTimeLabels) MaterialTheme.colorScheme.primary
+                if (uiState.aggregation == TrendAggregation.RAW) {
+                    val active = uiState.showTimeLabels
+                    TextButton(
+                        onClick = { viewModel.setShowTimeLabels(!active) },
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                            .semantics {
+                                contentDescription = "${if (active) "隐藏" else "显示"}横轴具体时分"
+                            },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            "时分",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            color = if (active) MaterialTheme.colorScheme.onPrimaryContainer
                             else MaterialTheme.colorScheme.onSurfaceVariant,
-                        softWrap = false
-                    )
+                            softWrap = false
+                        )
+                    }
                 }
-                TrendFullscreenActionsMenu(uiState, viewModel, displayed)
+                // 高频查数操作直接外露在横屏工具栏（O-06）
+                TextButton(
+                    onClick = viewModel::selectPrevious,
+                    enabled = index > 0,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) { Text("上一条", style = MaterialTheme.typography.labelLarge, softWrap = false) }
+                TextButton(
+                    onClick = viewModel::selectNext,
+                    enabled = index >= 0 && index < points.lastIndex,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) { Text("下一条", style = MaterialTheme.typography.labelLarge, softWrap = false) }
+                TextButton(
+                    onClick = { displayed?.let(viewModel::openPointDetails) },
+                    enabled = displayed != null,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) { Text("明细", style = MaterialTheme.typography.labelLarge, softWrap = false) }
+
+                TrendFullscreenActionsMenu(uiState, viewModel)
             }
             TrendFullscreenReadout(displayed, Modifier.width(readoutWidth))
         }
@@ -215,37 +293,53 @@ private fun TrendFullscreenReadout(point: TrendPoint?, modifier: Modifier = Modi
     val date = formatTrendPointDate(point)
     val pressure = "${if (daily) "平均 " else ""}${point.systolic}/${point.diastolic} mmHg"
     val pulse = trendPointPulseText(point)
+    val categoryText = CategoryPresentation.label(point.category)
     Column(
-        modifier.testTag("fullscreenReadout").semantics(mergeDescendants = true) {
-            contentDescription = "$date，${if (daily) "当日平均" else ""}收缩压 ${point.systolic}，舒张压 ${point.diastolic}，$pulse" +
-                (if (daily) "，${point.recordCount} 次测量" else "") +
-                (if (point.containsHighRiskReading) "，含高风险读数" else "")
-        },
+        modifier
+            .testTag("fullscreenReadout")
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$date，${if (daily) "当日平均" else ""}收缩压 ${point.systolic}，舒张压 ${point.diastolic}，$categoryText，$pulse" +
+                    (if (daily) "，${point.recordCount} 次测量" else "") +
+                    (if (point.containsHighRiskReading) "，含高风险读数" else "")
+            },
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "$date · $categoryText",
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(pressure, style = MaterialTheme.typography.titleSmall, fontFamily = NumberFontFamily,
-                fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-            Text(pulse, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                pressure,
+                style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+                fontFamily = NumberFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                pulse,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = TabularFeatureSettings),
+                color = MaterialTheme.colorScheme.onSurface
+            )
             if (daily) Text("${point.recordCount} 次测量", style = MaterialTheme.typography.labelMedium)
             if (point.containsHighRiskReading) Text(
                 if (daily) "当天含高风险记录" else "含高风险读数",
-                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error
             )
         }
     }
 }
 
 @Composable
-private fun TrendFullscreenActionsMenu(uiState: TrendUiState, viewModel: TrendViewModel, displayed: TrendPoint?) {
+private fun TrendFullscreenActionsMenu(uiState: TrendUiState, viewModel: TrendViewModel) {
     var expanded by remember { mutableStateOf(false) }
     val points = uiState.series.points
-    val index = points.indexOfFirst { it.id == displayed?.id }
     Box {
         IconButton(onClick = { expanded = true }) {
             Icon(Icons.Default.MoreVert, contentDescription = "趋势操作")
@@ -257,21 +351,20 @@ private fun TrendFullscreenActionsMenu(uiState: TrendUiState, viewModel: TrendVi
                 onClick = { expanded = false; viewModel.setFullscreenShowPulse(!uiState.fullscreenShowPulse) }
             )
             HorizontalDivider()
-            DropdownMenuItem(text = { Text("上一条") }, enabled = index > 0,
-                onClick = { expanded = false; viewModel.selectPrevious() })
-            DropdownMenuItem(text = { Text("下一条") }, enabled = index >= 0 && index < points.lastIndex,
-                onClick = { expanded = false; viewModel.selectNext() })
-            DropdownMenuItem(text = { Text("明细") }, enabled = displayed != null,
-                onClick = { expanded = false; displayed?.let(viewModel::openPointDetails) })
-            DropdownMenuItem(text = { Text("恢复") }, enabled = points.isNotEmpty(),
-                onClick = { expanded = false; viewModel.resetChart() })
-            DropdownMenuItem(text = { Text("回到最新") }, enabled = points.isNotEmpty(),
-                onClick = { expanded = false; viewModel.moveToLatest() })
+            DropdownMenuItem(
+                text = { Text("恢复默认视野") },
+                enabled = points.isNotEmpty(),
+                onClick = { expanded = false; viewModel.resetChart() }
+            )
+            DropdownMenuItem(
+                text = { Text("回到最新") },
+                enabled = points.isNotEmpty(),
+                onClick = { expanded = false; viewModel.moveToLatest() }
+            )
         }
     }
 }
 
-/** 在旋转重建时保留进入前策略；方向限制被忽略时仍能使用自适应详情。 */
 @Composable
 internal fun TrendFullscreenOrientation(fullscreen: Boolean) {
     val activity = LocalContext.current.findActivity() ?: return

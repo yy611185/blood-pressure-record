@@ -1,6 +1,8 @@
 package com.example.bloodpressurerecord.ui.common
 
 import androidx.lifecycle.SavedStateHandle
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.withContext
 
 data class SessionFormDraft(
     val measuredAtText: String,
@@ -84,6 +86,11 @@ class SessionDraftStore(
     fun persist(draft: SessionFormDraft): Result<Unit> {
         save(draft)
         return repository?.save(keyPrefix, draft) ?: Result.success(Unit)
+    }
+
+    suspend fun persist(draft: SessionFormDraft, dispatcher: CoroutineDispatcher): Result<Unit> {
+        save(draft)
+        return withContext(dispatcher) { repository?.save(keyPrefix, draft) ?: Result.success(Unit) }
     }
 
     private fun key(suffix: String): String = "$keyPrefix.$suffix"

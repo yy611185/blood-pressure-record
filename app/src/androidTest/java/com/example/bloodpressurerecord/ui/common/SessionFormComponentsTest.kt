@@ -50,6 +50,28 @@ class SessionFormComponentsTest {
     }
 
     @Test
+    fun wheel_time_fast_confirm_before_scroll_settles_submits_tapped_item() {
+        var submitted: Pair<Int, Int>? = null
+        composeRule.setContent {
+            BloodPressureRecordTheme {
+                WheelTimePickerDialog("选择时间", 12, 30, {}, { hour, minute ->
+                    submitted = hour to minute
+                })
+            }
+        }
+        composeRule.mainClock.autoAdvance = false
+        try {
+            composeRule.onNodeWithContentDescription("13 时").performClick()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.onNodeWithText("确定").performClick()
+            composeRule.mainClock.advanceTimeByFrame()
+            assertEquals(13 to 30, submitted)
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
     fun wheel_time_large_text_fits_inside_selected_touch_target() {
         composeRule.setContent {
             val density = LocalDensity.current

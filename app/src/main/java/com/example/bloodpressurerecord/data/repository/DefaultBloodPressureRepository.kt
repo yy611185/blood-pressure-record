@@ -169,12 +169,19 @@ class DefaultBloodPressureRepository(
         onDataChanged?.invoke()
     }
 
-    override suspend fun deleteSession(sessionId: String): Result<Unit> = runCatching {
-        database.withTransaction {
+    override suspend fun deleteSession(sessionId: String): Result<Unit> =
+        deleteSessionWithSnapshot(sessionId).map { }
+
+    override suspend fun deleteSessionWithSnapshot(sessionId: String): Result<SessionRecord> = runCatching {
+        val snapshot = database.withTransaction {
+            val existing = sessionDao.getSessionWithReadings(sessionId)?.toRecord()
+                ?: error("记录不存在，无法删除")
             check(sessionDao.deleteSessionById(sessionId) == 1) { "记录不存在，无法删除" }
             deleteLegacySource(sessionId)
+            existing
         }
-        onDataChanged?.invoke()
+        runCatching { onDataChanged?.invoke() }
+        snapshot
     }
 
     private suspend fun deleteLegacySource(sessionId: String) {
@@ -193,22 +200,7 @@ class DefaultBloodPressureRepository(
     }
 
     override suspend fun restoreSession(session: SessionRecord): Result<Unit> = runCatching {
-        requireValidMeasurementTime(session.measuredAt)
-        val orderedReadings = session.readings.sortedBy { it.orderIndex }.map {
-            SessionReadingInput(it.systolic, it.diastolic, it.pulse)
-        }
-        val input = SaveSessionInput(
-            measuredAt = session.measuredAt,
-            scene = session.scene,
-            note = session.note,
-            symptoms = session.symptoms,
-            readings = orderedReadings,
-            averageStrategy = session.averageStrategy,
-            timePeriod = session.timePeriod,
-            symptomNote = session.symptomNote,
-            factorNote = session.factorNote
-        )
-        validateReadings(input, minimumReadingCount = 1)
+        // 撤销恢复已存在过的记录，旧读数或变更后的系统时间不适用新录入校验。
         val entity = MeasurementSessionEntity(
             id = session.id,
             measuredAt = session.measuredAt,
@@ -221,9 +213,8 @@ class DefaultBloodPressureRepository(
             averageStrategy = session.averageStrategy.name,
             category = session.category,
             containsHighRiskReading = session.containsHighRiskReading,
-            createdAt = session.createdAt.takeIf { it > 0L } ?: nowMillis(),
-            updatedAt = session.updatedAt.takeIf { it > 0L } ?: session.createdAt.takeIf { it > 0L }
-                ?: nowMillis(),
+            createdAt = session.createdAt,
+            updatedAt = session.updatedAt,
             timePeriod = session.timePeriod,
             symptomNote = session.symptomNote,
             factorNote = session.factorNote
@@ -238,8 +229,13 @@ class DefaultBloodPressureRepository(
                 pulse = reading.pulse
             )
         }
-        sessionDao.insertSessionWithReadings(entity, readings)
-        onDataChanged?.invoke()
+        database.withTransaction {
+            check(sessionDao.insertSessionIfAbsent(entity) != -1L) {
+                "同编号记录已存在，未覆盖现存数据"
+            }
+            sessionDao.insertReadingsStrict(readings)
+        }
+        runCatching { onDataChanged?.invoke() }
     }
 
     private fun buildSessionEntity(

@@ -212,6 +212,157 @@ class SettingsViewModelTest {
         assertEquals(BpZoneTargetDraft.from(customConfig()), vm.zoneTargetEditorState.value?.draft)
     }
 
+    @Test
+    fun `resetZoneTargetToDefault restores default cuts inside open editor`() = runTest {
+        val configRepo = FakeZoneConfigRepository(initial = customConfig())
+        val vm = SettingsViewModel(FakeTargetSettingsRepository(), zoneConfigRepository = configRepo)
+        vm.openZoneTargetEditor()
+        advanceUntilIdle()
+        assertEquals("110", vm.zoneTargetEditorState.value?.draft?.value(BpZoneAxis.SYS, BpZoneField.NORMAL_CUT))
+
+        vm.resetZoneTargetToDefault()
+        assertEquals(BpZoneTargetDraft.from(BpZoneConfig.Default), vm.zoneTargetEditorState.value?.draft)
+    }
+
+    @Test
+    fun `updating reminder time auto enables disabled reminder and profile dirty tracks unsaved edits`() = runTest {
+        var morningScheduleCalls = 0
+        var scheduledTime = ""
+        val repo = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun setMorningReminderSchedule(time: String, enabled: Boolean) {
+                scheduledTime = time
+                if (enabled) morningScheduleCalls += 1
+            }
+        }
+        val vm = SettingsViewModel(repo)
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.morningReminderEnabled)
+        vm.updateMorningTime("08:15")
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.morningReminderEnabled)
+        assertEquals("08:15", vm.uiState.value.morningReminderTime)
+        assertEquals("08:15", scheduledTime)
+        assertEquals(1, morningScheduleCalls)
+
+        assertFalse(vm.uiState.value.isProfileDirty)
+        vm.updateName("张阿姨")
+        assertTrue(vm.uiState.value.isProfileDirty)
+        vm.discardProfileChanges()
+        assertFalse(vm.uiState.value.isProfileDirty)
+        assertEquals("", vm.uiState.value.name)
+    }
+
+    @Test
+    fun `reminder schedule failure rolls back optimistic state and reports error`() = runTest {
+        val repo = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun setMorningReminderSchedule(time: String, enabled: Boolean) {
+                throw IllegalStateException("DataStore IO error")
+            }
+        }
+        val vm = SettingsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.updateMorningTime("06:45")
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.morningReminderEnabled)
+        assertEquals("07:30", vm.uiState.value.morningReminderTime)
+        assertTrue(vm.uiState.value.messageIsError)
+    }
+
+    @Test
+    fun `profile save locks concurrent clicks and preserves dirty state on failure`() = runTest {
+        val saveGate = CompletableDeferred<Unit>()
+        var saveCount = 0
+        var shouldFail = false
+        val repo = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun saveUserProfile(profile: UserProfile) {
+                saveCount += 1
+                saveGate.await()
+                if (shouldFail) throw IllegalStateException("disk full")
+            }
+        }
+        val vm = SettingsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.updateName("王大爷")
+        var savedCallbacks = 0
+        vm.saveUserProfile { savedCallbacks += 1 }
+        vm.saveUserProfile { savedCallbacks += 1 }
+        assertTrue(vm.uiState.value.isSavingProfile)
+        // 保存期间的修改与放弃都被锁定忽略
+        vm.updateName("被忽略的并发修改")
+        vm.discardProfileChanges()
+        assertEquals("王大爷", vm.uiState.value.name)
+        assertEquals(1, saveCount)
+
+        saveGate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isSavingProfile)
+        assertFalse(vm.uiState.value.isProfileDirty)
+        assertEquals(1, savedCallbacks)
+
+        // 失败路径保留未保存状态并给出错误提示，不触发返回回调
+        val failGate = CompletableDeferred<Unit>().apply { complete(Unit) }
+        shouldFail = true
+        val failingRepo = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun saveUserProfile(profile: UserProfile) {
+                failGate.await()
+                throw IllegalStateException("disk full")
+            }
+        }
+        val vmFail = SettingsViewModel(failingRepo)
+        advanceUntilIdle()
+        vmFail.updateName("李阿姨")
+        var failCallbacks = 0
+        vmFail.saveUserProfile { failCallbacks += 1 }
+        advanceUntilIdle()
+        assertEquals(0, failCallbacks)
+        assertTrue(vmFail.uiState.value.isProfileDirty)
+        assertTrue(vmFail.uiState.value.messageIsError)
+    }
+
+    @Test
+    fun `clear in progress blocks cancel or backup export and marks partial issues as error`() = runTest {
+        val clearGate = CompletableDeferred<Unit>()
+        val repo = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun clearAllData(): Result<ClearAllDataResult> {
+                clearGate.await()
+                return Result.success(
+                    ClearAllDataResult(
+                        databaseCleared = true,
+                        settingsCleared = false,
+                        remindersRescheduled = true,
+                        widgetRefreshed = true,
+                        warnings = listOf("偏好设置重置未完成")
+                    )
+                )
+            }
+        }
+        val vm = SettingsViewModel(repo)
+        advanceUntilIdle()
+
+        vm.requestClearAll()
+        assertTrue(vm.uiState.value.showClearConfirm)
+        vm.confirmClearAll()
+        assertTrue(vm.uiState.value.isDataActionRunning)
+        assertEquals(SettingsDataAction.CLEAR, vm.uiState.value.activeDataAction)
+
+        // 清空进行中禁止关闭弹窗或切去导出备份
+        vm.dismissClearAll()
+        vm.requestBackupExport()
+        assertTrue(vm.uiState.value.showClearConfirm)
+        assertFalse(vm.uiState.value.showBackupExportConfirm)
+
+        clearGate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.isDataActionRunning)
+        assertFalse(vm.uiState.value.showClearConfirm)
+        assertTrue(vm.uiState.value.messageIsError)
+        assertTrue(vm.uiState.value.message.contains("部分清理未完成"))
+    }
+
     private fun customConfig() = BpZoneConfig.Default.copy(
         sys = BpZoneConfig.Default.sys.copy(cuts = BpZoneCuts(90, 110, 130))
     )

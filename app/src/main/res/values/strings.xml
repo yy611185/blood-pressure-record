@@ -3,6 +3,7 @@
     <string name="back">返回</string>
     <string name="history_title">历史记录</string>
     <string name="note_search_title">搜索历史备注</string>
+    <string name="note_search_idle_hint">输入不舒服症状、影响因素或备注词（如：头晕、没睡好、漏服药）</string>
     <string name="note_search_input">输入关键词</string>
     <string name="note_search_clear">清空搜索</string>
     <string name="note_search_loading">正在搜索备注…</string>
@@ -42,8 +43,9 @@
     <string name="bp_range_empty_description">还没有有效读数，测一次后显示你的区间</string>
     <string name="bp_range_empty_hint">测一次后显示你的区间</string>
     <string name="bp_range_edit_hint">目标范围可自定义</string>
-    <string name="bp_zone_config_title">自定义目标范围</string>
-    <string name="bp_zone_config_placeholder_note">默认数字只是占位示例，不构成医学标准，实际分级与默认目标范围待产品确认。</string>
+    <string name="bp_zone_config_title">首页四色条区间</string>
+    <string name="bp_zone_config_placeholder_note">默认范围参考常用成人血压区间（90/60、120/80、140/90 mmHg），仅用于调整首页四色条的显示位置，不改变医学血压分级；可按医生建议微调。</string>
+    <string name="bp_zone_config_reset">恢复默认区间</string>
     <string name="bp_zone_config_help">单位为 mmHg。三个起点须严格递增，并在显示范围内；读数等于起点时进入更高一级。</string>
     <string name="bp_zone_config_sys">收缩压</string>
     <string name="bp_zone_config_dia">舒张压</string>

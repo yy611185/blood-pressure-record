@@ -14,13 +14,18 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import kotlinx.coroutines.CoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Path
@@ -59,17 +64,50 @@ class TrendChartController(
     initialViewport: Pair<Long, Long>? = null,
     onViewportChanged: (Long, Long) -> Unit = { _, _ -> }
 ) {
+    private data class ScopeBinding(
+        val owner: Any,
+        val scope: CoroutineScope,
+        val reducedMotion: Boolean
+    )
+
     private var range: TrendRange? = null
+    private var appliedSeries: TrendSeries? = null
     private var pendingViewport = initialViewport
     private var initialized = false
     private var latestMeasuredAt: Long? = null
     private val sharedViewport = TrendTimeViewportState(onViewportChanged)
+    private val scopeBindings = ArrayList<ScopeBinding>(3)
+
+    private val activeUiScope: CoroutineScope?
+        get() = scopeBindings.firstOrNull()?.scope
+
+    private val activeReducedMotion: Boolean
+        get() = scopeBindings.firstOrNull()?.reducedMotion ?: false
+
+    internal fun attachUiScope(owner: Any, scope: CoroutineScope, reduced: Boolean) {
+        val index = scopeBindings.indexOfFirst { it.owner === owner }
+        val binding = ScopeBinding(owner, scope, reduced)
+        if (index >= 0) {
+            scopeBindings[index] = binding
+        } else {
+            scopeBindings.add(binding)
+        }
+        if (activeReducedMotion) sharedViewport.finishAnimation()
+    }
+
+    internal fun detachUiScope(owner: Any) {
+        val wasActive = scopeBindings.firstOrNull()?.owner === owner
+        scopeBindings.removeAll { it.owner === owner }
+        if (wasActive) sharedViewport.finishAnimation()
+    }
 
     @Suppress("UNUSED_PARAMETER")
     internal fun viewportFor(requestedRange: TrendRange): TrendTimeViewportState = sharedViewport
 
-    /** 两个面板、布局重建和数据刷新共用一次绝对时间窗口更新路径。 */
+    /** 两个面板、布局重建和数据刷新共用一次绝对时间窗口更新路径；相同 series 重复挂载不打断在途视窗动画。 */
     internal fun updateSeries(series: TrendSeries) {
+        if (initialized && appliedSeries == series) return
+        sharedViewport.cancelAnimation()
         val defaults = TrendChartMath.defaultViewport(
             series.points, series.range, series.rangeStart, series.rangeEnd
         )
@@ -87,27 +125,64 @@ class TrendChartController(
             )
         }
         range = series.range
+        appliedSeries = series
     }
 
-    internal var resetToken by mutableStateOf(0)
+    internal var resetToken by mutableIntStateOf(0)
         private set
 
     fun reset() {
-        if (initialized) sharedViewport.resetToDefault()
+        if (initialized) {
+            sharedViewport.animateWindowTo(
+                sharedViewport.defaultStartRatio,
+                sharedViewport.defaultEndRatio,
+                activeUiScope,
+                activeReducedMotion
+            )
+        }
         resetToken++
     }
 
     fun moveToLatest() {
-        if (initialized) latestMeasuredAt?.let(sharedViewport::moveToLatest)
+        if (initialized) {
+            latestMeasuredAt?.let { ts ->
+                val (s, e) = sharedViewport.targetRangeForLatest(ts)
+                sharedViewport.animateWindowTo(s, e, activeUiScope, activeReducedMotion)
+            }
+        }
     }
 
     fun ensureVisible(timestamp: Long) {
-        if (initialized) sharedViewport.ensureVisible(timestamp)
+        if (!initialized) return
+        sharedViewport.cancelAnimation()
+        if (timestamp !in sharedViewport.startMillis()..sharedViewport.endMillis()) {
+            sharedViewport.targetRangeForCenterOn(timestamp)?.let { (s, e) ->
+                sharedViewport.animateWindowTo(s, e, activeUiScope, activeReducedMotion)
+            }
+        }
     }
 
     fun clearSavedViewport() {
+        sharedViewport.cancelAnimation()
         pendingViewport = null
+        appliedSeries = null
         initialized = false
+    }
+}
+
+/**
+ * 将控制器绑定到页面级协程作用域（优先于子图面板），
+ * 确保全屏开闭或脉搏副图收起不会取消血压主图的在途动画或清空共享作用域。
+ */
+@Composable
+internal fun BindTrendChartController(controller: TrendChartController?) {
+    if (controller == null) return
+    val reducedMotion = LocalReducedMotion.current
+    val scope = rememberCoroutineScope()
+    val owner = remember { Any() }
+    SideEffect { controller.attachUiScope(owner, scope, reducedMotion) }
+    DisposableEffect(controller, owner, scope) {
+        onDispose { controller.detachUiScope(owner) }
     }
 }
 
@@ -138,7 +213,8 @@ fun SessionTimeSeriesDualLineChart(
 
     val density = LocalDensity.current
     val palette = trendChartPalette()
-    val zoneId = remember { ZoneId.systemDefault() }
+    BindTrendChartController(controller)
+    val zoneId = series.zoneId
     val textMeasurer = rememberTextMeasurer()
     val viewport = controller?.viewportFor(series.range)
         ?: remember(series.range) { TrendTimeViewportState() }
@@ -155,13 +231,12 @@ fun SessionTimeSeriesDualLineChart(
     val domainEnd = series.rangeEnd
     val domainSpanMillis = (domainEnd - domainStart).coerceAtLeast(1L)
 
-    // 复位计数：图表内部只认这一套重置逻辑，范围切换、双击复位与「恢复」按钮
-    // 都走同一个副作用，避免出现多份互不一致的重置代码。
+    // 数据域同步与复位信号严格拆分：避免 resetToken 自增反过来触发 updateSeries 取消刚启动的复位动画。
     val activeResetToken = controller?.resetToken ?: 0
-
     var localInitialized by remember(series.range) { mutableStateOf(false) }
     var appliedResetToken by remember { mutableIntStateOf(activeResetToken) }
-    LaunchedEffect(series, activeResetToken) {
+
+    LaunchedEffect(controller, series) {
         if (controller != null) {
             controller.updateSeries(series)
         } else {
@@ -169,17 +244,17 @@ fun SessionTimeSeriesDualLineChart(
             if (!localInitialized) {
                 viewport.reset(domainStart, domainEnd, defaults.first, defaults.second)
                 localInitialized = true
-            } else if (activeResetToken != appliedResetToken) {
-                viewport.resetToDefault()
             } else {
                 viewport.updateDomain(domainStart, domainEnd, defaults.first, defaults.second)
             }
         }
+    }
+
+    LaunchedEffect(activeResetToken) {
         if (activeResetToken != appliedResetToken) {
-            onPointSelected(null)
             claimScroll = false
+            appliedResetToken = activeResetToken
         }
-        appliedResetToken = activeResetToken
     }
 
     val viewportStart = viewport.startMillis()
@@ -261,16 +336,45 @@ fun SessionTimeSeriesDualLineChart(
                 16.dp.toPx()
         }
     }
+    val unitLabelStyle = MaterialTheme.typography.labelSmall
+    val yTickMeasureStyle = TextStyle(color = palette.axis, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    val (axisLeftPadding, idealTopPadding) = remember(yAxis.max, unitLabelStyle, yTickMeasureStyle, density) {
+        with(density) {
+            val unitSize = textMeasurer.measure("mmHg", unitLabelStyle, softWrap = false).size
+            val tickSample = textMeasurer.measure(maxOf(yAxis.max, 200).toString(), yTickMeasureStyle, softWrap = false).size
+            val leftPx = maxOf(38.dp.toPx(), tickSample.width + 10.dp.toPx())
+            val topPx = maxOf(20.dp.toPx(), 2.dp.toPx() + unitSize.height + 4.dp.toPx() + tickSample.height / 2f)
+            leftPx to topPx
+        }
+    }
+    val axisTopPadding = remember(canvasSize.height, axisBottomPadding, idealTopPadding, density) {
+        if (canvasSize.height <= 0) {
+            idealTopPadding
+        } else {
+            val maxAllowedTop = (canvasSize.height - axisBottomPadding - with(density) { 48.dp.toPx() })
+                .coerceAtLeast(with(density) { 20.dp.toPx() })
+            idealTopPadding.coerceAtMost(maxAllowedTop)
+        }
+    }
+    val unitStartPadding = remember(axisTopPadding, idealTopPadding, axisLeftPadding, density) {
+        if (axisTopPadding + 0.5f < idealTopPadding) {
+            with(density) { axisLeftPadding.toDp() } + 4.dp
+        } else {
+            4.dp
+        }
+    }
     val chartDescription = remember(series, showSystolic, showDiastolic) {
         buildChartDescription(series, showSystolic, showDiastolic)
     }
     val scrollClaim = rememberChartScrollClaim { claimScroll }
 
-    val geometry = remember(canvasSize, density, axisBottomPadding) {
+    val geometry = remember(canvasSize, density, axisBottomPadding, axisLeftPadding, axisTopPadding) {
         ChartGeometry.create(
             size = canvasSize,
             density = density.density,
-            bottomPadding = axisBottomPadding
+            bottomPadding = axisBottomPadding,
+            leftPadding = axisLeftPadding,
+            topPadding = axisTopPadding
         )
     }
     val nodeTouchRadiusPx = remember(density) {
@@ -297,6 +401,8 @@ fun SessionTimeSeriesDualLineChart(
                     viewport = viewport,
                     densityScale = density.density,
                     axisBottomPadding = axisBottomPadding,
+                    axisLeftPadding = axisLeftPadding,
+                    axisTopPadding = axisTopPadding,
                     yAxis = { latestYAxis },
                     selectedPoint = { latestSelectedPoint },
                     onPointSelected = onPointSelected,
@@ -315,7 +421,9 @@ fun SessionTimeSeriesDualLineChart(
                 val currentGeometry = ChartGeometry.create(
                     size = IntSize(size.width.roundToInt(), size.height.roundToInt()),
                     density = density.density,
-                    bottomPadding = axisBottomPadding
+                    bottomPadding = axisBottomPadding,
+                    leftPadding = axisLeftPadding,
+                    topPadding = axisTopPadding
                 )
                 val scaler = ChartProjection(
                     geometry = currentGeometry,
@@ -345,11 +453,12 @@ fun SessionTimeSeriesDualLineChart(
                     right = currentGeometry.right,
                     bottom = currentGeometry.bottom
                 ) {
-                    drawThresholdLines(
+                    val targetLabelBounds = drawThresholdLines(
                         geometry = currentGeometry,
                         scaler = scaler,
                         lines = thresholdLines,
-                        palette = palette
+                        palette = palette,
+                        textMeasurer = textMeasurer
                     )
 
                     // 手势期间照常绘制曲线，缩放/拖动有实时反馈。
@@ -364,7 +473,8 @@ fun SessionTimeSeriesDualLineChart(
                         point.timestamp in viewportStart..viewportEnd
                     }
                     selectedVisible?.let { point ->
-                        drawCrosshair(point, scaler, palette, textMeasurer, showSystolic, showDiastolic)
+                        drawCrosshair(point, scaler, palette, textMeasurer, showSystolic, showDiastolic,
+                            targetLabelBounds = targetLabelBounds)
                     }
 
                     // 普通圆点随密度减少；高风险提示与选中节点独立保留。
@@ -419,6 +529,12 @@ fun SessionTimeSeriesDualLineChart(
                 // 时间轴文字：位于 Plot Area 下方，不能被数据层裁剪连坐。
                 drawTimeAxisLabels(axisTicks, axisLabelLayouts, scaler, currentGeometry, palette)
             }
+            Text(
+                text = "mmHg",
+                modifier = Modifier.align(Alignment.TopStart).padding(start = unitStartPadding, top = 2.dp),
+                style = unitLabelStyle,
+                color = palette.axis
+            )
         }
 
         if (showHint) Text(
@@ -450,14 +566,22 @@ fun SessionTimeSeriesPulseChart(
     }
     val density = LocalDensity.current
     val palette = trendChartPalette()
-    val zoneId = remember { ZoneId.systemDefault() }
+    BindTrendChartController(controller)
+    val zoneId = series.zoneId
     val textMeasurer = rememberTextMeasurer()
     val viewport = controller.viewportFor(series.range)
-    LaunchedEffect(series) { controller.updateSeries(series) }
+    LaunchedEffect(controller, series) { controller.updateSeries(series) }
     val gestureConfig = rememberChartGestureConfig()
     val haptics = LocalHapticFeedback.current
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var claimScroll by remember { mutableStateOf(false) }
+    var appliedPulseResetToken by remember { mutableIntStateOf(controller.resetToken) }
+    LaunchedEffect(controller.resetToken) {
+        if (controller.resetToken != appliedPulseResetToken) {
+            claimScroll = false
+            appliedPulseResetToken = controller.resetToken
+        }
+    }
     val scrollClaim = rememberChartScrollClaim { claimScroll }
     val pulsePath = remember { Path() }
     val viewportStart = viewport.startMillis()
@@ -513,8 +637,38 @@ fun SessionTimeSeriesPulseChart(
                 16.dp.toPx()
         }
     }
-    val geometry = remember(canvasSize, density, axisBottomPadding) {
-        ChartGeometry.create(canvasSize, density.density, axisBottomPadding)
+    val compactPulseAxis = canvasSize.height > 0 &&
+        canvasSize.height < axisBottomPadding + with(density) { 46.dp.toPx() }
+    val pulseAxisBottomPadding = if (compactPulseAxis) with(density) { 8.dp.toPx() } else axisBottomPadding
+    val pulseUnitStyle = MaterialTheme.typography.labelSmall
+    val pulseTickMeasureStyle = TextStyle(color = palette.axis, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    val (axisLeftPadding, idealTopPadding) = remember(activeYAxis.max, pulseUnitStyle, pulseTickMeasureStyle, density) {
+        with(density) {
+            val unitSize = textMeasurer.measure("次/分", pulseUnitStyle, softWrap = false).size
+            val tickSample = textMeasurer.measure(maxOf(activeYAxis.max, 160).toString(), pulseTickMeasureStyle, softWrap = false).size
+            val leftPx = maxOf(38.dp.toPx(), tickSample.width + 10.dp.toPx())
+            val topPx = maxOf(20.dp.toPx(), 2.dp.toPx() + unitSize.height + 4.dp.toPx() + tickSample.height / 2f)
+            leftPx to topPx
+        }
+    }
+    val axisTopPadding = remember(canvasSize.height, pulseAxisBottomPadding, idealTopPadding, density) {
+        if (canvasSize.height <= 0) {
+            idealTopPadding
+        } else {
+            val maxAllowedTop = (canvasSize.height - pulseAxisBottomPadding - with(density) { 48.dp.toPx() })
+                .coerceAtLeast(with(density) { 20.dp.toPx() })
+            idealTopPadding.coerceAtMost(maxAllowedTop)
+        }
+    }
+    val pulseUnitStartPadding = remember(axisTopPadding, idealTopPadding, axisLeftPadding, density) {
+        if (axisTopPadding + 0.5f < idealTopPadding) {
+            with(density) { axisLeftPadding.toDp() } + 4.dp
+        } else {
+            4.dp
+        }
+    }
+    val geometry = remember(canvasSize, density, pulseAxisBottomPadding, axisLeftPadding, axisTopPadding) {
+        ChartGeometry.create(canvasSize, density.density, pulseAxisBottomPadding, axisLeftPadding, axisTopPadding)
     }
     val minSpanRatio = remember(series.range, series.rangeStart, series.rangeEnd, geometry.plotWidth) {
         TrendChartMath.minSpanRatio(
@@ -545,7 +699,9 @@ fun SessionTimeSeriesPulseChart(
                 domainEnd = series.rangeEnd,
                 viewport = viewport,
                 densityScale = density.density,
-                axisBottomPadding = axisBottomPadding,
+                axisBottomPadding = pulseAxisBottomPadding,
+                axisLeftPadding = axisLeftPadding,
+                axisTopPadding = axisTopPadding,
                 yAxis = { latestYAxis },
                 selectedPoint = { latestSelectedPoint },
                 onPointSelected = onPointSelected,
@@ -564,7 +720,9 @@ fun SessionTimeSeriesPulseChart(
             val currentGeometry = ChartGeometry.create(
                 IntSize(size.width.roundToInt(), size.height.roundToInt()),
                 density.density,
-                axisBottomPadding
+                pulseAxisBottomPadding,
+                axisLeftPadding,
+                axisTopPadding
             )
             val scaler = ChartProjection(
                 geometry = currentGeometry,
@@ -600,12 +758,12 @@ fun SessionTimeSeriesPulseChart(
                     )
                 }
             }
-            drawTimeAxisLabels(axisTicks, axisLabelLayouts, scaler, currentGeometry, palette)
+            if (!compactPulseAxis) drawTimeAxisLabels(axisTicks, axisLabelLayouts, scaler, currentGeometry, palette)
         }
         Text(
             text = "次/分",
-            modifier = Modifier.align(Alignment.TopStart).padding(start = 4.dp, top = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.align(Alignment.TopStart).padding(start = pulseUnitStartPadding, top = 2.dp),
+            style = pulseUnitStyle,
             color = palette.axis
         )
     }

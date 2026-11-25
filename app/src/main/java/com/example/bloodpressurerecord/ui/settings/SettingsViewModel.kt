@@ -4,8 +4,10 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.R
+import com.example.bloodpressurerecord.data.datastore.AppSettings
 import com.example.bloodpressurerecord.data.db.dao.MedicationWithTimes
 import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
+import com.example.bloodpressurerecord.data.repository.DeletionUndoManager
 import com.example.bloodpressurerecord.data.repository.MedicationRepository
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
@@ -19,12 +21,12 @@ import com.example.bloodpressurerecord.ui.home.BpZoneAxis
 import com.example.bloodpressurerecord.ui.home.BpZoneField
 import com.example.bloodpressurerecord.ui.home.BpZoneTargetDraft
 import com.example.bloodpressurerecord.ui.home.BpZoneTargetEditorUiState
+import com.example.bloodpressurerecord.update.UpdatePromptGate
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
-import com.example.bloodpressurerecord.update.UpdatePromptGate
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +37,15 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+enum class SettingsDataAction {
+    EXPORT_XLSX,
+    EXPORT_BPX,
+    IMPORT,
+    CLEAR
+}
 
 data class SettingsUiState(
     val isLargeTextEnabled: Boolean = true,
@@ -56,7 +67,11 @@ data class SettingsUiState(
     val gender: String = "",
     val targetSystolicText: String = "",
     val targetDiastolicText: String = "",
+    val isProfileDirty: Boolean = false,
+    val isProfileLoaded: Boolean = false,
+    val isSavingProfile: Boolean = false,
     val message: String = "",
+    val messageIsError: Boolean = false,
     val showClearConfirm: Boolean = false,
     val showBackupExportConfirm: Boolean = false,
     val showExportPassphraseDialog: Boolean = false,
@@ -77,6 +92,8 @@ data class SettingsUiState(
     val exportFileName: String = "",
     val exportVolumeRequestId: String? = null,
     val isDataActionRunning: Boolean = false,
+    val isChoosingBackupLocation: Boolean = false,
+    val activeDataAction: SettingsDataAction? = null,
     val lastSuccessfulExportAt: Long? = null,
     val ageError: String? = null,
     val targetSystolicError: String? = null,
@@ -90,7 +107,8 @@ class SettingsViewModel(
     private val repository: SettingsRepository,
     private val medicationRepository: MedicationRepository? = null,
     private val zoneConfigRepository: BpZoneConfigRepository? = null,
-    private val updatePromptGate: UpdatePromptGate? = null
+    private val updatePromptGate: UpdatePromptGate? = null,
+    private val deletionUndoManager: DeletionUndoManager? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -103,28 +121,61 @@ class SettingsViewModel(
         (zoneConfigRepository?.observeConfig() ?: flowOf(BpZoneConfig.Default))
             .shareIn(viewModelScope, SharingStarted.Eagerly, replay = 1)
     private var isProfileDirty: Boolean = false
+    private var latestSavedProfile: UserProfile = UserProfile()
+    private var latestSavedAppSettings: AppSettings = AppSettings()
+    private val morningReminderMutex = Mutex()
+    private val eveningReminderMutex = Mutex()
     /** 等待用户输入口令后继续预览的加密备份文件。 */
     private var pendingImportUri: Uri? = null
     private var pendingExportPlan: BackupExportPlan? = null
     private var pendingExportPassphrase: CharArray? = null
     private var pendingExportBaseName: String = ""
+    private var releaseBackupLocation: (() -> Unit)? = null
+
+    fun beginBackupLocation(): Boolean {
+        val state = _uiState.value
+        if (state.isDataActionRunning || state.isChoosingBackupLocation) return false
+        releaseBackupLocation = updatePromptGate?.hold()
+        _uiState.update { it.copy(isChoosingBackupLocation = true) }
+        return true
+    }
+
+    fun finishBackupLocation(onResult: () -> Unit) {
+        val release = releaseBackupLocation
+        releaseBackupLocation = null
+        _uiState.update { it.copy(isChoosingBackupLocation = false) }
+        try {
+            onResult()
+        } finally {
+            release?.invoke()
+        }
+    }
+
+    fun onBackupLocationLaunchFailed() = finishBackupLocation {
+        _uiState.update { it.copy(message = "无法打开文件选择器，请重试。", messageIsError = true) }
+    }
 
     /** 门控随实际任务结束释放，离开数据管理页面也不会提前解除。 */
-    private fun launchDataAction(block: suspend CoroutineScope.() -> Unit) {
-        if (_uiState.value.isDataActionRunning) return
+    private fun launchDataAction(
+        action: SettingsDataAction,
+        block: suspend CoroutineScope.() -> Unit
+    ) {
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation) return
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            _uiState.update { it.copy(isDataActionRunning = true) }
+            _uiState.update { it.copy(isDataActionRunning = true, activeDataAction = action) }
             val release = updatePromptGate?.hold()
             try {
                 block()
             } finally {
-                _uiState.update { it.copy(isDataActionRunning = false) }
+                _uiState.update { it.copy(isDataActionRunning = false, activeDataAction = null) }
                 release?.invoke()
             }
         }
     }
 
     override fun onCleared() {
+        releaseBackupLocation?.invoke()
+        releaseBackupLocation = null
         discardExportPlan()
         super.onCleared()
     }
@@ -135,9 +186,17 @@ class SettingsViewModel(
         pendingExportPlan = null
         pendingExportBaseName = ""
         _uiState.update {
-            it.copy(showBackupExportConfirm = false, showExportPassphraseDialog = false,
-                exportVolumeRequestId = null, exportVolumeIndex = 0, exportVolumeCount = 0, exportTotalRecords = 0,
-                exportVolumeRecords = 0, exportEncrypted = false, exportFileName = "")
+            it.copy(
+                showBackupExportConfirm = false,
+                showExportPassphraseDialog = false,
+                exportVolumeRequestId = null,
+                exportVolumeIndex = 0,
+                exportVolumeCount = 0,
+                exportTotalRecords = 0,
+                exportVolumeRecords = 0,
+                exportEncrypted = false,
+                exportFileName = ""
+            )
         }
     }
 
@@ -151,12 +210,15 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             repository.observeSettings().collectLatest { bundle ->
+                latestSavedProfile = bundle.userProfile
+                latestSavedAppSettings = bundle.appSettings
                 _uiState.update { state ->
-                    val profileName = if (isProfileDirty) state.name else bundle.userProfile.name.orEmpty()
-                    val profileAge = if (isProfileDirty) state.ageText else bundle.userProfile.age?.toString().orEmpty()
-                    val profileGender = if (isProfileDirty) state.gender else bundle.userProfile.gender.orEmpty()
-                    val profileTargetSys = if (isProfileDirty) state.targetSystolicText else bundle.userProfile.targetSystolic?.toString().orEmpty()
-                    val profileTargetDia = if (isProfileDirty) state.targetDiastolicText else bundle.userProfile.targetDiastolic?.toString().orEmpty()
+                    val keepDraft = isProfileDirty || state.isSavingProfile
+                    val profileName = if (keepDraft) state.name else bundle.userProfile.name.orEmpty()
+                    val profileAge = if (keepDraft) state.ageText else bundle.userProfile.age?.toString().orEmpty()
+                    val profileGender = if (keepDraft) state.gender else bundle.userProfile.gender.orEmpty()
+                    val profileTargetSys = if (keepDraft) state.targetSystolicText else bundle.userProfile.targetSystolic?.toString().orEmpty()
+                    val profileTargetDia = if (keepDraft) state.targetDiastolicText else bundle.userProfile.targetDiastolic?.toString().orEmpty()
                     state.copy(
                         isLargeTextEnabled = bundle.appSettings.largeTextEnabled,
                         highRiskAlertEnabled = bundle.appSettings.highRiskAlertEnabled,
@@ -168,8 +230,7 @@ class SettingsViewModel(
                         eveningReminderEnabled = bundle.appSettings.eveningReminderEnabled,
                         eveningReminderTime = bundle.appSettings.eveningReminderTime,
                         medicationReminderEnabled = bundle.appSettings.medicationReminderEnabled,
-                        medicationCalendarSyncEnabled =
-                            bundle.appSettings.medicationCalendarSyncEnabled,
+                        medicationCalendarSyncEnabled = bundle.appSettings.medicationCalendarSyncEnabled,
                         medicationCalendarId = bundle.appSettings.medicationCalendarId,
                         medicationCalendarIncludeDetails = bundle.appSettings.medicationCalendarIncludeDetails,
                         name = profileName,
@@ -177,6 +238,8 @@ class SettingsViewModel(
                         gender = profileGender,
                         targetSystolicText = profileTargetSys,
                         targetDiastolicText = profileTargetDia,
+                        isProfileDirty = isProfileDirty,
+                        isProfileLoaded = true,
                         lastSuccessfulExportAt = bundle.appSettings.lastSuccessfulExportAt
                     )
                 }
@@ -202,6 +265,13 @@ class SettingsViewModel(
         mutableZoneTargetEditorState.update { state ->
             if (state == null || state.saving) state
             else state.copy(draft = state.draft.update(axis, field, value), errorRes = null)
+        }
+    }
+
+    fun resetZoneTargetToDefault() {
+        mutableZoneTargetEditorState.update { state ->
+            if (state == null || state.saving) state
+            else state.copy(draft = BpZoneTargetDraft.from(BpZoneConfig.Default), errorRes = null)
         }
     }
 
@@ -259,19 +329,61 @@ class SettingsViewModel(
     }
 
     fun setMorningReminderEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(morningReminderEnabled = enabled) }
         viewModelScope.launch {
-            repository.setMorningReminderEnabled(enabled)
-            _uiState.update {
-                it.copy(message = if (enabled) "晨间提醒已启用。" else "晨间提醒已关闭。")
+            morningReminderMutex.withLock {
+                try {
+                    repository.setMorningReminderEnabled(enabled)
+                    latestSavedAppSettings = latestSavedAppSettings.copy(morningReminderEnabled = enabled)
+                    _uiState.update {
+                        it.copy(
+                            morningReminderEnabled = enabled,
+                            message = if (enabled) "晨间提醒已启用。" else "晨间提醒已关闭。",
+                            messageIsError = false
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (throwable: Throwable) {
+                    _uiState.update {
+                        it.copy(
+                            morningReminderEnabled = latestSavedAppSettings.morningReminderEnabled,
+                            morningReminderTime = latestSavedAppSettings.morningReminderTime,
+                            message = "晨间提醒更新失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
+                    }
+                }
             }
         }
     }
 
     fun setEveningReminderEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(eveningReminderEnabled = enabled) }
         viewModelScope.launch {
-            repository.setEveningReminderEnabled(enabled)
-            _uiState.update {
-                it.copy(message = if (enabled) "晚间提醒已启用。" else "晚间提醒已关闭。")
+            eveningReminderMutex.withLock {
+                try {
+                    repository.setEveningReminderEnabled(enabled)
+                    latestSavedAppSettings = latestSavedAppSettings.copy(eveningReminderEnabled = enabled)
+                    _uiState.update {
+                        it.copy(
+                            eveningReminderEnabled = enabled,
+                            message = if (enabled) "晚间提醒已启用。" else "晚间提醒已关闭。",
+                            messageIsError = false
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (throwable: Throwable) {
+                    _uiState.update {
+                        it.copy(
+                            eveningReminderEnabled = latestSavedAppSettings.eveningReminderEnabled,
+                            eveningReminderTime = latestSavedAppSettings.eveningReminderTime,
+                            message = "晚间提醒更新失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
+                    }
+                }
             }
         }
     }
@@ -281,12 +393,20 @@ class SettingsViewModel(
             runCatching { repository.setMedicationReminderEnabled(enabled) }
                 .onSuccess {
                     _uiState.update {
-                        it.copy(message = if (enabled) "服药提醒已启用。" else "服药提醒已关闭。")
+                        it.copy(
+                            message = if (enabled) "服药提醒已启用。" else "服药提醒已关闭。",
+                            messageIsError = false
+                        )
                     }
                 }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _uiState.update {
-                        it.copy(message = "服药提醒更新失败：${throwable.message ?: "请稍后重试"}")
+                        it.copy(
+                            medicationReminderEnabled = latestSavedAppSettings.medicationReminderEnabled,
+                            message = "服药提醒更新失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
         }
@@ -311,17 +431,22 @@ class SettingsViewModel(
                                 "已将服药时间同步到所选日历。"
                             } else {
                                 "已关闭日历同步，本应用创建的服药日程已清理。"
-                            }
+                            },
+                            messageIsError = false
                         )
                     }
                 }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _uiState.update {
-                        it.copy(message = if (enabled) {
-                            "日历同步失败：${throwable.message ?: "请稍后重试"}"
-                        } else {
-                            "日历同步更新未完成：${throwable.message ?: "请稍后重试"}"
-                        })
+                        it.copy(
+                            message = if (enabled) {
+                                "日历同步失败：${throwable.message ?: "请稍后重试"}"
+                            } else {
+                                "日历同步更新未完成：${throwable.message ?: "请稍后重试"}"
+                            },
+                            messageIsError = true
+                        )
                     }
                 }
         }
@@ -329,11 +454,11 @@ class SettingsViewModel(
 
     fun addMedication(name: String, dosage: String, times: List<String>) {
         if (name.isBlank()) {
-            _uiState.update { it.copy(message = "请填写药品名称。") }
+            _uiState.update { it.copy(message = "请填写药品名称。", messageIsError = true) }
             return
         }
         if (times.isEmpty()) {
-            _uiState.update { it.copy(message = "请至少添加一个服药时间。") }
+            _uiState.update { it.copy(message = "请至少添加一个服药时间。", messageIsError = true) }
             return
         }
         val medRepo = medicationRepository ?: return
@@ -342,20 +467,26 @@ class SettingsViewModel(
                 .onSuccess {
                     runCatching { repository.refreshReminders() }
                         .onSuccess {
-                            _uiState.update { it.copy(message = "已添加「${name.trim()}」。") }
+                            _uiState.update { it.copy(message = "已添加「${name.trim()}」。", messageIsError = false) }
                         }
                         .onFailure { throwable ->
+                            if (throwable is CancellationException) throw throwable
                             _uiState.update {
                                 it.copy(
                                     message = "药品已保存，但提醒同步失败：" +
-                                        (throwable.message ?: "请稍后在提醒设置中重试")
+                                        (throwable.message ?: "请稍后在提醒设置中重试"),
+                                    messageIsError = true
                                 )
                             }
                         }
                 }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _uiState.update {
-                        it.copy(message = "添加失败：${throwable.message ?: "请稍后重试"}")
+                        it.copy(
+                            message = "添加失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
         }
@@ -363,11 +494,11 @@ class SettingsViewModel(
 
     fun updateMedication(id: Long, name: String, dosage: String, times: List<String>) {
         if (name.isBlank()) {
-            _uiState.update { it.copy(message = "请填写药品名称。") }
+            _uiState.update { it.copy(message = "请填写药品名称。", messageIsError = true) }
             return
         }
         if (times.isEmpty()) {
-            _uiState.update { it.copy(message = "请至少添加一个服药时间。") }
+            _uiState.update { it.copy(message = "请至少添加一个服药时间。", messageIsError = true) }
             return
         }
         val medRepo = medicationRepository ?: return
@@ -376,20 +507,26 @@ class SettingsViewModel(
                 .onSuccess {
                     runCatching { repository.refreshReminders() }
                         .onSuccess {
-                            _uiState.update { it.copy(message = "「${name.trim()}」已更新。") }
+                            _uiState.update { it.copy(message = "「${name.trim()}」已更新。", messageIsError = false) }
                         }
                         .onFailure { throwable ->
+                            if (throwable is CancellationException) throw throwable
                             _uiState.update {
                                 it.copy(
                                     message = "药品已更新，但提醒同步失败：" +
-                                        (throwable.message ?: "请稍后在提醒设置中重试")
+                                        (throwable.message ?: "请稍后在提醒设置中重试"),
+                                    messageIsError = true
                                 )
                             }
                         }
                 }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _uiState.update {
-                        it.copy(message = "保存失败：${throwable.message ?: "请稍后重试"}")
+                        it.copy(
+                            message = "保存失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
         }
@@ -398,39 +535,56 @@ class SettingsViewModel(
     fun deleteMedication(id: Long) {
         val medRepo = medicationRepository ?: return
         viewModelScope.launch {
-            medRepo.deleteMedication(id)
-                .onSuccess {
+            val result = deletionUndoManager?.deleteMedication { medRepo.deleteMedicationWithSnapshot(id) }
+                ?: medRepo.deleteMedicationWithSnapshot(id)
+            result
+                .onSuccess { snapshot ->
                     runCatching { repository.refreshReminders() }
                         .onSuccess {
-                            _uiState.update { it.copy(message = "药品已删除。") }
+                            _uiState.update {
+                                it.copy(
+                                    message = "已删除「${snapshot.medication.name}」。",
+                                    messageIsError = false
+                                )
+                            }
                         }
                         .onFailure { throwable ->
+                            if (throwable is CancellationException) throw throwable
                             _uiState.update {
                                 it.copy(
                                     message = "药品已删除，但提醒同步失败：" +
-                                        (throwable.message ?: "请稍后在提醒设置中重试")
+                                        (throwable.message ?: "请稍后在提醒设置中重试"),
+                                    messageIsError = true
                                 )
                             }
                         }
                 }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _uiState.update {
-                        it.copy(message = "删除失败：${throwable.message ?: "请稍后重试"}")
+                        it.copy(
+                            message = "删除失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
         }
     }
 
     fun showReminderAuthorizationRequired(message: String) {
-        _uiState.update { it.copy(message = message) }
+        _uiState.update { it.copy(message = message, messageIsError = true) }
     }
 
     fun refreshReminders() {
         viewModelScope.launch {
             runCatching { repository.refreshReminders() }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     _uiState.update {
-                        it.copy(message = "提醒刷新失败：${throwable.message ?: "请稍后重试"}")
+                        it.copy(
+                            message = "提醒刷新失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
         }
@@ -438,145 +592,247 @@ class SettingsViewModel(
 
     fun updateMorningTime(value: String) {
         if (!isTimeTextValid(value)) {
-            _uiState.update { it.copy(message = "提醒时间格式应为 HH:mm，例如 07:30。") }
+            _uiState.update { it.copy(message = "提醒时间格式应为 HH:mm，例如 07:30。", messageIsError = true) }
             return
         }
-        if (_uiState.value.morningReminderTime == value) return
-        _uiState.update { it.copy(morningReminderTime = value) }
+        val wasEnabled = _uiState.value.morningReminderEnabled
+        if (_uiState.value.morningReminderTime == value && wasEnabled) return
+        _uiState.update { it.copy(morningReminderTime = value, morningReminderEnabled = true) }
         viewModelScope.launch {
-            runCatching { repository.setMorningReminderTime(value) }
-                .onSuccess {
+            morningReminderMutex.withLock {
+                try {
+                    repository.setMorningReminderSchedule(value, enabled = true)
+                    latestSavedAppSettings = latestSavedAppSettings.copy(
+                        morningReminderTime = value,
+                        morningReminderEnabled = true
+                    )
                     _uiState.update { state ->
-                        state.copy(message = "晨间提醒时间已自动保存。")
+                        state.copy(
+                            morningReminderTime = value,
+                            morningReminderEnabled = true,
+                            message = if (wasEnabled) "晨间提醒时间已自动保存。" else "已自动开启晨间提醒并保存时间。",
+                            messageIsError = false
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (throwable: Throwable) {
+                    _uiState.update { state ->
+                        state.copy(
+                            morningReminderTime = latestSavedAppSettings.morningReminderTime,
+                            morningReminderEnabled = latestSavedAppSettings.morningReminderEnabled,
+                            message = "自动保存失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
-                .onFailure { throwable ->
-                    _uiState.update { state ->
-                        state.copy(message = "自动保存失败：${throwable.message ?: "请稍后重试"}")
-                    }
-                }
+            }
         }
     }
 
     fun updateEveningTime(value: String) {
         if (!isTimeTextValid(value)) {
-            _uiState.update { it.copy(message = "提醒时间格式应为 HH:mm，例如 19:30。") }
+            _uiState.update { it.copy(message = "提醒时间格式应为 HH:mm，例如 19:30。", messageIsError = true) }
             return
         }
-        if (_uiState.value.eveningReminderTime == value) return
-        _uiState.update { it.copy(eveningReminderTime = value) }
+        val wasEnabled = _uiState.value.eveningReminderEnabled
+        if (_uiState.value.eveningReminderTime == value && wasEnabled) return
+        _uiState.update { it.copy(eveningReminderTime = value, eveningReminderEnabled = true) }
         viewModelScope.launch {
-            runCatching { repository.setEveningReminderTime(value) }
-                .onSuccess {
+            eveningReminderMutex.withLock {
+                try {
+                    repository.setEveningReminderSchedule(value, enabled = true)
+                    latestSavedAppSettings = latestSavedAppSettings.copy(
+                        eveningReminderTime = value,
+                        eveningReminderEnabled = true
+                    )
                     _uiState.update { state ->
-                        state.copy(message = "晚间提醒时间已自动保存。")
+                        state.copy(
+                            eveningReminderTime = value,
+                            eveningReminderEnabled = true,
+                            message = if (wasEnabled) "晚间提醒时间已自动保存。" else "已自动开启晚间提醒并保存时间。",
+                            messageIsError = false
+                        )
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (throwable: Throwable) {
+                    _uiState.update { state ->
+                        state.copy(
+                            eveningReminderTime = latestSavedAppSettings.eveningReminderTime,
+                            eveningReminderEnabled = latestSavedAppSettings.eveningReminderEnabled,
+                            message = "自动保存失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
+                        )
                     }
                 }
-                .onFailure { throwable ->
-                    _uiState.update { state ->
-                        state.copy(message = "自动保存失败：${throwable.message ?: "请稍后重试"}")
-                    }
-                }
+            }
         }
     }
 
     fun updateName(value: String) {
+        if (_uiState.value.isSavingProfile) return
         isProfileDirty = true
-        _uiState.update { it.copy(name = value) }
+        _uiState.update { it.copy(name = value, isProfileDirty = true) }
     }
 
     fun updateAgeText(value: String) {
+        if (_uiState.value.isSavingProfile) return
         isProfileDirty = true
-        _uiState.update { it.copy(ageText = value, ageError = null) }
+        _uiState.update { it.copy(ageText = value, ageError = null, isProfileDirty = true) }
     }
 
     fun updateGender(value: String) {
+        if (_uiState.value.isSavingProfile) return
         isProfileDirty = true
-        _uiState.update { it.copy(gender = value) }
+        _uiState.update { it.copy(gender = value, isProfileDirty = true) }
     }
 
     fun updateTargetSystolicText(value: String) {
+        if (_uiState.value.isSavingProfile) return
         isProfileDirty = true
-        _uiState.update { it.copy(targetSystolicText = value, targetSystolicError = null) }
+        _uiState.update { it.copy(targetSystolicText = value, targetSystolicError = null, isProfileDirty = true) }
     }
 
     fun updateTargetDiastolicText(value: String) {
+        if (_uiState.value.isSavingProfile) return
         isProfileDirty = true
-        _uiState.update { it.copy(targetDiastolicText = value, targetDiastolicError = null) }
+        _uiState.update { it.copy(targetDiastolicText = value, targetDiastolicError = null, isProfileDirty = true) }
+    }
+
+    fun discardProfileChanges() {
+        if (_uiState.value.isSavingProfile) return
+        isProfileDirty = false
+        _uiState.update {
+            it.copy(
+                name = latestSavedProfile.name.orEmpty(),
+                ageText = latestSavedProfile.age?.toString().orEmpty(),
+                gender = latestSavedProfile.gender.orEmpty(),
+                targetSystolicText = latestSavedProfile.targetSystolic?.toString().orEmpty(),
+                targetDiastolicText = latestSavedProfile.targetDiastolic?.toString().orEmpty(),
+                isProfileDirty = false,
+                ageError = null,
+                targetSystolicError = null,
+                targetDiastolicError = null,
+                message = "",
+                messageIsError = false
+            )
+        }
     }
 
     fun saveUserProfile() {
+        saveUserProfile(onSaved = null)
+    }
+
+    fun saveUserProfile(onSaved: (() -> Unit)?) {
         val state = _uiState.value
+        if (!state.isProfileLoaded || state.isSavingProfile) return
         val age = state.ageText.toIntOrNull()
         val targetSys = state.targetSystolicText.toIntOrNull()
         val targetDia = state.targetDiastolicText.toIntOrNull()
 
         if (state.ageText.isNotBlank() && age == null) {
-            _uiState.update { it.copy(ageError = "年龄应为整数。", message = "请检查用户资料。") }
+            _uiState.update { it.copy(ageError = "年龄应为整数。", message = "请检查用户资料。", messageIsError = true) }
             return
         }
         if (age != null && age !in 1..120) {
-            _uiState.update { it.copy(ageError = "年龄须在 1–120 岁之间。", message = "请检查用户资料。") }
+            _uiState.update { it.copy(ageError = "年龄须在 1–120 岁之间。", message = "请检查用户资料。", messageIsError = true) }
             return
         }
         if (state.targetSystolicText.isNotBlank() && targetSys == null) {
-            _uiState.update { it.copy(targetSystolicError = "请输入有效整数。", message = "请检查用户资料。") }
+            _uiState.update { it.copy(targetSystolicError = "请输入有效整数。", message = "请检查用户资料。", messageIsError = true) }
             return
         }
         if (state.targetDiastolicText.isNotBlank() && targetDia == null) {
-            _uiState.update { it.copy(targetDiastolicError = "请输入有效整数。", message = "请检查用户资料。") }
+            _uiState.update { it.copy(targetDiastolicError = "请输入有效整数。", message = "请检查用户资料。", messageIsError = true) }
             return
         }
         if (targetSys != null && targetSys !in 40..300) {
-            _uiState.update { it.copy(targetSystolicError = "数值须在 40–300 之间。", message = "请检查用户资料。") }
+            _uiState.update { it.copy(targetSystolicError = "达标高压须在 40–300 之间。", message = "请检查用户资料。", messageIsError = true) }
             return
         }
         if (targetDia != null && targetDia !in 20..200) {
-            _uiState.update { it.copy(targetDiastolicError = "数值须在 20–200 之间。", message = "请检查用户资料。") }
+            _uiState.update { it.copy(targetDiastolicError = "达标低压须在 20–200 之间。", message = "请检查用户资料。", messageIsError = true) }
             return
         }
         if (targetSys != null && targetDia != null && targetDia >= targetSys) {
             _uiState.update {
                 it.copy(
-                    targetDiastolicError = "目标舒张压必须低于目标收缩压。",
-                    message = "请检查用户资料。"
+                    targetDiastolicError = "达标低压必须低于达标高压。",
+                    message = "请检查用户资料。",
+                    messageIsError = true
                 )
             }
             return
         }
 
-        viewModelScope.launch {
-            repository.saveUserProfile(
-                UserProfile(
-                    name = state.name,
-                    age = age,
-                    gender = state.gender,
-                    targetSystolic = targetSys,
-                    targetDiastolic = targetDia
-                )
-            )
-            isProfileDirty = false
+        val savedProfile = UserProfile(
+            name = state.name,
+            age = age,
+            gender = state.gender,
+            targetSystolic = targetSys,
+            targetDiastolic = targetDia
+        )
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             _uiState.update {
                 it.copy(
-                    message = "用户资料已保存。",
+                    isSavingProfile = true,
+                    message = "",
+                    messageIsError = false,
                     ageError = null,
                     targetSystolicError = null,
                     targetDiastolicError = null
                 )
             }
+            val release = updatePromptGate?.hold()
+            try {
+                repository.saveUserProfile(savedProfile)
+                latestSavedProfile = savedProfile
+                isProfileDirty = false
+                _uiState.update {
+                    it.copy(
+                        isSavingProfile = false,
+                        isProfileDirty = false,
+                        message = "用户资料已保存。",
+                        messageIsError = false,
+                        ageError = null,
+                        targetSystolicError = null,
+                        targetDiastolicError = null
+                    )
+                }
+                onSaved?.invoke()
+            } catch (cancelled: CancellationException) {
+                _uiState.update { it.copy(isSavingProfile = false) }
+                throw cancelled
+            } catch (throwable: Throwable) {
+                isProfileDirty = true
+                _uiState.update {
+                    it.copy(
+                        isSavingProfile = false,
+                        isProfileDirty = true,
+                        message = "保存失败：${throwable.message ?: "请稍后重试"}",
+                        messageIsError = true
+                    )
+                }
+            } finally {
+                release?.invoke()
+            }
         }
     }
 
     fun requestBackupExport() {
+        if (_uiState.value.isDataActionRunning) return
         if (pendingExportPlan != null) { showCurrentExportVolume(); return }
         _uiState.update { it.copy(showBackupExportConfirm = true) }
     }
 
     fun dismissBackupExport() {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(showBackupExportConfirm = false) }
     }
 
     fun requestEncryptedBackupExport() {
+        if (_uiState.value.isDataActionRunning) return
         if (pendingExportPlan != null) { showCurrentExportVolume(); return }
         _uiState.update {
             it.copy(
@@ -587,6 +843,7 @@ class SettingsViewModel(
     }
 
     fun dismissEncryptedBackupExport() {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(showExportPassphraseDialog = false) }
     }
 
@@ -599,26 +856,29 @@ class SettingsViewModel(
     }
 
     private fun runExport(uri: Uri, fileNameHint: String, passphrase: CharArray?) {
-        launchDataAction {
+        val action = if (passphrase != null) SettingsDataAction.EXPORT_BPX else SettingsDataAction.EXPORT_XLSX
+        launchDataAction(action) {
             _uiState.update {
                 it.copy(
                     showBackupExportConfirm = false,
                     showExportPassphraseDialog = false,
                     message = if (passphrase != null) {
-                        "正在导出加密备份，请稍候..."
+                        "正在导出加密备份，请稍候…"
                     } else {
-                        "正在导出 Excel 备份，请稍候..."
-                    }
+                        "正在导出 Excel 备份，请稍候…"
+                    },
+                    messageIsError = false
                 )
             }
             repository.exportBackupXlsxToUri(uri, fileNameHint, passphrase)
                 .onSuccess { msg ->
-                    _uiState.update { it.copy(message = msg) }
+                    _uiState.update { it.copy(message = msg, messageIsError = false) }
                 }
                 .onFailure { throwable ->
                     _uiState.update {
                         it.copy(
-                            message = throwable.message ?: "导出失败，请重新选择保存位置后再试"
+                            message = throwable.message ?: "导出失败，请重新选择保存位置后再试",
+                            messageIsError = true
                         )
                     }
                 }
@@ -638,19 +898,25 @@ class SettingsViewModel(
         pendingExportPassphrase?.fill('\u0000')
         pendingExportPassphrase = passphrase
         pendingExportBaseName = baseName
-        launchDataAction {
+        val action = if (passphrase != null) SettingsDataAction.EXPORT_BPX else SettingsDataAction.EXPORT_XLSX
+        launchDataAction(action) {
             _uiState.update { it.copy(showBackupExportConfirm = false, showExportPassphraseDialog = false) }
             repository.prepareBackupExport().onSuccess { plan ->
                 pendingExportPlan = plan
                 _uiState.update {
-                    it.copy(exportVolumeIndex = 0,
-                        exportVolumeCount = plan.volumes.size, exportTotalRecords = plan.totalRecords,
-                        exportEncrypted = passphrase != null, message = "已准备 ${plan.volumes.size} 个备份文件，请依次保存全部文件。")
+                    it.copy(
+                        exportVolumeIndex = 0,
+                        exportVolumeCount = plan.volumes.size,
+                        exportTotalRecords = plan.totalRecords,
+                        exportEncrypted = passphrase != null,
+                        message = "已准备 ${plan.volumes.size} 个备份文件，请依次保存全部文件。",
+                        messageIsError = false
+                    )
                 }
                 showCurrentExportVolume()
             }.onFailure { error ->
                 discardExportPlan()
-                _uiState.update { it.copy(message = error.message ?: "备份准备失败") }
+                _uiState.update { it.copy(message = error.message ?: "备份准备失败", messageIsError = true) }
             }
         }
     }
@@ -661,9 +927,13 @@ class SettingsViewModel(
         val extension = if (pendingExportPassphrase == null) "xlsx" else "bpx"
         val suffix = if (plan.volumes.size > 1) "_第${index + 1}卷_共${plan.volumes.size}卷" else ""
         val requestId = UUID.randomUUID().toString()
-        _uiState.update { it.copy(exportVolumeRequestId = requestId,
-            exportFileName = "$pendingExportBaseName$suffix.$extension",
-            exportVolumeRecords = plan.volumes[index].measurements.size) }
+        _uiState.update {
+            it.copy(
+                exportVolumeRequestId = requestId,
+                exportFileName = "$pendingExportBaseName$suffix.$extension",
+                exportVolumeRecords = plan.volumes[index].measurements.size
+            )
+        }
     }
 
     fun onExportLocationResult(requestId: String, uri: Uri?) {
@@ -672,45 +942,77 @@ class SettingsViewModel(
         if (state.isDataActionRunning || state.exportVolumeRequestId != requestId) return
         val index = state.exportVolumeIndex
         if (uri == null) {
-            _uiState.update { it.copy(message = "保存已取消；已保存 $index/${plan.volumes.size} 卷。可继续保存当前卷。") }
+            _uiState.update {
+                it.copy(
+                    message = "保存已取消；已保存 $index/${plan.volumes.size} 卷。可继续保存当前卷。",
+                    messageIsError = false
+                )
+            }
             showCurrentExportVolume()
             return
         }
-        launchDataAction {
+        val action = if (pendingExportPassphrase != null) SettingsDataAction.EXPORT_BPX else SettingsDataAction.EXPORT_XLSX
+        launchDataAction(action) {
             _uiState.update { it.copy(exportVolumeRequestId = null) }
             repository.exportBackupVolumeToUri(plan, index, uri, pendingExportPassphrase)
                 .onSuccess {
                     if (index == plan.volumes.lastIndex) {
                         discardExportPlan()
-                        _uiState.update { it.copy(
-                            message = "全部 ${plan.volumes.size} 卷已导出，共 ${plan.totalRecords} 条测量记录。请从第一卷起逐卷恢复。") }
+                        _uiState.update {
+                            it.copy(
+                                message = "全部 ${plan.volumes.size} 卷已导出，共 ${plan.totalRecords} 条测量记录。请从第一卷起逐卷恢复。",
+                                messageIsError = false
+                            )
+                        }
                     } else {
-                        _uiState.update { it.copy(exportVolumeIndex = index + 1,
-                            message = "已保存 ${index + 1}/${plan.volumes.size} 卷，备份尚未完整，请继续保存。") }
+                        _uiState.update {
+                            it.copy(
+                                exportVolumeIndex = index + 1,
+                                message = "已保存 ${index + 1}/${plan.volumes.size} 卷，备份尚未完整，请继续保存。",
+                                messageIsError = false
+                            )
+                        }
                         showCurrentExportVolume()
                     }
                 }.onFailure { error ->
-                    _uiState.update { it.copy(message = error.message ?: "当前卷保存失败，请重试") }
+                    _uiState.update {
+                        it.copy(
+                            message = error.message ?: "当前卷保存失败，请重试",
+                            messageIsError = true
+                        )
+                    }
                     showCurrentExportVolume()
                 }
         }
     }
 
     fun pauseBackupExport() {
-        if (pendingExportPlan == null) return
-        _uiState.update { it.copy(exportVolumeRequestId = null,
-            message = "备份未完成：已保存 ${it.exportVolumeIndex}/${it.exportVolumeCount} 卷。点击导出可继续；离开页面或重启后请重新导出全部卷。") }
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation || pendingExportPlan == null) return
+        _uiState.update {
+            it.copy(
+                exportVolumeRequestId = null,
+                message = "备份未完成：已保存 ${it.exportVolumeIndex}/${it.exportVolumeCount} 卷。点击导出可继续；离开页面或重启后请重新导出全部卷。",
+                messageIsError = false
+            )
+        }
     }
 
     fun requestClearAll() {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(showClearConfirm = true) }
     }
 
     fun requestBackupImport() {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(showBackupImportConfirm = true) }
     }
 
     fun dismissBackupImport() {
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation) return
+        resetBackupImportState()
+    }
+
+    private fun resetBackupImportState() {
         _uiState.update {
             it.copy(
                 showBackupImportConfirm = false,
@@ -729,11 +1031,12 @@ class SettingsViewModel(
     }
 
     fun previewBackupXlsxFromUri(uri: Uri, passphrase: CharArray? = null) {
-        launchDataAction {
+        launchDataAction(SettingsDataAction.IMPORT) {
             _uiState.update {
                 it.copy(
                     showBackupImportConfirm = false,
-                    message = "正在验证备份并生成导入预览..."
+                    message = "正在验证备份并生成导入预览…",
+                    messageIsError = false
                 )
             }
             repository.previewBackupXlsxFromUri(uri, passphrase)
@@ -749,7 +1052,8 @@ class SettingsViewModel(
                             restoreDisplaySettingsSelected = false,
                             restoreReminderSettingsSelected = false,
                             restoreMedicationsSelected = false,
-                            message = "预览完成：不会自动写入数据，请确认导入范围。"
+                            message = "预览完成：不会自动写入数据，请确认导入范围。",
+                            messageIsError = false
                         )
                     }
                 }
@@ -761,7 +1065,8 @@ class SettingsViewModel(
                                 it.copy(
                                     showImportPassphraseDialog = true,
                                     importPassphraseError = null,
-                                    message = "该备份文件已加密。"
+                                    message = "该备份文件已加密。",
+                                    messageIsError = false
                                 )
                             }
                         }
@@ -771,14 +1076,16 @@ class SettingsViewModel(
                                 it.copy(
                                     showImportPassphraseDialog = true,
                                     importPassphraseError = throwable.message,
-                                    message = throwable.message ?: "备份口令错误。"
+                                    message = throwable.message ?: "备份口令错误。",
+                                    messageIsError = true
                                 )
                             }
                         }
                         else -> {
                             _uiState.update {
                                 it.copy(
-                                    message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
+                                    message = "导入失败：${throwable.message ?: "文件格式不受支持"}",
+                                    messageIsError = true
                                 )
                             }
                         }
@@ -793,6 +1100,11 @@ class SettingsViewModel(
     }
 
     fun dismissImportPassphrase() {
+        if (_uiState.value.isDataActionRunning) return
+        resetImportPassphraseState()
+    }
+
+    private fun resetImportPassphraseState() {
         pendingImportUri = null
         _uiState.update {
             it.copy(
@@ -803,22 +1115,27 @@ class SettingsViewModel(
     }
 
     fun setImportMeasurementsSelected(selected: Boolean) {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(importMeasurementsSelected = selected) }
     }
 
     fun setRestoreUserProfileSelected(selected: Boolean) {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(restoreUserProfileSelected = selected) }
     }
 
     fun setRestoreDisplaySettingsSelected(selected: Boolean) {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(restoreDisplaySettingsSelected = selected) }
     }
 
     fun setRestoreReminderSettingsSelected(selected: Boolean) {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(restoreReminderSettingsSelected = selected) }
     }
 
     fun setRestoreMedicationsSelected(selected: Boolean) {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(restoreMedicationsSelected = selected) }
     }
 
@@ -826,9 +1143,9 @@ class SettingsViewModel(
         val state = _uiState.value
         val preview = state.backupImportPreview ?: return
         if (!state.hasImportSelection || state.isDataActionRunning) return
-        launchDataAction {
+        launchDataAction(SettingsDataAction.IMPORT) {
             _uiState.update {
-                it.copy(message = "正在提交导入，请稍候...")
+                it.copy(message = "正在提交导入，请稍候…", messageIsError = false)
             }
             repository.commitBackupImport(
                 preview = preview,
@@ -844,13 +1161,16 @@ class SettingsViewModel(
                 _uiState.update {
                     it.copy(
                         backupImportPreview = null,
-                        message = message
+                        isProfileDirty = false,
+                        message = message,
+                        messageIsError = false
                     )
                 }
             }.onFailure { throwable ->
                 _uiState.update {
                     it.copy(
-                        message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
+                        message = "导入失败：${throwable.message ?: "文件格式不受支持"}",
+                        messageIsError = true
                     )
                 }
             }
@@ -858,26 +1178,40 @@ class SettingsViewModel(
     }
 
     fun dismissClearAll() {
+        if (_uiState.value.isDataActionRunning) return
         _uiState.update { it.copy(showClearConfirm = false) }
     }
 
     fun confirmClearAll() {
-        launchDataAction {
-            _uiState.update { it.copy(message = "正在清空本地数据...") }
+        launchDataAction(SettingsDataAction.CLEAR) {
+            _uiState.update { it.copy(message = "正在清空本地数据…", messageIsError = false) }
             repository.clearAllData()
                 .onSuccess { result ->
                     if (result.databaseCleared) {
                         discardExportPlan()
-                        dismissBackupImport()
-                        dismissImportPassphrase()
+                        resetBackupImportState()
+                        resetImportPassphraseState()
                         isProfileDirty = false
-                        _uiState.update { it.copy(name = "", ageText = "", gender = "", targetSystolicText = "",
-                            targetDiastolicText = "", ageError = null, targetSystolicError = null, targetDiastolicError = null) }
+                        latestSavedProfile = UserProfile()
+                        _uiState.update {
+                            it.copy(
+                                name = "",
+                                ageText = "",
+                                gender = "",
+                                targetSystolicText = "",
+                                targetDiastolicText = "",
+                                isProfileDirty = false,
+                                ageError = null,
+                                targetSystolicError = null,
+                                targetDiastolicError = null
+                            )
+                        }
                     }
                     _uiState.update {
                         it.copy(
                             showClearConfirm = false,
-                            message = result.toUserMessage()
+                            message = result.toUserMessage(),
+                            messageIsError = result.hasIssues
                         )
                     }
                 }
@@ -885,7 +1219,8 @@ class SettingsViewModel(
                     _uiState.update {
                         it.copy(
                             showClearConfirm = false,
-                            message = "清空失败：${throwable.message ?: "请稍后重试"}"
+                            message = "清空失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
                         )
                     }
                 }

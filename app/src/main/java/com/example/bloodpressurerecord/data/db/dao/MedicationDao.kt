@@ -19,6 +19,12 @@ data class MedicationWithTimes(
     val times: List<MedicationTimeEntity>
 )
 
+data class MedicationFullSnapshot(
+    val medication: MedicationEntity,
+    val times: List<MedicationTimeEntity>,
+    val logs: List<MedicationIntakeLogEntity>
+)
+
 @Dao
 interface MedicationDao {
 
@@ -52,8 +58,17 @@ interface MedicationDao {
     @Query("SELECT * FROM medication_intake_logs ORDER BY epochDay ASC, timeId ASC")
     suspend fun getAllLogs(): List<MedicationIntakeLogEntity>
 
+    @Query("SELECT * FROM medication_intake_logs WHERE medicationId = :medicationId ORDER BY epochDay ASC, timeId ASC, id ASC")
+    suspend fun getLogsForMedication(medicationId: Long): List<MedicationIntakeLogEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertLog(log: MedicationIntakeLogEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertLogs(logs: List<MedicationIntakeLogEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertLogsExact(logs: List<MedicationIntakeLogEntity>)
 
     @Query("DELETE FROM medication_intake_logs WHERE timeId = :timeId AND epochDay = :epochDay")
     suspend fun deleteLog(timeId: Long, epochDay: Long)
@@ -61,14 +76,20 @@ interface MedicationDao {
     @Insert
     suspend fun insertMedication(medication: MedicationEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertMedicationExact(medication: MedicationEntity): Long
+
     @Update
     suspend fun updateMedication(medication: MedicationEntity)
 
     @Query("DELETE FROM medications WHERE id = :id")
-    suspend fun deleteMedication(id: Long)
+    suspend fun deleteMedication(id: Long): Int
 
     @Insert
     suspend fun insertTime(time: MedicationTimeEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertTimesExact(times: List<MedicationTimeEntity>)
 
     @Query("UPDATE medication_times SET active = :active WHERE id = :id")
     suspend fun setTimeActive(id: Long, active: Boolean)
@@ -85,6 +106,9 @@ interface MedicationDao {
     @Query("SELECT * FROM medication_times WHERE id = :timeId")
     suspend fun getTime(timeId: Long): MedicationTimeEntity?
 
+    @Query("SELECT id FROM medication_times WHERE id IN (:ids)")
+    suspend fun getExistingTimeIds(ids: List<Long>): List<Long>
+
     @Query("SELECT id FROM medication_times")
     suspend fun getAllTimeIds(): List<Long>
 
@@ -99,6 +123,56 @@ interface MedicationDao {
 
     @Query("DELETE FROM medications")
     suspend fun deleteAllMedications()
+
+    /**
+     * 在同一数据库事务中校验药品与时间点存在且有效后再写入打卡，
+     * 防止删药或清空并发时触发外键约束异常。重复打卡因 IGNORE 保持幂等。
+     */
+    @Transaction
+    suspend fun insertLogIfSlotActive(log: MedicationIntakeLogEntity): Boolean {
+        val time = getTime(log.timeId) ?: return false
+        if (!time.active || time.medicationId != log.medicationId) return false
+        val medication = getMedication(log.medicationId) ?: return false
+        if (!medication.enabled) return false
+        insertLog(log)
+        return true
+    }
+
+    /**
+     * 在事务中完整快照药品、全部时间点（含已停用）与历史服药打卡后再执行删除。
+     */
+    @Transaction
+    suspend fun deleteMedicationReturningSnapshot(id: Long): MedicationFullSnapshot? {
+        val medication = getMedication(id) ?: return null
+        val times = getTimesForMedication(id)
+        val logs = getLogsForMedication(id)
+        if (deleteMedication(id) != 1) return null
+        return MedicationFullSnapshot(
+            medication = medication,
+            times = times,
+            logs = logs
+        )
+    }
+
+    /**
+     * 事务化完整恢复已删药品及其原 ID、停用时间点、启用状态和历史打卡；
+     * 若原主键已被占用则拒绝覆盖并返回 false。
+     */
+    @Transaction
+    suspend fun restoreMedicationSnapshot(snapshot: MedicationFullSnapshot): Boolean {
+        if (getMedication(snapshot.medication.id) != null) return false
+        if (snapshot.times.isNotEmpty() && getExistingTimeIds(snapshot.times.map { it.id }).isNotEmpty()) {
+            return false
+        }
+        insertMedicationExact(snapshot.medication)
+        if (snapshot.times.isNotEmpty()) {
+            insertTimesExact(snapshot.times)
+        }
+        if (snapshot.logs.isNotEmpty()) {
+            insertLogsExact(snapshot.logs)
+        }
+        return true
+    }
 
     /**
      * 药品与时间点必须原子写入；任何一步失败都会回滚，避免出现“有药品但没有提醒时间”。
@@ -118,22 +192,28 @@ interface MedicationDao {
     /**
      * 按时间文本切换计划；移除的时间点只停用，保留其全部历史打卡。
      * 再次启用同一时间沿用原 id，避免重复计划及同日打卡。
+     * 返回本次新停用的时间点 id 列表，供上层清理对应已发出的系统通知。
      */
     @Transaction
     suspend fun updateMedicationWithTimes(
         medication: MedicationEntity,
         timeTexts: List<String>
-    ) {
+    ): List<Long> {
         updateMedication(medication)
         val desired = timeTexts.toSet()
         val existing = getTimesForMedication(medication.id)
         val keptTexts = hashSetOf<String>()
+        val deactivatedIds = mutableListOf<Long>()
         existing.sortedByDescending { it.active }.forEach { time ->
             val active = time.timeText in desired && keptTexts.add(time.timeText)
-            if (time.active != active) setTimeActive(time.id, active)
+            if (time.active != active) {
+                setTimeActive(time.id, active)
+                if (!active) deactivatedIds += time.id
+            }
         }
         desired.filterNot(keptTexts::contains).sorted().forEach { timeText ->
             insertTime(MedicationTimeEntity(medicationId = medication.id, timeText = timeText))
         }
+        return deactivatedIds
     }
 }

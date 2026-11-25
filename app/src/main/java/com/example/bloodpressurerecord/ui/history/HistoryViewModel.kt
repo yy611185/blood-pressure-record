@@ -27,11 +27,13 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -54,7 +56,8 @@ data class HistoryUiState(
     val recentSummary: RecentSummary? = null,
     val recentError: String? = null,
     val monthError: String? = null,
-    val dayError: String? = null
+    val dayError: String? = null,
+    val today: LocalDate = LocalDate.now()
 ) {
     val monthHasRecords: Boolean get() = daySummaries.isNotEmpty()
 }
@@ -95,10 +98,19 @@ class HistoryViewModel(
     private val repository: BloodPressureRepository,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
     private val zoneId: ZoneId = ZoneId.systemDefault(),
-    private val todayProvider: () -> LocalDate = { LocalDate.now(zoneId) },
+    private val zoneProvider: () -> ZoneId = { zoneId },
+    private val todayProvider: () -> LocalDate = { LocalDate.now(zoneProvider()) },
     todayTicks: Flow<LocalDate> = flow { emit(todayProvider()) },
-    settingsRepository: SettingsRepository? = null
+    settingsRepository: SettingsRepository? = null,
+    timeChangeSignal: Flow<Unit> = emptyFlow()
 ) : ViewModel() {
+    private val activeZoneFlow: Flow<ZoneId> = timeChangeSignal
+        .onStart { emit(Unit) }
+        .map { zoneProvider() }
+        .distinctUntilChanged()
+    private val currentDate = todayTicks.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), todayProvider()
+    )
     private val userProfile = settingsRepository?.observeSettings()?.map { it.userProfile }
         ?: flowOf(UserProfile())
     private val viewMode = MutableStateFlow(
@@ -135,15 +147,16 @@ class HistoryViewModel(
 
     private val monthResult: Flow<MonthResult> = combine(
         displayedMonth,
-        monthRefresh
-    ) { month, _ -> month }.flatMapLatest { month ->
-        val range = month.toEpochMillisRange(zoneId)
+        monthRefresh,
+        activeZoneFlow
+    ) { month, _, activeZone -> month to activeZone }.flatMapLatest { (month, activeZone) ->
+        val range = month.toEpochMillisRange(activeZone)
         combine(
             repository.observeCalendarSessionSummaries(range.startInclusive, range.endExclusive),
             repository.observeSessionSummariesInRange(range.startInclusive, range.endExclusive)
         ) { rows, sessions ->
-                val sessionsByDay = sessions.groupBy { it.measuredAt.toLocalDate(zoneId) }
-                val summaries = rows.groupBy { it.measuredAt.toLocalDate(zoneId) }
+                val sessionsByDay = sessions.groupBy { it.measuredAt.toLocalDate(activeZone) }
+                val summaries = rows.groupBy { it.measuredAt.toLocalDate(activeZone) }
                     .mapValues { (date, values) ->
                         val daySessions = sessionsByDay[date].orEmpty()
                         val avgSystolic = daySessions.takeIf { it.isNotEmpty() }
@@ -171,12 +184,13 @@ class HistoryViewModel(
 
     private val dayResult: Flow<DayResult> = combine(
         selectedDate,
-        dayRefresh
-    ) { date, _ -> date }.flatMapLatest { date ->
+        dayRefresh,
+        activeZoneFlow
+    ) { date, _, activeZone -> date to activeZone }.flatMapLatest { (date, activeZone) ->
         if (date == null) {
             flowOf(DayResult(date = null))
         } else {
-            val range = date.toEpochMillisRange(zoneId)
+            val range = date.toEpochMillisRange(activeZone)
             repository.observeSessionSummariesInRange(range.startInclusive, range.endExclusive)
                 .map { records ->
                     DayResult(
@@ -192,41 +206,45 @@ class HistoryViewModel(
         }
     }
 
-    // “本周 / 本月”的边界跟随日期流重算，跨零点或跨周后不再停留在旧范围。
+    // “本周 / 本月”的边界跟随日期流与系统时区重算，跨零点或切换时区后不再停留在旧范围。
     private val recentResult: Flow<RecentResult> = combine(
         recentPeriod,
         recentRefresh,
-        todayTicks
-    ) { period, _, today -> period to today }.flatMapLatest { (period, today) ->
-        val range = HistoryDateRanges.recent(period, today, zoneId)
-        combine(
-            repository.observeSessionSummariesInRange(
-                range.startInclusive,
-                range.endExclusive
-            ),
-            repository.observePeriodStatistics(
-                range.startInclusive,
-                range.endExclusive
-            )
-        ) { records, statistics ->
-            RecentResult(
-                period = period,
-                range = range,
-                records = records.sortedWith(
-                    compareByDescending<SessionSummary> { it.measuredAt }.thenBy { it.id }
+        currentDate,
+        activeZoneFlow
+    ) { period, _, today, activeZone -> Triple(period, today, activeZone) }
+        .flatMapLatest { (period, today, activeZone) ->
+            val range = HistoryDateRanges.recent(period, today, activeZone)
+            combine(
+                repository.observeSessionSummariesInRange(
+                    range.startInclusive,
+                    range.endExclusive
                 ),
-                statistics = statistics
-            )
-        }.catch {
-            emit(
+                repository.observePeriodStatistics(
+                    range.startInclusive,
+                    range.endExclusive
+                )
+            ) { records, statistics ->
                 RecentResult(
                     period = period,
                     range = range,
-                    error = "无法加载近期记录，请重试。"
+                    zone = activeZone,
+                    records = records.sortedWith(
+                        compareByDescending<SessionSummary> { it.measuredAt }.thenBy { it.id }
+                    ),
+                    statistics = statistics
                 )
-            )
+            }.catch {
+                emit(
+                    RecentResult(
+                        period = period,
+                        range = range,
+                        zone = activeZone,
+                        error = "无法加载近期记录，请重试。"
+                    )
+                )
+            }
         }
-    }
 
     private val calendarStateParts = combine(
         displayedMonth,
@@ -242,8 +260,8 @@ class HistoryViewModel(
         recentPeriod,
         calendarStateParts,
         recentResult,
-        userProfile
-    ) { mode, period, calendar, recentData, profile ->
+        combine(userProfile, currentDate, ::Pair)
+    ) { mode, period, calendar, recentData, (profile, today) ->
         val month = calendar.month
         val selected = calendar.selected
         val monthData = calendar.monthData
@@ -251,7 +269,8 @@ class HistoryViewModel(
         val monthMatches = monthData.month == month
         val dayMatches = dayData.date == selected
         val recentMatches = recentData.period == period
-        val records = if (dayMatches) dayData.records.map(::toItem) else emptyList()
+        val activeZone = recentData.zone ?: zoneProvider()
+        val records = if (dayMatches) dayData.records.map { toItem(it, activeZone) } else emptyList()
         HistoryUiState(
             viewMode = mode,
             recentPeriod = period,
@@ -286,21 +305,22 @@ class HistoryViewModel(
             } else {
                 CalendarLoadingState.ERROR
             },
-            recentRecords = if (recentMatches) recentData.records.map(::toItem) else emptyList(),
+            recentRecords = if (recentMatches) recentData.records.map { toItem(it, activeZone) } else emptyList(),
             recentSummary = if (recentMatches && recentData.error == null) {
-                recentData.toSummary(zoneId)
+                recentData.toSummary(activeZone)
             } else {
                 null
             },
             recentError = recentData.error,
             monthError = monthData.error,
-            dayError = dayData.error
+            dayError = dayData.error,
+            today = today
         )
     }.onEach { state ->
         if (state.monthState != CalendarLoadingState.CONTENT) return@onEach
         pendingRequestedDate?.let { requested ->
             pendingRequestedDate = null
-            if (!requested.isAfter(todayProvider()) && YearMonth.from(requested) == state.displayedMonth) {
+            if (!requested.isAfter(state.today) && YearMonth.from(requested) == state.displayedMonth) {
                 setSelectedDate(requested)
             } else {
                 setSelectedDate(null)
@@ -309,7 +329,7 @@ class HistoryViewModel(
         }
         if (state.selectedDate != null &&
             (YearMonth.from(state.selectedDate) != state.displayedMonth ||
-                (state.selectedDate.isAfter(todayProvider()) &&
+                (state.selectedDate.isAfter(state.today) &&
                     state.selectedDate.toString() != savedStateHandle.get<String>(KEY_LOCATION_DATE)))) {
             setSelectedDate(null)
         }
@@ -320,14 +340,17 @@ class HistoryViewModel(
             viewMode = viewMode.value,
             recentPeriod = recentPeriod.value,
             displayedMonth = displayedMonth.value,
-            selectedDate = selectedDate.value
+            selectedDate = selectedDate.value,
+            today = currentDate.value
         )
     )
 
     private val locationJob = locationSessionId?.let { sessionId ->
         viewModelScope.launch {
-            flow { emitAll(repository.observeSession(sessionId)) }
-                .map { it?.measuredAt?.toLocalDate(zoneId) }
+            combine(
+                flow { emitAll(repository.observeSession(sessionId)) },
+                activeZoneFlow
+            ) { session, activeZone -> session?.measuredAt?.toLocalDate(activeZone) }
                 .distinctUntilChanged()
                 .catch { emit(null) }
                 .collect { date ->
@@ -406,7 +429,7 @@ class HistoryViewModel(
     fun selectDate(date: LocalDate?) {
         if (date != null) {
             if (YearMonth.from(date) != displayedMonth.value) return
-            if (date.isAfter(todayProvider())) return
+            if (date.isAfter(currentDate.value)) return
         }
         setSelectedDate(date)
     }
@@ -428,13 +451,13 @@ class HistoryViewModel(
         savedStateHandle[KEY_SELECTED_DATE] = date?.toString()
     }
 
-    private fun toItem(record: SessionSummary): HistorySessionItemUi {
+    private fun toItem(record: SessionSummary, activeZone: ZoneId = zoneProvider()): HistorySessionItemUi {
         return HistorySessionItemUi(
             id = record.id,
             measuredAt = record.measuredAt,
-            measuredDate = record.measuredAt.toLocalDate(zoneId),
+            measuredDate = record.measuredAt.toLocalDate(activeZone),
             measuredAtText = Instant.ofEpochMilli(record.measuredAt)
-                .atZone(zoneId)
+                .atZone(activeZone)
                 .format(DateTimeFormatter.ofPattern("HH:mm")),
             avgBloodPressureText = "${record.avgSystolic}/${record.avgDiastolic}",
             avgPulseText = record.avgPulse?.toString() ?: "--",
@@ -461,6 +484,7 @@ class HistoryViewModel(
     private data class RecentResult(
         val period: RecentPeriod? = null,
         val range: EpochMillisRange? = null,
+        val zone: ZoneId? = null,
         val records: List<SessionSummary> = emptyList(),
         val statistics: PeriodStatistics = PeriodStatistics(),
         val error: String? = null

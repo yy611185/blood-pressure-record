@@ -15,15 +15,15 @@ import com.example.bloodpressurerecord.data.repository.SessionSummary
 import com.example.bloodpressurerecord.data.repository.SettingsBundle
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.domain.calculator.LocateBpZoneUseCase
+import com.example.bloodpressurerecord.domain.calculator.SessionStatisticsCalculator
 import com.example.bloodpressurerecord.domain.model.BpZone
 import com.example.bloodpressurerecord.domain.model.BpZoneConfig
 import com.example.bloodpressurerecord.domain.time.naturalWeekDates
 import com.example.bloodpressurerecord.domain.time.toEpochMillisRange
 import com.example.bloodpressurerecord.domain.time.toLocalDate
-import com.example.bloodpressurerecord.domain.time.weekStartSunday
+import com.example.bloodpressurerecord.domain.time.weekStartMonday
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.Instant
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,10 +32,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.shareIn
@@ -54,7 +56,9 @@ data class DashboardUiState(
     val bpRange: BpRangeUiState = BpRangeUiState.Empty,
     val todayMorning: SessionSummary? = null,
     val todayEvening: SessionSummary? = null,
-    /** 自然周（周日→周六，固定 7 天）的每日均值与打卡状态。 */
+    /** 今日凌晨（00:00–04:59）与午后（12:00–17:59）记录，与趋势/报告早晚口径严格一致。 */
+    val todayOtherSessions: List<SessionSummary> = emptyList(),
+    /** 自然周（周一→周日，固定 7 天）的每日均值与打卡状态。 */
     val week: List<DashboardWeekDay> = emptyList(),
     val userName: String? = null,
     val showTrendChart: Boolean = true,
@@ -64,6 +68,8 @@ data class DashboardUiState(
     val todayAverageDiastolic: Int? = null,
     /** 从今天（今天没记录则从昨天）往前连续有记录的天数。 */
     val streakDays: Int = 0,
+    /** 连续天数达到 365 天统计窗口上限时为 true（UI 显示 365+ 天）。 */
+    val streakCapped: Boolean = false,
     /** 今日服药打卡行（按时间升序）。 */
     val medicationSlots: List<MedicationSlot> = emptyList(),
     /** 正在写入的时间点；UI 应暂时禁用对应复选框，避免快速点击产生竞态。 */
@@ -100,13 +106,19 @@ class DashboardViewModel(
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     todayTicks: Flow<LocalDate> = flow { emit(LocalDate.now(zoneId)) },
     private val settingsRepository: SettingsRepository? = null,
-    zoneConfigRepository: BpZoneConfigRepository? = null
+    zoneConfigRepository: BpZoneConfigRepository? = null,
+    private val zoneProvider: () -> ZoneId = { zoneId },
+    timeChangeSignal: Flow<Unit> = emptyFlow()
 ) : ViewModel() {
     private val pendingMedicationCounts = MutableStateFlow<Map<Long, Int>>(emptyMap())
     private val medicationFeedbackEvents = MutableSharedFlow<MedicationFeedback>(extraBufferCapacity = 4)
     val medicationFeedback = medicationFeedbackEvents.asSharedFlow()
     private val medicationToggleMutex = Mutex()
     private val locateBpZone = LocateBpZoneUseCase()
+    private val activeZoneFlow = timeChangeSignal
+        .onStart { emit(Unit) }
+        .map { zoneProvider() }
+        .distinctUntilChanged()
     // 共享仓库的真实发射，不能让 StateFlow 的占位初值提前驱动首页展示。
     private val zoneConfigFlow =
         (zoneConfigRepository?.observeConfig() ?: flowOf(BpZoneConfig.Default))
@@ -116,16 +128,19 @@ class DashboardViewModel(
     val zoneConfig: StateFlow<BpZoneConfig> = zoneConfigFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BpZoneConfig.Default)
 
-    // “今日”范围跟随日期流重算，跨零点后自动切换到新的一天。
-    val uiState: StateFlow<DashboardUiState> = todayTicks
+    // “今日”范围跟随日期流与系统时区重算，跨零点或切换时区后自动切换到新范围。
+    val uiState: StateFlow<DashboardUiState> = combine(
+        todayTicks.distinctUntilChanged(),
+        activeZoneFlow
+    ) { today, activeZone -> today to activeZone }
         .distinctUntilChanged()
-        .flatMapLatest { today ->
-            val todayRange = today.toEpochMillisRange(zoneId)
+        .flatMapLatest { (today, activeZone) ->
+            val todayRange = today.toEpochMillisRange(activeZone)
             val streakStart = today.minusDays(STREAK_WINDOW_DAYS)
-                .atStartOfDay(zoneId).toInstant().toEpochMilli()
-            // 「这一周」固定为自然周（周日→周六），查询范围与展示的 7 天完全一致。
-            val weekStartDate = weekStartSunday(today)
-            val weekStart = weekStartDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
+                .atStartOfDay(activeZone).toInstant().toEpochMilli()
+            // 「这一周」固定为自然周（周一→周日），查询范围与展示的 7 天完全一致。
+            val weekStartDate = weekStartMonday(today)
+            val weekStart = weekStartDate.atStartOfDay(activeZone).toInstant().toEpochMilli()
             val latestWithDetail: Flow<Pair<LatestSessionSummary?, SessionRecord?>> =
                 repository.observeLatestSessionSummary()
                 .flatMapLatest { latest ->
@@ -160,18 +175,30 @@ class DashboardViewModel(
                 val recentSummaries = measurements.recentSummaries
                 val weekSummaries = measurements.weekSummaries
                 val recordedDates = recentSummaries
-                    .mapTo(hashSetOf()) { it.measuredAt.toLocalDate(zoneId) }
+                    .mapTo(hashSetOf()) { it.measuredAt.toLocalDate(activeZone) }
                 val todaySessions = weekSummaries
-                    .filter { it.measuredAt.toLocalDate(zoneId) == today }
+                    .filter { it.measuredAt.toLocalDate(activeZone) == today }
                     .sortedBy { it.measuredAt }
-                val weekByDate = weekSummaries.groupBy { it.measuredAt.toLocalDate(zoneId) }
+                val weekByDate = weekSummaries.groupBy { it.measuredAt.toLocalDate(activeZone) }
+                val streak = streakDays(today, recordedDates)
+                val todayMorningSession = todaySessions.lastOrNull {
+                    SessionStatisticsCalculator.isMorning(it.measuredAt, activeZone)
+                }
+                val todayEveningSession = todaySessions.lastOrNull {
+                    SessionStatisticsCalculator.isEvening(it.measuredAt, activeZone)
+                }
+                val todayOther = todaySessions.filter {
+                    !SessionStatisticsCalculator.isMorning(it.measuredAt, activeZone) &&
+                        !SessionStatisticsCalculator.isEvening(it.measuredAt, activeZone)
+                }
                 DashboardUiState(
                     today = today,
                     latest = latest,
                     latestSession = latestSession,
                     bpRange = measurements.bpRange,
-                    todayMorning = todaySessions.lastOrNull { localHour(it.measuredAt) < 12 },
-                    todayEvening = todaySessions.lastOrNull { localHour(it.measuredAt) >= 12 },
+                    todayMorning = todayMorningSession,
+                    todayEvening = todayEveningSession,
+                    todayOtherSessions = todayOther,
                     week = naturalWeekDates(today).map { date ->
                         val sessions = weekByDate[date].orEmpty()
                         DashboardWeekDay(
@@ -189,7 +216,8 @@ class DashboardViewModel(
                     todayCount = todayStatistics.recordCount,
                     todayAverageSystolic = todayStatistics.averageSystolic?.roundToInt(),
                     todayAverageDiastolic = todayStatistics.averageDiastolic?.roundToInt(),
-                    streakDays = streakDays(today, recordedDates),
+                    streakDays = streak,
+                    streakCapped = streak >= STREAK_WINDOW_DAYS.toInt(),
                     medicationSlots = medicationSlots,
                     loading = false
                 )
@@ -225,7 +253,7 @@ class DashboardViewModel(
     /** 勾选/取消勾选某个服药时间点的“已服”状态。 */
     fun toggleMedicationTaken(slot: MedicationSlot, taken: Boolean) {
         val medRepo = medicationRepository ?: return
-        val date = LocalDate.now(zoneId)
+        val date = LocalDate.now(zoneProvider())
         pendingMedicationCounts.update { counts ->
             counts + (slot.timeId to ((counts[slot.timeId] ?: 0) + 1))
         }
@@ -258,9 +286,6 @@ class DashboardViewModel(
         }
         return streak
     }
-
-    private fun localHour(measuredAt: Long): Int =
-        Instant.ofEpochMilli(measuredAt).atZone(zoneId).hour
 
     companion object {
         private const val STREAK_WINDOW_DAYS = 365L

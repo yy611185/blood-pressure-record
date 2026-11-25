@@ -8,6 +8,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.R
 
+/** 等宽数字排版特性，防止读数跳动引发同行单位文字左右抖动。 */
+const val TabularFeatureSettings = "tnum"
+
+fun TextStyle.tabularNums(): TextStyle = copy(fontFeatureSettings = TabularFeatureSettings)
+
 /**
  * 原稿数字字体 Bricolage Grotesque（Google Fonts, OFL），离线打包；
  * 中文字符自动回退系统字体。用于血压大数字与统计数值。
@@ -26,7 +31,7 @@ val AppTypography = Typography(
         fontSize = 54.sp,
         lineHeight = 54.sp,
         letterSpacing = (-1).sp,
-        fontFeatureSettings = "tnum"
+        fontFeatureSettings = TabularFeatureSettings
     ),
     // 页面大标题（测量首页问候）30sp
     headlineLarge = TextStyle(
@@ -35,7 +40,7 @@ val AppTypography = Typography(
         fontSize = 30.sp,
         lineHeight = 38.sp
     ),
-    // 历史/趋势/设置页标题 24sp
+    // 历史/趋势/设置页标题 30sp
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,

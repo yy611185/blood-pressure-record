@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.ui.home
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -19,8 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -28,8 +31,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.R
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 
 /** 表单只展示草稿，解析、校验、保存与错误状态均由 ViewModel 处理。 */
@@ -39,8 +44,10 @@ internal fun BpZoneTargetSheet(
     state: BpZoneTargetEditorUiState,
     onChange: (BpZoneAxis, BpZoneField, String) -> Unit,
     onSave: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onResetDefault: (() -> Unit)? = null
 ) {
+    val reducedMotion = LocalReducedMotion.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { !state.saving })
@@ -48,11 +55,30 @@ internal fun BpZoneTargetSheet(
         BoxWithConstraints {
             val compactFields = maxWidth < 360.dp || LocalDensity.current.fontScale >= 1.3f
             Column(
-                Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+                Modifier.fillMaxWidth().testTag("bp-zone-target-sheet").imePadding().verticalScroll(rememberScrollState())
                     .padding(horizontal = AppSpacing.xLarge).padding(bottom = AppSpacing.xLarge),
                 verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)
             ) {
-                Text(stringResource(R.string.bp_zone_config_title), style = MaterialTheme.typography.titleLarge)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        stringResource(R.string.bp_zone_config_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (onResetDefault != null) {
+                        TextButton(
+                            onClick = onResetDefault,
+                            enabled = !state.saving,
+                            modifier = Modifier.heightIn(min = AppDimensions.minimumTouchTarget)
+                        ) {
+                            Text(stringResource(R.string.bp_zone_config_reset))
+                        }
+                    }
+                }
                 Text(stringResource(R.string.bp_zone_config_placeholder_note), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(stringResource(R.string.bp_zone_config_help), style = MaterialTheme.typography.bodySmall,
@@ -83,8 +109,18 @@ internal fun BpZoneTargetSheet(
                         }
                     }
                 }
-                state.errorRes?.let { error ->
-                    Text(stringResource(error), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                AnimatedVisibility(
+                    visible = state.errorRes != null,
+                    enter = AppMotion.expandVisibilityEnter(reducedMotion),
+                    exit = AppMotion.expandVisibilityExit(reducedMotion)
+                ) {
+                    state.errorRes?.let { error ->
+                        Text(
+                            stringResource(error),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
                 AppPrimaryButton(
                     text = stringResource(if (state.saving) R.string.bp_zone_config_saving else R.string.bp_zone_config_save),

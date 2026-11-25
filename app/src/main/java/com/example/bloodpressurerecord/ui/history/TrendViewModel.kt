@@ -28,12 +28,15 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -71,7 +74,8 @@ data class TrendUiState(
     val targetSystolic: Int? = null,
     val targetDiastolic: Int? = null,
     val dayDetails: TrendDayDetails? = null,
-    val insights: TrendInsights = TrendInsights()
+    val insights: TrendInsights = TrendInsights(),
+    val zoneId: ZoneId = ZoneId.systemDefault()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -84,8 +88,13 @@ class TrendViewModel(
     todayTicks: Flow<LocalDate> = flow {
         emit(Instant.ofEpochMilli(clockMillis()).atZone(zoneId).toLocalDate())
     },
-    private val savedStateHandle: SavedStateHandle = SavedStateHandle()
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val zoneProvider: () -> ZoneId = { zoneId },
+    timeChangeSignal: Flow<Unit> = emptyFlow()
 ) : ViewModel() {
+    private val activeZoneFlow = timeChangeSignal
+        .onStart { emit(Unit) }
+        .map { zoneProvider() }
     private val selectedRange = MutableStateFlow(
         restoredEnum("trend.range", TrendRange.DAYS_30)
     )
@@ -98,13 +107,14 @@ class TrendViewModel(
     ).also {
         savedStateHandle["trend.aggregation"] = it.value.name
     }
+    val fullscreen: StateFlow<Boolean> = savedStateHandle.getStateFlow("trend.fullscreen", false)
+
     private val displayOptions = MutableStateFlow(DisplayOptions(
         metric = restoredEnum("trend.metric", TrendMetricType.BOTH),
         selectedPointId = savedStateHandle["trend.selectedPointId"],
         showPulse = savedStateHandle["trend.showPulse"] ?: true,
         fullscreenShowPulse = savedStateHandle["trend.fullscreenShowPulse"] ?: false,
-        showTimeLabels = savedStateHandle["trend.showTimeLabels"] ?: false,
-        fullscreen = savedStateHandle["trend.fullscreen"] ?: false
+        showTimeLabels = savedStateHandle["trend.showTimeLabels"] ?: false
     ))
     private val details = MutableStateFlow<TrendDayDetails?>(null)
     private var detailsJob: Job? = null
@@ -130,20 +140,24 @@ class TrendViewModel(
         }
     )
 
-    // 查询边界随“今天”滚动：上界取当天结束（半开区间），
-    // 打开页面后新增的记录能实时进入折线，跨零点后各固定天数窗口自动前移。
+    // 查询边界随“今天”和系统时区滚动：上界取当天结束（半开区间），
+    // 打开页面后新增的记录能实时进入折线，跨零点或切换时区后各固定天数窗口自动前移。
     private val seriesState = combine(
         selectedRange,
         selectedAggregation,
         todayTicks,
+        activeZoneFlow,
         preferenceReady
-    ) { range, aggregation, today, ready -> Triple(range, aggregation, today).takeIf { ready } }
+    ) { range, aggregation, _, activeZone, ready ->
+        val today = Instant.ofEpochMilli(clockMillis()).atZone(activeZone).toLocalDate()
+        if (ready) SeriesQuery(range, aggregation, today, activeZone) else null
+    }
         .filterNotNull()
-        .flatMapLatest { (range, aggregation, today) ->
-        val anchorMillis = today.atStartOfDay(zoneId).toInstant().toEpochMilli()
-        val start = TrendSeriesCalculator.rangeStart(range, anchorMillis, zoneId)
-        val endExclusive = today.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
-        val previousStart = previousRangeStart(range, start)
+        .flatMapLatest { (range, aggregation, today, activeZone) ->
+        val anchorMillis = today.atStartOfDay(activeZone).toInstant().toEpochMilli()
+        val start = TrendSeriesCalculator.rangeStart(range, anchorMillis, activeZone)
+        val endExclusive = today.plusDays(1).atStartOfDay(activeZone).toInstant().toEpochMilli()
+        val previousStart = previousRangeStart(range, start, activeZone)
         combine(
             trendRepository.observeRecords(start, endExclusive),
             if (previousStart == null) {
@@ -162,20 +176,21 @@ class TrendViewModel(
                     records = currentRecords,
                     range = range,
                     nowMillis = now,
-                    zoneId = zoneId,
+                    zoneId = activeZone,
                     aggregation = aggregation,
                     targetSystolic = targetSystolic,
                     targetDiastolic = targetDiastolic
-                ),
+                ).copy(zoneId = activeZone),
                 insights = TrendInsightCalculator.calculate(
                     records = currentRecords,
                     previousRecords = previousRecords,
                     targetSystolic = targetSystolic,
                     targetDiastolic = targetDiastolic,
-                    zoneId = zoneId
+                    zoneId = activeZone
                 ),
                 targetSystolic = targetSystolic,
-                targetDiastolic = targetDiastolic
+                targetDiastolic = targetDiastolic,
+                zoneId = activeZone
             )
         }.flowOn(computeContext)
     }.onEach { seriesState ->
@@ -185,10 +200,10 @@ class TrendViewModel(
     val uiState: StateFlow<TrendUiState> = combine(
         selectedRange,
         selectedAggregation,
-        displayOptions,
+        combine(displayOptions, fullscreen, ::Pair),
         seriesState,
         details
-    ) { range, aggregation, options, seriesState, dayDetails ->
+    ) { range, aggregation, (options, isFullscreen), seriesState, dayDetails ->
         TrendUiState(
             range = range,
             metric = options.metric,
@@ -197,12 +212,13 @@ class TrendViewModel(
             showPulse = options.showPulse,
             fullscreenShowPulse = options.fullscreenShowPulse,
             showTimeLabels = options.showTimeLabels,
-            fullscreen = options.fullscreen,
+            fullscreen = isFullscreen,
             series = seriesState.series,
             targetSystolic = seriesState.targetSystolic,
             targetDiastolic = seriesState.targetDiastolic,
             dayDetails = dayDetails,
-            insights = seriesState.insights
+            insights = seriesState.insights,
+            zoneId = seriesState.zoneId
         )
     }.filter { state ->
         // 范围或粒度刚切换时等待对应计算结果，避免新控件与旧图表短暂混用。
@@ -222,7 +238,8 @@ class TrendViewModel(
             showPulse = displayOptions.value.showPulse,
             fullscreenShowPulse = displayOptions.value.fullscreenShowPulse,
             showTimeLabels = displayOptions.value.showTimeLabels,
-            fullscreen = displayOptions.value.fullscreen
+            fullscreen = fullscreen.value,
+            zoneId = zoneProvider()
         )
     )
 
@@ -249,9 +266,9 @@ class TrendViewModel(
         clearSelectionMapping()
         writeSelection(null)
         dismissDayDetails()
+        chartController.clearSavedViewport()
         savedStateHandle.remove<Long>("trend.viewportStart")
         savedStateHandle.remove<Long>("trend.viewportEnd")
-        chartController.clearSavedViewport()
         savedStateHandle["trend.range"] = range.name
         selectedRange.value = range
         if (!hasAggregationPreference) applyAggregation(defaultAggregation(range))
@@ -316,7 +333,6 @@ class TrendViewModel(
 
     fun setFullscreen(fullscreen: Boolean) {
         savedStateHandle["trend.fullscreen"] = fullscreen
-        displayOptions.update { it.copy(fullscreen = fullscreen) }
     }
 
     fun selectPrevious() = selectAdjacent(-1)
@@ -353,14 +369,15 @@ class TrendViewModel(
         writeSelection(point, timestamp)
         detailsJob?.cancel()
         val request = ++detailsRequest
-        val date = Instant.ofEpochMilli(point.timestamp).atZone(zoneId).toLocalDate()
+        val currentZone = zoneProvider()
+        val date = Instant.ofEpochMilli(point.timestamp).atZone(currentZone).toLocalDate()
         details.value = TrendDayDetails(
             point = point,
             selectedRecordId = point.id.takeIf { point.aggregation == TrendAggregation.RAW },
             title = "$date ${if (point.aggregation == TrendAggregation.RAW) "当天记录" else "每日平均记录"}"
         )
         detailsJob = viewModelScope.launch {
-            val (startInclusive, endExclusive) = dayRangeOf(point)
+            val (startInclusive, endExclusive) = dayRangeOf(point, currentZone)
             try {
                 val now = clockMillis()
                 val sourceIds = point.sourceRecordIds.toSet()
@@ -387,12 +404,12 @@ class TrendViewModel(
     }
 
     /** 节点所属自然日的半开区间。 */
-    private fun dayRangeOf(point: TrendPoint): Pair<Long, Long> {
+    private fun dayRangeOf(point: TrendPoint, activeZone: ZoneId = zoneProvider()): Pair<Long, Long> {
         if (point.aggregation != TrendAggregation.RAW) {
             return point.intervalStart to point.intervalEndExclusive
         }
-        val date = Instant.ofEpochMilli(point.timestamp).atZone(zoneId).toLocalDate()
-        val range = date.toEpochMillisRange(zoneId)
+        val date = Instant.ofEpochMilli(point.timestamp).atZone(activeZone).toLocalDate()
+        val range = date.toEpochMillisRange(activeZone)
         return range.startInclusive to range.endExclusive
     }
 
@@ -477,18 +494,29 @@ class TrendViewModel(
         val selectedPointId: String?,
         val showPulse: Boolean,
         val fullscreenShowPulse: Boolean,
-        val showTimeLabels: Boolean,
-        val fullscreen: Boolean
+        val showTimeLabels: Boolean
+    )
+
+    private data class SeriesQuery(
+        val range: TrendRange,
+        val aggregation: TrendAggregation,
+        val today: LocalDate,
+        val zone: ZoneId
     )
 
     private data class TrendSeriesState(
         val series: TrendSeries,
         val insights: TrendInsights,
         val targetSystolic: Int?,
-        val targetDiastolic: Int?
+        val targetDiastolic: Int?,
+        val zoneId: ZoneId
     )
 
-    private fun previousRangeStart(range: TrendRange, currentStart: Long): Long? {
+    private fun previousRangeStart(
+        range: TrendRange,
+        currentStart: Long,
+        activeZone: ZoneId = zoneProvider()
+    ): Long? {
         val days = when (range) {
             TrendRange.DAYS_7 -> 7L
             TrendRange.DAYS_30 -> 30L
@@ -496,8 +524,8 @@ class TrendViewModel(
             TrendRange.DAYS_365 -> 365L
             TrendRange.ALL -> return null
         }
-        return Instant.ofEpochMilli(currentStart).atZone(zoneId)
-            .toLocalDate().minusDays(days).atStartOfDay(zoneId)
+        return Instant.ofEpochMilli(currentStart).atZone(activeZone)
+            .toLocalDate().minusDays(days).atStartOfDay(activeZone)
             .toInstant().toEpochMilli()
     }
 }

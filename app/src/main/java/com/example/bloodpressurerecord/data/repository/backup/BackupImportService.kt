@@ -131,6 +131,8 @@ class BackupImportPreview internal constructor(
         get() = userProfile["medication_reminder_enabled"]?.toBooleanStrictOrNull() != null
     val errorCount: Int
         get() = errors.size
+    val importedSessionIds: Set<String>
+        get() = preparedRecords.mapTo(linkedSetOf()) { it.session.id }
 }
 
 internal data class PreparedImportRecord(
@@ -223,7 +225,8 @@ class BackupImportService(
 
     suspend fun commitImport(
         preview: BackupImportPreview,
-        options: BackupImportOptions
+        options: BackupImportOptions,
+        onDatabaseCommitted: () -> Unit = {}
     ): BackupImportResult = withContext(Dispatchers.IO) {
         require(options.hasSelection) { "请至少选择一项导入内容" }
         val errors = if (options.importMeasurements) preview.errors.toMutableList() else mutableListOf()
@@ -254,6 +257,7 @@ class BackupImportService(
             }
             if (options.restoreMedications) importMedications(preview)
         }
+        onDatabaseCommitted()
 
         if (options.restoreDisplaySettings || options.restoreReminderSettings) {
             runCatching {

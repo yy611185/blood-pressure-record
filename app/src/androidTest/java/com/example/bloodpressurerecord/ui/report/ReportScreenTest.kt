@@ -1,32 +1,40 @@
 package com.example.bloodpressurerecord.ui.report
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
-import androidx.compose.ui.test.hasScrollAction
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isEnabled
-import androidx.compose.ui.test.isToggleable
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.Density
 import androidx.lifecycle.ViewModelStore
 import androidx.test.platform.app.InstrumentationRegistry
+import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.data.repository.ReportRepository
 import com.example.bloodpressurerecord.data.repository.SettingsBundle
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
@@ -50,6 +58,7 @@ import java.lang.reflect.Proxy
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.flowOf
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -70,6 +79,7 @@ class ReportScreenTest {
     private val cache by lazy { ReportCache(root) }
     private val repository = FixtureRepository()
     private lateinit var viewModel: ReportViewModel
+    private var backDispatcher: OnBackPressedDispatcher? = null
 
     @After fun clearFixture() {
         instrumentation.runOnMainSync { store.clear() }
@@ -85,9 +95,21 @@ class ReportScreenTest {
         composeRule.onNodeWithText("近 90 天").performClick()
         scrollTo("自定义")
         composeRule.onNodeWithText("自定义").performClick()
-        composeRule.onNodeWithText("开始日期").performTextReplacement("2025-10-11")
-        composeRule.onNodeWithText("结束日期").performTextReplacement("2026-10-11")
-        composeRule.onNodeWithText("确定").performClick()
+
+        // 近 90 天为 2026-07-14 至 2026-10-11；用日期选择器的文本模式输入 2025-07-14。
+        composeRule.onNodeWithText("2026年7月14日").performClick()
+        val inDatePicker = hasAnyAncestor(hasTestTag("reportDatePicker"))
+        val inputModeLabel = context.getString(
+            context.resources.getIdentifier("m3c_date_picker_switch_to_input_mode", "string", context.packageName)
+        )
+        composeRule.onNode(inDatePicker and hasContentDescription(inputModeLabel)).performClick()
+        val dateParts = mapOf('y' to "2025", 'M' to "07", 'd' to "14")
+        val dateDigits = android.text.format.DateFormat.getDateFormatOrder(context).joinToString("") { dateParts.getValue(it) }
+        composeRule.onNode(inDatePicker and hasSetTextAction()).performTextReplacement(dateDigits)
+        composeRule.onNodeWithTag("reportDatePickerConfirm").assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.onNodeWithText("2025年7月14日").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("reportCustomPeriodConfirm").performClick()
         composeRule.onNodeWithText("自定义统计周期").assertIsDisplayed()
         composeRule.onNode(
             hasText("请选择不晚于今天的有效日期范围，最多 365 天。") and hasAnyAncestor(isDialog())
@@ -102,7 +124,8 @@ class ReportScreenTest {
     }
 
     @Test fun entryPeriodAndOutputActionsRemainReachableWithMaximumTextAndIdentityResets() {
-        render(fontScale = 2f, fromDataManagement = true)
+        var enteredState: androidx.compose.runtime.MutableState<Boolean>? = null
+        render(fontScale = 2f, fromDataManagement = true, onEnteredStateCreated = { enteredState = it })
         scrollTo("导出医生报告 PDF")
         composeRule.onNodeWithText("导出医生报告 PDF").assertIsDisplayed().performClick()
         scrollTo("近 7 天")
@@ -110,18 +133,26 @@ class ReportScreenTest {
         beginPreview(includeIdentity = true)
         composeRule.runOnIdle { assertEquals("测试姓名", viewModel.uiState.value.artifact?.plan?.report?.profile?.name) }
 
-        listOf("分享 PDF", "保存到文件", "打印报告", "保存摘要图片").forEach { label ->
-            scrollTo(label)
+        OutputLabels.forEach { label ->
             composeRule.onNodeWithText(label).assertIsDisplayed()
         }
         scrollTo("重新选择周期")
         composeRule.onNodeWithText("重新选择周期").performClick()
-        scrollTo("生成预览")
-        composeRule.onNodeWithText("生成预览").performClick()
-        composeRule.onNodeWithText("是否包含姓名和年龄？").assertIsDisplayed()
-        composeRule.onNode(isToggleable()).assertIsOff()
+        scrollTo("包含姓名与年龄")
+        composeRule.onNodeWithContentDescription("包含姓名与年龄").assertIsOff()
         composeRule.runOnIdle { assertFalse(viewModel.uiState.value.options.includeIdentity) }
-        composeRule.onNodeWithText("取消").performClick()
+
+        // 勾选身份信息后退出页面再重新进入，必须再次默认关闭且不记忆
+        composeRule.onNodeWithContentDescription("包含姓名与年龄").performClick()
+        composeRule.onNodeWithContentDescription("包含姓名与年龄").assertIsOn()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.back)).performClick()
+        composeRule.onNodeWithText("导出医生报告 PDF").performScrollTo().performClick()
+        scrollTo("包含姓名与年龄")
+        composeRule.onNodeWithContentDescription("包含姓名与年龄").assertIsOff()
+        composeRule.runOnIdle {
+            assertFalse(viewModel.uiState.value.options.includeIdentity)
+            assertNotNull(enteredState)
+        }
     }
 
     @Test fun privacySwitchesRegenerateNativePdfWithoutNotesAndMedications() {
@@ -159,8 +190,7 @@ class ReportScreenTest {
             composeRule.onAllNodes(hasText("此页预览失败，请重新生成。"))
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        listOf("分享 PDF", "保存到文件", "打印报告", "保存摘要图片").forEach { label ->
-            scrollTo(label)
+        OutputLabels.forEach { label ->
             composeRule.onNodeWithText(label).assertIsNotEnabled()
         }
         composeRule.runOnIdle { assertNotNull(viewModel.uiState.value.artifact) }
@@ -185,15 +215,14 @@ class ReportScreenTest {
         composeRule.waitUntil(15_000) {
             composeRule.onAllNodes(hasContentDescription("报告第 1 页")).fetchSemanticsNodes().isNotEmpty()
         }
-        scrollTo("分享 PDF")
         composeRule.waitUntil(15_000) {
-            composeRule.onAllNodes(hasText("分享 PDF") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodes(hasText(PrimaryShareLabel) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("分享 PDF").assertIsDisplayed().assertIsEnabled()
+        composeRule.onNodeWithText(PrimaryShareLabel).assertIsDisplayed().assertIsEnabled()
 
         restoration.emulateSavedInstanceStateRestore()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("分享 PDF").assertIsDisplayed().assertIsEnabled()
+        composeRule.onNodeWithText(PrimaryShareLabel).assertIsDisplayed().assertIsEnabled()
         composeRule.runOnIdle { assertTrue(original === viewModel.uiState.value.artifact) }
 
         // 新选项产生新匿名文件路径；读过旧摘要不能让新的无效 PDF 获得输出权限。
@@ -208,10 +237,42 @@ class ReportScreenTest {
         composeRule.waitUntil(15_000) {
             composeRule.onAllNodes(hasText("此页预览失败，请重新生成。")).fetchSemanticsNodes().isNotEmpty()
         }
-        listOf("分享 PDF", "保存到文件", "打印报告", "保存摘要图片").forEach { label ->
-            scrollTo(label)
+        OutputLabels.forEach { label ->
             composeRule.onNodeWithText(label).assertIsNotEnabled()
         }
+    }
+
+    @Test fun systemBackDuringSavingDoesNotExitPreviewOrDeleteArtifact() {
+        var outerBackInvoked = false
+        render(onBackOverride = { outerBackInvoked = true })
+        beginPreview()
+        val artifact = requireNotNull(viewModel.uiState.value.artifact)
+        scrollTo("第 1 页")
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodes(hasText(PrimaryShareLabel) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
+        val saveGate = CompletableDeferred<Unit>()
+        composeRule.runOnIdle {
+            viewModel.save(artifact) {
+                saveGate.await()
+            }
+        }
+        composeRule.waitForIdle()
+        assertTrue(viewModel.uiState.value.isSaving)
+
+        composeRule.runOnIdle {
+            checkNotNull(backDispatcher).onBackPressed()
+        }
+        composeRule.waitForIdle()
+        assertFalse("System back must not fall through while saving", outerBackInvoked)
+        composeRule.onNodeWithText("医生报告预览").assertIsDisplayed()
+        composeRule.onNodeWithText("正在保存报告，请稍候…").assertIsDisplayed()
+        assertTrue(artifact.file.exists())
+
+        saveGate.complete(Unit)
+        composeRule.waitUntil(10_000) { !viewModel.uiState.value.isSaving }
+        composeRule.onNodeWithText("报告已保存。").assertIsDisplayed()
+        composeRule.onNodeWithText(PrimaryShareLabel).assertIsEnabled()
     }
 
     private fun render(
@@ -219,21 +280,31 @@ class ReportScreenTest {
         fromDataManagement: Boolean = false,
         invalidPdf: Boolean = false,
         restoration: StateRestorationTester? = null,
-        generatorOverride: ReportGenerator? = null
+        generatorOverride: ReportGenerator? = null,
+        onEnteredStateCreated: ((androidx.compose.runtime.MutableState<Boolean>) -> Unit)? = null,
+        onBackOverride: (() -> Unit)? = null
     ) {
         viewModel = ReportViewModel(repository,
             generatorOverride ?: if (invalidPdf) InvalidPdfGenerator() else DefaultReportGenerator(renderer, cache),
             { now }, zone)
         store.put("report-screen", viewModel)
         val entered = mutableStateOf(!fromDataManagement)
+        onEnteredStateCreated?.invoke(entered)
         val settings = if (fromDataManagement) SettingsViewModel(fixtureSettings()).also { store.put("settings-screen", it) } else null
         val content: @Composable () -> Unit = {
+            backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 BloodPressureRecordTheme {
                     Surface {
-                        if (entered.value) ReportScreen(viewModel) {}
-                        else SettingsDataManagementScreen(requireNotNull(settings), {}, { entered.value = true })
+                        if (entered.value) {
+                            ReportScreen(viewModel) {
+                                if (fromDataManagement) entered.value = false
+                                else onBackOverride?.invoke()
+                            }
+                        } else {
+                            SettingsDataManagementScreen(requireNotNull(settings), {}, { entered.value = true })
+                        }
                     }
                 }
             }
@@ -242,12 +313,15 @@ class ReportScreenTest {
     }
 
     private fun beginPreview(includeIdentity: Boolean = false) {
+        composeRule.waitUntil(5_000) { viewModel.uiState.value.hasProfileIdentity }
+        scrollTo("包含姓名与年龄")
+        composeRule.onNodeWithContentDescription("包含姓名与年龄").assertIsOff()
+        if (includeIdentity) {
+            composeRule.onNodeWithContentDescription("包含姓名与年龄").performClick()
+            composeRule.onNodeWithContentDescription("包含姓名与年龄").assertIsOn()
+        }
         scrollTo("生成预览")
         composeRule.onNodeWithText("生成预览").performClick()
-        composeRule.onNodeWithText("是否包含姓名和年龄？").assertIsDisplayed()
-        composeRule.onNode(isToggleable()).assertIsOff()
-        if (includeIdentity) composeRule.onNode(isToggleable()).performClick()
-        composeRule.onNode(hasText("生成预览") and hasAnyAncestor(isDialog())).performClick()
         waitForCurrentPreview()
     }
 
@@ -279,13 +353,18 @@ class ReportScreenTest {
 
     private class FixtureRepository : ReportRepository {
         val requests = mutableListOf<ReportOptions>()
+        override suspend fun hasProfileIdentity(): Boolean = true
         override suspend fun loadSnapshot(period: ReportPeriod, options: ReportOptions): ReportSnapshot {
             requests += options
             return ReportSnapshot(
                 measurements = listOf(ReportMeasurement("fixture", now, 128, 78, 68, note = "测试备注")),
-                profile = ReportUserProfile("测试姓名", 60),
-                medications = listOf(ReportMedication(1, "测试药品", "5 mg", true,
-                    listOf(ReportMedicationTime(1, "08:00", true))))
+                profile = if (options.includeIdentity) ReportUserProfile("测试姓名", 60) else null,
+                medications = if (options.includeMedications) {
+                    listOf(ReportMedication(1, "测试药品", "5 mg", true,
+                        listOf(ReportMedicationTime(1, "08:00", true))))
+                } else {
+                    emptyList()
+                }
             )
         }
     }
@@ -301,6 +380,8 @@ class ReportScreenTest {
     }
 
     private companion object {
+        const val PrimaryShareLabel = "分享 PDF（发给医生/家人）"
+        val OutputLabels = listOf(PrimaryShareLabel, "存文件", "打印", "存摘要图")
         val zone: ZoneId = ZoneId.of("Asia/Taipei")
         val now: Long = LocalDate.of(2026, 10, 11).atTime(20, 0).atZone(zone).toInstant().toEpochMilli()
     }

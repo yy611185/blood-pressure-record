@@ -1,13 +1,11 @@
 package com.example.bloodpressurerecord.ui.settings
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,65 +17,70 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.DarkMode
-import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.RoundIconBadge
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.home.BpZoneTargetSheet
+import com.example.bloodpressurerecord.ui.home.Buddy
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
-import com.example.bloodpressurerecord.ui.home.Buddy
-import com.example.bloodpressurerecord.ui.home.BpZoneTargetSheet
-
-private val restoreSystemEnter = fadeIn(AppMotion.floatFast) + expandVertically(AppMotion.sizeFast)
-private val restoreSystemExit = fadeOut(AppMotion.floatFast) + shrinkVertically(AppMotion.sizeFast)
+import com.example.bloodpressurerecord.ui.theme.tabularNums
 
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onOpenProfile: () -> Unit,
     onOpenReminder: () -> Unit,
-    onOpenDisplay: () -> Unit,
+    onOpenDisplay: () -> Unit = {},
     onOpenDataManagement: () -> Unit,
     onOpenInfo: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val targetEditorState by viewModel.zoneTargetEditorState.collectAsStateWithLifecycle()
+    val reducedMotion = LocalReducedMotion.current
     targetEditorState?.let { editor ->
         BpZoneTargetSheet(
             state = editor,
             onChange = viewModel::updateZoneTargetField,
             onSave = viewModel::saveZoneTargetEditor,
-            onDismiss = viewModel::dismissZoneTargetEditor
+            onDismiss = viewModel::dismissZoneTargetEditor,
+            onResetDefault = viewModel::resetZoneTargetToDefault
         )
     }
     val systemDark = isSystemInDarkTheme()
@@ -87,13 +90,16 @@ fun SettingsScreen(
         else -> systemDark
     }
     Column(
-        Modifier.fillMaxSize()
+        Modifier
+            .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .padding(top = statusBarTopPadding())
     ) {
         AppTopBar(title = "我的")
         Column(
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = AppDimensions.pageHorizontalPadding)
                 .padding(
                     top = 16.dp,
@@ -103,34 +109,57 @@ fun SettingsScreen(
         ) {
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(Modifier.fillMaxWidth().clickable(onClick = onOpenProfile).heightIn(min = 56.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Buddy(category = "正常", modifier = Modifier.size(54.dp))
+                    val profileInteraction = remember { MutableInteractionSource() }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .pressableScale(profileInteraction)
+                            .clickable(
+                                interactionSource = profileInteraction,
+                                indication = LocalIndication.current,
+                                onClick = onOpenProfile
+                            )
+                            .heightIn(min = 56.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Buddy(category = "正常", animateIdle = false, modifier = Modifier.size(54.dp))
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(state.name.ifBlank { "我的资料" }, style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold)
+                            Text(
+                                state.name.ifBlank { "我的资料" },
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
                             val details = listOfNotNull(
                                 state.ageText.takeIf { it.isNotBlank() }?.let { "$it 岁" },
                                 state.gender.takeIf { it.isNotBlank() }
                             ).joinToString(" · ")
-                            Text(details.ifBlank { "设置年龄、性别和目标值" },
+                            Text(
+                                details.ifBlank { "设置年龄、性别和达标值" },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        Icon(Icons.Default.ChevronRight, contentDescription = "编辑资料",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = "编辑资料",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TargetTile("目标高压", state.targetSystolicText.ifBlank { "—" }, Modifier.weight(1f))
-                        TargetTile("目标低压", state.targetDiastolicText.ifBlank { "—" }, Modifier.weight(1f))
+                        TargetTile("达标高压", state.targetSystolicText.ifBlank { "—" }, Modifier.weight(1f))
+                        TargetTile("达标低压", state.targetDiastolicText.ifBlank { "—" }, Modifier.weight(1f))
                     }
                 }
             }
             SettingsSectionTitle("血压")
             SettingsGroup {
-                SettingRow("血压目标范围", "自定义首页血压分段范围", Icons.Outlined.FavoriteBorder,
-                    viewModel::openZoneTargetEditor)
+                SettingRow(
+                    title = "首页四色条区间",
+                    subtitle = "调整首页色条四段刻度，不影响医学分级",
+                    icon = Icons.Outlined.FavoriteBorder,
+                    onClick = viewModel::openZoneTargetEditor
+                )
             }
             SettingsSectionTitle("提醒")
             SettingsGroup {
@@ -139,64 +168,111 @@ fun SettingsScreen(
             ExpandableSection(
                 title = "显示",
                 summary = listOf(
-                    if (state.isLargeTextEnabled) "大字模式已开启" else "标准字号",
+                    if (state.isLargeTextEnabled) "大字模式" else "标准字号",
                     when (state.appearanceMode) {
                         "dark" -> "深色模式"
                         "light" -> "浅色模式"
-                        else -> "外观跟随系统"
+                        else -> "跟随系统"
                     },
-                    if (state.showBuddy) "显示小压" else "隐藏小压"
+                    if (state.showTrendChart) "显示趋势" else "隐藏趋势",
+                    if (state.highRiskAlertEnabled) "高风险提醒" else "关闭高风险提醒"
                 ).joinToString(" · "),
                 initiallyExpanded = true,
                 stateKey = "settings-display"
             ) {
                 SettingsGroup {
-                    SettingSwitchRow("大字模式", "字号放大，按钮更好按", Icons.Outlined.Visibility,
-                        state.isLargeTextEnabled, viewModel::setLargeTextEnabled)
+                    SettingSwitchRow(
+                        "大字模式",
+                        "字号放大，按钮更好按",
+                        Icons.Outlined.Visibility,
+                        state.isLargeTextEnabled,
+                        viewModel::setLargeTextEnabled
+                    )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingSwitchRow("深色模式", if (state.appearanceMode == "system") "跟随系统" else "手动设置",
-                        Icons.Outlined.DarkMode, darkEnabled) {
+                    SettingSwitchRow(
+                        "深色模式",
+                        if (state.appearanceMode == "system") "跟随系统" else "手动设置",
+                        Icons.Outlined.DarkMode,
+                        darkEnabled
+                    ) {
                         viewModel.setAppearanceMode(if (it) "dark" else "light")
                     }
                     AnimatedVisibility(
                         visible = state.appearanceMode != "system",
-                        enter = restoreSystemEnter,
-                        exit = restoreSystemExit
+                        enter = AppMotion.expandVisibilityEnter(reducedMotion),
+                        exit = AppMotion.expandVisibilityExit(reducedMotion)
                     ) {
-                        TextButton(onClick = { viewModel.setAppearanceMode("system") },
-                            modifier = Modifier.fillMaxWidth()) { Text("恢复跟随系统") }
+                        TextButton(
+                            onClick = { viewModel.setAppearanceMode("system") },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("恢复跟随系统") }
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingSwitchRow("显示小压", "首页小伙伴会跟着血压变表情", Icons.Outlined.FavoriteBorder,
-                        state.showBuddy, viewModel::setShowBuddy)
+                    SettingSwitchRow(
+                        "显示小压",
+                        "首页小伙伴会跟着血压变表情",
+                        Icons.Outlined.FavoriteBorder,
+                        state.showBuddy,
+                        viewModel::setShowBuddy
+                    )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow("显示设置", "趋势图和高风险提醒", Icons.Outlined.Visibility, onOpenDisplay)
+                    SettingSwitchRow(
+                        "显示趋势图",
+                        "在底部导航与首页展示趋势图入口",
+                        Icons.AutoMirrored.Outlined.ShowChart,
+                        state.showTrendChart,
+                        viewModel::setShowTrendChart
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingSwitchRow(
+                        "启用高风险提醒",
+                        "任一组读数达到 ≥180 或 ≥120 时提醒",
+                        Icons.Outlined.WarningAmber,
+                        state.highRiskAlertEnabled,
+                        viewModel::setHighRiskAlertEnabled
+                    )
                 }
             }
             ExpandableSection(
                 title = "数据",
-                summary = "导出 · 加密备份 · 导入 · 更新说明",
+                summary = "医生报告 · 备份恢复 · 更新说明",
                 stateKey = "settings-data"
             ) {
                 SettingsGroup {
-                    SettingRow("导出、加密备份与导入", "数据保存在本机", Icons.Outlined.Folder,
-                        onOpenDataManagement)
+                    SettingRow(
+                        "数据管理与医生报告",
+                        "医生报告 PDF、备份恢复、清空数据",
+                        Icons.Outlined.Folder,
+                        onOpenDataManagement
+                    )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingRow("关于与更新说明", "应用功能和版本变化", Icons.Outlined.Info, onOpenInfo)
                 }
             }
-            Surface(shape = RoundedCornerShape(22.dp),
+            Surface(
+                shape = RoundedCornerShape(22.dp),
                 color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+            ) {
                 Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Outlined.Shield, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Icon(
+                        Icons.Outlined.Shield,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                     Column {
-                        Text("数据只在这台手机上。", fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Text("不注册、不上传。卸载或换机前请先导出备份。",
+                        Text(
+                            "数据只在这台手机上。",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            "不注册、不上传。卸载或换机前请先导出备份。",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
                     }
                 }
             }
@@ -206,61 +282,122 @@ fun SettingsScreen(
 
 @Composable
 private fun TargetTile(label: String, value: String, modifier: Modifier) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
         Column(Modifier.padding(12.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(if (value == "—") value else "< $value",
-                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                if (value == "—") value else "< $value",
+                style = MaterialTheme.typography.titleLarge.tabularNums(),
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
 
 @Composable
 private fun SettingsSectionTitle(title: String) {
-    Text(title, modifier = Modifier.padding(start = 2.dp, top = 12.dp),
-        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(
+        title,
+        modifier = Modifier.padding(start = 2.dp, top = 12.dp),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold
+    )
 }
 
 @Composable
 private fun SettingsGroup(content: @Composable () -> Unit) {
-    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()) { Column { content() } }
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) { Column { content() } }
 }
 
 @Composable
 private fun SettingRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick)
-        .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        RoundIconBadge(icon, MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer)
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressableScale(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick
+            )
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RoundIconBadge(
+            icon,
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer
+        )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        Icon(Icons.Default.ChevronRight, contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
 @Composable
 private fun SettingSwitchRow(
-    title: String, subtitle: String, icon: ImageVector, checked: Boolean, onChecked: (Boolean) -> Unit
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onChecked: (Boolean) -> Unit
 ) {
-    Row(Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Switch, onValueChange = onChecked)
-        .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        RoundIconBadge(icon, MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer)
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressableScale(interactionSource)
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                role = Role.Switch,
+                onValueChange = onChecked
+            )
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RoundIconBadge(
+            icon,
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer
+        )
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Switch(checked = checked, onCheckedChange = null)
     }
@@ -268,8 +405,15 @@ private fun SettingSwitchRow(
 
 @Composable
 fun SettingListItem(
-    title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit, warm: Boolean = true
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    warm: Boolean = true
 ) {
-    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()) { SettingRow(title, subtitle, icon, onClick) }
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) { SettingRow(title, subtitle, icon, onClick) }
 }

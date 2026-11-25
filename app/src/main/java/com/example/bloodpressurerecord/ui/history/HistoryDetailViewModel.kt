@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
+import com.example.bloodpressurerecord.data.repository.DeletionUndoManager
 import com.example.bloodpressurerecord.data.repository.SessionRecord
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,14 +24,18 @@ data class HistoryDetailUiState(
     val measuredAtText: String = "",
     val symptomsText: String = "无",
     val showDeleteConfirm: Boolean = false,
+    val isDeleting: Boolean = false,
     val deleted: Boolean = false,
     val deletedSnapshot: SessionRecord? = null,
-    val message: String = ""
+    val message: String = "",
+    val messageIsError: Boolean = false,
+    val loading: Boolean = true
 )
 
 class HistoryDetailViewModel(
     private val sessionId: String,
-    private val repository: BloodPressureRepository
+    private val repository: BloodPressureRepository,
+    private val deletionUndoManager: DeletionUndoManager
 ) : ViewModel() {
     private val localState = MutableStateFlow(HistoryDetailUiState())
 
@@ -42,68 +49,58 @@ class HistoryDetailViewModel(
                 session = snapshot,
                 measuredAtText = snapshot?.let(::formatMeasuredAt).orEmpty(),
                 symptomsText = snapshot?.symptoms?.takeIf { it.isNotEmpty() }
-                    ?.joinToString("、") ?: "无"
+                    ?.joinToString("、") ?: "无",
+                loading = false
             )
         } else {
             local.copy(
                 session = session,
                 measuredAtText = formatMeasuredAt(session),
-                symptomsText = if (session.symptoms.isEmpty()) "无" else session.symptoms.joinToString("、")
+                symptomsText = if (session.symptoms.isEmpty()) "无" else session.symptoms.joinToString("、"),
+                loading = false
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryDetailUiState())
 
     fun requestDelete() {
+        if (localState.value.isDeleting || localState.value.deleted) return
         localState.update { it.copy(showDeleteConfirm = true) }
     }
 
     fun dismissDelete() {
+        if (localState.value.isDeleting) return
         localState.update { it.copy(showDeleteConfirm = false) }
     }
 
     fun confirmDelete() {
-        val snapshot = uiState.value.session ?: return
-        viewModelScope.launch {
-            repository.deleteSession(sessionId)
-                .onSuccess {
+        val state = localState.value
+        if (!state.showDeleteConfirm || state.isDeleting || state.deleted) return
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            localState.update { it.copy(isDeleting = true) }
+            try {
+                deletionUndoManager.deleteSession { repository.deleteSessionWithSnapshot(sessionId) }.onSuccess { snapshot ->
                     localState.update {
                         it.copy(
                             showDeleteConfirm = false,
                             deleted = true,
                             deletedSnapshot = snapshot,
-                            message = "记录已删除。"
+                            message = "记录已删除。",
+                            messageIsError = false
                         )
                     }
-                }
-                .onFailure { throwable ->
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     localState.update {
                         it.copy(
                             showDeleteConfirm = false,
-                            message = "删除失败：${throwable.message ?: "请稍后重试"}"
+                            message = "删除失败：${throwable.message ?: "请稍后重试"}",
+                            messageIsError = true
                         )
                     }
                 }
-        }
-    }
-
-    fun undoDelete() {
-        val snapshot = localState.value.deletedSnapshot ?: return
-        viewModelScope.launch {
-            repository.restoreSession(snapshot)
-                .onSuccess {
-                    localState.update {
-                        it.copy(
-                            deleted = false,
-                            deletedSnapshot = null,
-                            message = "已恢复完整记录。"
-                        )
-                    }
-                }
-                .onFailure {
-                    localState.update {
-                        it.copy(message = "恢复失败，请返回历史页确认记录状态。")
-                    }
-                }
+            } finally {
+                localState.update { it.copy(isDeleting = false) }
+            }
         }
     }
 
@@ -116,11 +113,12 @@ class HistoryDetailViewModel(
     companion object {
         fun provideFactory(
             sessionId: String,
-            repository: BloodPressureRepository
+            repository: BloodPressureRepository,
+            deletionUndoManager: DeletionUndoManager
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return HistoryDetailViewModel(sessionId, repository) as T
+                return HistoryDetailViewModel(sessionId, repository, deletionUndoManager) as T
             }
         }
     }

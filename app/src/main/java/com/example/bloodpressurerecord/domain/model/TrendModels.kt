@@ -1,5 +1,7 @@
 package com.example.bloodpressurerecord.domain.model
 
+import java.time.ZoneId
+
 enum class TrendRange(val label: String, val title: String) {
     DAYS_7("7天", "最近7天"),
     DAYS_30("30天", "最近30天"),
@@ -83,5 +85,6 @@ data class TrendSeries(
     /** 范围内第一次测量的时间；没有记录时为 null。 */
     val firstMeasuredAt: Long? = null,
     /** 范围内最后一次测量的时间；没有记录时为 null。 */
-    val lastMeasuredAt: Long? = null
+    val lastMeasuredAt: Long? = null,
+    val zoneId: ZoneId = ZoneId.systemDefault()
 )

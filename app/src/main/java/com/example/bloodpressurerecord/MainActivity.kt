@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -8,22 +9,32 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.bloodpressurerecord.ui.LocalAppFontScale
 import com.example.bloodpressurerecord.navigation.BloodPressureAppRoot
+import com.example.bloodpressurerecord.ui.LocalAppFontScale
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 
 class MainActivity : ComponentActivity() {
+    private var pendingDestination by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDestination = if (savedInstanceState == null) {
+            intent?.getStringExtra(EXTRA_OPEN_DESTINATION)?.takeIf { it.isNotBlank() }
+        } else {
+            savedInstanceState.getString(STATE_PENDING_DESTINATION)?.takeIf { it.isNotBlank() }
+        }
+        intent?.removeExtra(EXTRA_OPEN_DESTINATION)
         requestHighestRefreshRate()
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(
@@ -32,6 +43,8 @@ class MainActivity : ComponentActivity() {
             val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
             val currentDensity = LocalDensity.current
             val appFontScale = if (settingsUiState.isLargeTextEnabled) 1.15f else 1f
+            // 与系统大字相乘时做合理上限钳制，避免 2.3x+ 导致极端裁切
+            val effectiveFontScale = (currentDensity.fontScale * appFontScale).coerceAtMost(MAX_EFFECTIVE_FONT_SCALE)
             val darkTheme = when (settingsUiState.appearanceMode) {
                 "dark" -> true
                 "light" -> false
@@ -44,21 +57,38 @@ class MainActivity : ComponentActivity() {
                     LocalAppFontScale provides appFontScale,
                     LocalDensity provides Density(
                         density = currentDensity.density,
-                        fontScale = currentDensity.fontScale * appFontScale
+                        fontScale = effectiveFontScale
                     )
                 ) {
-                    BloodPressureAppRoot(showTrendChart = settingsUiState.showTrendChart)
+                    BloodPressureAppRoot(
+                        showTrendChart = settingsUiState.showTrendChart,
+                        pendingDestination = pendingDestination,
+                        onConsumePendingDestination = { pendingDestination = null }
+                    )
                 }
             }
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingDestination?.takeIf { it.isNotBlank() }?.let { route ->
+            outState.putString(STATE_PENDING_DESTINATION, route)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val route = intent.getStringExtra(EXTRA_OPEN_DESTINATION)?.takeIf { it.isNotBlank() }
+        intent.removeExtra(EXTRA_OPEN_DESTINATION)
+        setIntent(intent)
+        if (route != null) {
+            pendingDestination = route
+        }
+    }
+
     /**
      * 让页面背景真正延伸到三键导航和全面屏手势区域。
-     *
-     * 不能使用 SystemBarStyle.auto：Android 10+ 会为透明三键导航强制叠加
-     * 黑/白对比底，正是截图中底部突兀色块的来源。这里按当前主题显式选择
-     * 图标明暗，并关闭系统对比层。
      */
     private fun enableImmersiveSystemBars(isDarkTheme: Boolean) {
         val transparent = Color.TRANSPARENT
@@ -79,8 +109,6 @@ class MainActivity : ComponentActivity() {
 
     /**
      * 申请当前分辨率下最高刷新率的显示模式。
-     * 部分厂商 ROM 默认把第三方应用锁在 60Hz，主动声明后动画才能吃满高刷。
-     * 系统仍可按温控/省电策略降频，这里只是表达偏好。
      */
     private fun requestHighestRefreshRate() {
         val display: Display? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -102,5 +130,11 @@ class MainActivity : ComponentActivity() {
                 preferredDisplayModeId = bestMode.modeId
             }
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_DESTINATION = "open_destination"
+        private const val STATE_PENDING_DESTINATION = "state_pending_destination"
+        private const val MAX_EFFECTIVE_FONT_SCALE = 2.0f
     }
 }

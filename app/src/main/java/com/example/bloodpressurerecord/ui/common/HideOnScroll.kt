@@ -11,17 +11,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.unit.Velocity
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 
 /**
  * 顶栏“往下浏览时收起、往回滚动时复现”的滚动状态。
- *
- * 用法：页面把 [nestedScrollConnection] 挂在滚动容器的父级
- * （Scaffold 或根 Column 的 `Modifier.nestedScroll(...)`），
- * 再把本状态传给 [AppTopBar]，顶栏即可跟手收起/展开；
- * 手指离开后自动吸附到全显或全隐，不会停在半截。
+ * 手指离开后承接剩余纵向惯性速度弹簧吸附，不再僵硬按半高死线重启。
  */
 @Stable
-class HideOnScrollState {
+class HideOnScrollState(
+    private val reducedMotionProvider: () -> Boolean = { false }
+) {
     /** 顶栏完整高度（px），由顶栏测量时写入。 */
     var barHeightPx by mutableFloatStateOf(0f)
 
@@ -33,12 +33,11 @@ class HideOnScrollState {
             if (barHeightPx > 0f) {
                 offsetPx = (offsetPx + available.y).coerceIn(-barHeightPx, 0f)
             }
-            // 不消费滚动量：内容与顶栏同步移动，视觉上是标准的 enterAlways 行为。
             return Offset.Zero
         }
 
         override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-            settle()
+            settle(initialVelocity = available.y)
             return Velocity.Zero
         }
     }
@@ -48,16 +47,34 @@ class HideOnScrollState {
         offsetPx = 0f
     }
 
-    private suspend fun settle() {
+    private suspend fun settle(initialVelocity: Float) {
         if (barHeightPx <= 0f) return
-        val target = if (offsetPx < -barHeightPx / 2f) -barHeightPx else 0f
+        val target = when {
+            initialVelocity < -400f -> -barHeightPx
+            initialVelocity > 400f -> 0f
+            offsetPx < -barHeightPx / 2f -> -barHeightPx
+            else -> 0f
+        }
         if (target != offsetPx) {
-            animate(initialValue = offsetPx, targetValue = target) { value, _ ->
-                offsetPx = value
+            val reduced = reducedMotionProvider()
+            if (reduced) {
+                offsetPx = target
+            } else {
+                animate(
+                    initialValue = offsetPx,
+                    targetValue = target,
+                    initialVelocity = initialVelocity.coerceIn(-2400f, 2400f),
+                    animationSpec = AppMotion.springSnappy(reducedMotion = false)
+                ) { value, _ ->
+                    offsetPx = value.coerceIn(-barHeightPx, 0f)
+                }
             }
         }
     }
 }
 
 @Composable
-fun rememberHideOnScrollState(): HideOnScrollState = remember { HideOnScrollState() }
+fun rememberHideOnScrollState(): HideOnScrollState {
+    val reducedMotion = LocalReducedMotion.current
+    return remember(reducedMotion) { HideOnScrollState(reducedMotionProvider = { reducedMotion }) }
+}

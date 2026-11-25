@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 深色模式的暖色底 -->
-    <color name="warm_background">#201E1D</color>
+    <!-- 深色模式的暖棕底色，与 Compose DarkColors.background 保持一致 -->
+    <color name="warm_background">#1A1512</color>
 </resources>

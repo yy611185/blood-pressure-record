@@ -110,6 +110,14 @@ class AppSettingsStore(
         }
     }
 
+    /** 原子写入晨间提醒的时间与启用状态，避免分两次 edit 留下中间状态。 */
+    suspend fun updateMorningReminder(enabled: Boolean? = null, time: String? = null) {
+        context.appDataStore.edit { prefs ->
+            enabled?.let { prefs[PreferenceKeys.MORNING_REMINDER_ENABLED] = it }
+            time?.let { prefs[PreferenceKeys.MORNING_REMINDER_TIME] = it }
+        }
+    }
+
     suspend fun setEveningReminderEnabled(enabled: Boolean) {
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] = enabled
@@ -119,6 +127,14 @@ class AppSettingsStore(
     suspend fun setEveningReminderTime(value: String) {
         context.appDataStore.edit { prefs ->
             prefs[PreferenceKeys.EVENING_REMINDER_TIME] = value
+        }
+    }
+
+    /** 原子写入晚间提醒的时间与启用状态，避免分两次 edit 留下中间状态。 */
+    suspend fun updateEveningReminder(enabled: Boolean? = null, time: String? = null) {
+        context.appDataStore.edit { prefs ->
+            enabled?.let { prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] = it }
+            time?.let { prefs[PreferenceKeys.EVENING_REMINDER_TIME] = it }
         }
     }
 

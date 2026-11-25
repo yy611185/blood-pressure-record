@@ -23,7 +23,7 @@ data class BpRangeColors(
 }
 
 val LightBpRangeColors = BpRangeColors(
-    low = Color(0xFFBFE3D0),
+    low = Color(0xFFC9CBF0),
     normal = Color(0xFF7FCAA6),
     elevated = Color(0xFFF2C48D),
     high = Color(0xFFE9967F),
@@ -31,7 +31,7 @@ val LightBpRangeColors = BpRangeColors(
 )
 
 val DarkBpRangeColors = BpRangeColors(
-    low = Color(0xFF577A68),
+    low = Color(0xFF6B6FA8),
     normal = Color(0xFF4E9B78),
     elevated = Color(0xFFBA8B50),
     high = Color(0xFFC87963),

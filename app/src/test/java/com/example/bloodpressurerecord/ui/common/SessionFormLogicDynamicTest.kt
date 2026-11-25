@@ -1,7 +1,9 @@
 package com.example.bloodpressurerecord.ui.common
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionFormLogicDynamicTest {
@@ -51,6 +53,40 @@ class SessionFormLogicDynamicTest {
         assertEquals(121, result.avgSystolic)
         assertEquals(78, result.avgDiastolic)
         assertEquals("正常高值", result.categoryLabel)
+    }
+
+    @Test
+    fun auto_advance_only_on_complete_valid_forward_input() {
+        val sysPrefix = SessionFormLogic.SYSTOLIC_AUTO_ADVANCE_PREFIX
+        val diaPrefix = SessionFormLogic.DIASTOLIC_AUTO_ADVANCE_PREFIX
+        // 收缩压：3位有效值自动跳格；2位仅 > 30（不可能续输3位 ≤300）才跳；退格删除或中间插入绝不跳格
+        assertTrue(SessionFormLogic.shouldAutoAdvanceField("12", "125", sysPrefix))
+        assertFalse(SessionFormLogic.shouldAutoAdvanceField("1", "12", sysPrefix))
+        assertTrue(SessionFormLogic.shouldAutoAdvanceField("8", "85", sysPrefix))
+        assertFalse(SessionFormLogic.shouldAutoAdvanceField("125", "12", sysPrefix))
+        assertFalse(SessionFormLogic.shouldAutoAdvanceField("125", "125", sysPrefix))
+        assertFalse(SessionFormLogic.shouldAutoAdvanceField("25", "125", sysPrefix))
+
+        // 舒张压：> 20 的2位或3位正向追加自动跳格；11（可能续输 110）或退格删除不跳格
+        assertTrue(SessionFormLogic.shouldAutoAdvanceField("8", "80", diaPrefix))
+        assertFalse(SessionFormLogic.shouldAutoAdvanceField("1", "11", diaPrefix))
+        assertTrue(SessionFormLogic.shouldAutoAdvanceField("11", "110", diaPrefix))
+        assertFalse(SessionFormLogic.shouldAutoAdvanceField("80", "8", diaPrefix))
+    }
+
+    @Test
+    fun quick_note_tag_toggle_adds_and_removes_cleanly() {
+        val added = SessionFormLogic.toggleQuickNoteTag("", "头晕")
+        assertEquals("头晕", added)
+        assertTrue(SessionFormLogic.containsQuickNoteTag(added, "头晕"))
+
+        val second = SessionFormLogic.toggleQuickNoteTag(added, "乏力")
+        assertEquals("头晕、乏力", second)
+        assertTrue(SessionFormLogic.containsQuickNoteTag(second, "乏力"))
+
+        val removed = SessionFormLogic.toggleQuickNoteTag(second, "头晕")
+        assertEquals("乏力", removed)
+        assertFalse(SessionFormLogic.containsQuickNoteTag(removed, "头晕"))
     }
 }
 

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +20,9 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -163,10 +168,13 @@ class BpRangeBarTest {
                     }
                 }
             }
-            composeRule.onNodeWithText("血压目标范围").performScrollTo().assertIsDisplayed().performClick()
-            composeRule.onNodeWithText(context.getString(R.string.bp_zone_config_title)).assertIsDisplayed()
+            composeRule.onNodeWithText("首页四色条区间").performScrollTo().assertIsDisplayed().performClick()
+            val sheetTitleMatcher = hasText(context.getString(R.string.bp_zone_config_title)) and
+                hasAnyAncestor(hasTestTag("bp-zone-target-sheet"))
+            composeRule.onNode(sheetTitleMatcher).assertIsDisplayed()
             composeRule.onNodeWithText(context.getString(R.string.bp_zone_config_cancel)).performScrollTo().performClick()
-            composeRule.onNodeWithText(context.getString(R.string.bp_zone_config_title)).assertDoesNotExist()
+            composeRule.onNodeWithTag("bp-zone-target-sheet").assertDoesNotExist()
+            composeRule.onNodeWithText("首页四色条区间").assertIsDisplayed()
             captureIfRequested("settings-entry", "settings-capture")
         } finally {
             composeRule.runOnIdle { store.clear() }
@@ -192,7 +200,13 @@ class BpRangeBarTest {
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale.value)) {
                 BloodPressureRecordTheme(darkTheme = dark.value) {
                     Surface {
-                        Column(Modifier.width(width.value).testTag("hero-capture").padding(20.dp)) {
+                        Column(
+                            Modifier
+                                .width(width.value)
+                                .verticalScroll(rememberScrollState())
+                                .testTag("hero-capture")
+                                .padding(20.dp)
+                        ) {
                             ReadingHero(state.value)
                         }
                     }
@@ -206,7 +220,7 @@ class BpRangeBarTest {
                 val pulse = composeRule.onNodeWithText("67 次/分", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                 assertTrue("Pulse must sit to the right of pressure", pulse.left >= pressure.right)
                 assertTrue("Pulse must share the reading row", pulse.top < pressure.bottom && pulse.bottom > pressure.top)
-                composeRule.onNodeWithText("正常高值").assertDoesNotExist()
+                composeRule.onNodeWithText("正常高值", useUnmergedTree = true).assertIsDisplayed()
                 composeRule.onNodeWithText(context.getString(R.string.bp_range_edit_hint)).assertDoesNotExist()
                 assertHeroTextFits()
                 captureIfRequested("hero-${screenWidth.value.toInt()}-${scale}-${if (darkTheme) "dark" else "light"}", "hero-capture")

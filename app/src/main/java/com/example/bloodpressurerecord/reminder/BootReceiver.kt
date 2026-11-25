@@ -4,11 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.bloodpressurerecord.BloodPressureApplication
-import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class BootReceiver : BroadcastReceiver() {
@@ -22,12 +20,9 @@ class BootReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val appContext = context.applicationContext
-                val settings = AppSettingsStore(appContext).settingsFlow.first()
-                ReminderScheduler(appContext).apply(settings)
-                (appContext as? BloodPressureApplication)
-                    ?.appContainer
-                    ?.medicationReminderCoordinator
-                    ?.resyncAlarms()
+                val container = (appContext as BloodPressureApplication).appContainer
+                container.settingsRepository.refreshMeasurementReminders()
+                container.medicationReminderCoordinator.resyncAlarms()
             } finally {
                 pendingResult.finish()
             }

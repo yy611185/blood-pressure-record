@@ -1,14 +1,14 @@
 package com.example.bloodpressurerecord.data.repository
 
-import com.example.bloodpressurerecord.data.datastore.AppSettings
+import android.net.Uri
 import com.example.bloodpressurerecord.data.calendar.MedicationCalendarTarget
+import com.example.bloodpressurerecord.data.datastore.AppSettings
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
-import android.net.Uri
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
-import com.example.bloodpressurerecord.domain.model.TrendAggregation
 
 data class UserProfile(
     val name: String? = null,
@@ -30,6 +30,10 @@ data class ClearAllDataResult(
     val widgetRefreshed: Boolean,
     val warnings: List<String> = emptyList()
 ) {
+    val hasIssues: Boolean
+        get() = !databaseCleared || !settingsCleared || !remindersRescheduled ||
+            !widgetRefreshed || warnings.isNotEmpty()
+
     fun toUserMessage(): String {
         if (!databaseCleared) return "清空失败：本地数据未完整删除，请重试。"
         if (warnings.isNotEmpty()) return "健康记录已删除，但部分清理未完成：${warnings.joinToString("、")}。"
@@ -60,9 +64,19 @@ interface SettingsRepository {
 
     suspend fun setMorningReminderTime(value: String)
 
+    suspend fun setMorningReminderSchedule(time: String, enabled: Boolean = true) {
+        setMorningReminderTime(time)
+        setMorningReminderEnabled(enabled)
+    }
+
     suspend fun setEveningReminderEnabled(enabled: Boolean)
 
     suspend fun setEveningReminderTime(value: String)
+
+    suspend fun setEveningReminderSchedule(time: String, enabled: Boolean = true) {
+        setEveningReminderTime(time)
+        setEveningReminderEnabled(enabled)
+    }
 
     suspend fun setMedicationReminderEnabled(enabled: Boolean)
 
@@ -70,6 +84,7 @@ interface SettingsRepository {
     suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean)
 
     suspend fun refreshReminders()
+    suspend fun refreshMeasurementReminders() = refreshReminders()
 
     suspend fun saveUserProfile(profile: UserProfile)
 

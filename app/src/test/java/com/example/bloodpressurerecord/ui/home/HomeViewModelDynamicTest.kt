@@ -38,11 +38,11 @@ class HomeViewModelDynamicTest {
         vm.updateReading2Diastolic("82")
 
         vm.addNextReadingGroup()
-        vm.updateExtraReadingSystolic(0, "128")
-        vm.updateExtraReadingDiastolic(0, "84")
+        vm.updateExtraReadingSystolic(vm.uiState.value.extraReadings[0].editorId, "128")
+        vm.updateExtraReadingDiastolic(vm.uiState.value.extraReadings[0].editorId, "84")
         vm.addNextReadingGroup()
-        vm.updateExtraReadingSystolic(1, "130")
-        vm.updateExtraReadingDiastolic(1, "85")
+        vm.updateExtraReadingSystolic(vm.uiState.value.extraReadings[1].editorId, "130")
+        vm.updateExtraReadingDiastolic(vm.uiState.value.extraReadings[1].editorId, "85")
 
         vm.onSaveClicked()
         advanceUntilIdle()
@@ -56,8 +56,8 @@ class HomeViewModelDynamicTest {
         val repo = FakeRepository()
         val vm = HomeViewModel(repo)
         vm.addNextReadingGroup()
-        vm.updateExtraReadingSystolic(0, "130")
-        vm.removeExtraReading(0)
+        vm.updateExtraReadingSystolic(vm.uiState.value.extraReadings[0].editorId, "130")
+        vm.removeExtraReading(vm.uiState.value.extraReadings[0].editorId)
         assertTrue(vm.uiState.value.extraReadings.isEmpty())
     }
 
@@ -230,7 +230,7 @@ class HomeViewModelDynamicTest {
         vm.addNextReadingGroup()
         assertEquals(1, vm.uiState.value.extraReadings.size)
 
-        vm.removeExtraReading(0)
+        vm.removeExtraReading(vm.uiState.value.extraReadings[0].editorId)
 
         assertEquals(0, vm.uiState.value.extraReadings.size)
         assertTrue(!vm.uiState.value.canSave)

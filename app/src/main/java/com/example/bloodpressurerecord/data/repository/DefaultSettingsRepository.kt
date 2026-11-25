@@ -3,39 +3,42 @@ package com.example.bloodpressurerecord.data.repository
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.app.NotificationManagerCompat
+import androidx.room.withTransaction
 import com.example.bloodpressurerecord.data.calendar.MedicationCalendarSync
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
-import com.example.bloodpressurerecord.domain.model.TrendAggregation
+import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.dao.BloodPressureMeasurementDao
 import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
 import com.example.bloodpressurerecord.data.db.dao.UserProfileDao
 import com.example.bloodpressurerecord.data.db.entity.UserProfileEntity
 import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
-import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportPayload
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportService
 import com.example.bloodpressurerecord.data.repository.backup.BackupFileReader
 import com.example.bloodpressurerecord.data.repository.backup.BackupFileWriter
-import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
-import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
-import com.example.bloodpressurerecord.data.db.AppDatabase
-import androidx.room.withTransaction
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.first
-import com.example.bloodpressurerecord.reminder.ReminderScheduler
-import java.io.ByteArrayOutputStream
-import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
+import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.export.report.ReportCache
 import com.example.bloodpressurerecord.export.report.ReportShare
+import com.example.bloodpressurerecord.reminder.MedicationReminders
+import com.example.bloodpressurerecord.reminder.ReminderScheduler
+import com.example.bloodpressurerecord.reminder.ReminderType
+import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
+import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 class DefaultSettingsRepository(
     private val context: Context,
@@ -47,12 +50,15 @@ class DefaultSettingsRepository(
     /** 服药提醒重排回调（闹钟 + 日历），由 AppContainer 注入避免直接依赖。 */
     private val medicationResync: (suspend () -> Unit)? = null,
     /** 导入、清空等批量变更后刷新桌面小部件。 */
-    private val onDataChanged: (() -> Unit)? = null,
+    private val onDataChanged: (suspend () -> Unit)? = null,
     /** 应用内提醒开关只影响闹钟，不依赖可选的日历授权。 */
     private val medicationAlarmResync: (suspend () -> Unit)? = null,
-    private val reportCache: ReportCache = ReportCache(File(context.cacheDir, "reports"))
+    private val reportCache: ReportCache = ReportCache(File(context.cacheDir, "reports")),
+    private val deletionUndoManager: DeletionUndoManager? = null,
+    private val cancelRemovedMedicationNotifications: (suspend (Collection<Long>) -> Unit)? = null
 ) : SettingsRepository {
     private val calendarSettingsMutex = Mutex()
+    private val reminderSettingsMutex = Mutex()
 
     override fun observeTrendAggregationPreference(): Flow<TrendAggregation?> =
         appSettingsStore.trendAggregationPreference
@@ -96,23 +102,71 @@ class DefaultSettingsRepository(
     }
 
     override suspend fun setMorningReminderEnabled(enabled: Boolean) {
-        appSettingsStore.setMorningReminderEnabled(enabled)
-        rescheduleReminders()
+        updateMorningScheduleInternal(enabled = enabled, time = null)
     }
 
     override suspend fun setMorningReminderTime(value: String) {
-        appSettingsStore.setMorningReminderTime(value)
-        rescheduleReminders()
+        updateMorningScheduleInternal(enabled = null, time = value)
+    }
+
+    override suspend fun setMorningReminderSchedule(time: String, enabled: Boolean) {
+        updateMorningScheduleInternal(enabled = enabled, time = time)
     }
 
     override suspend fun setEveningReminderEnabled(enabled: Boolean) {
-        appSettingsStore.setEveningReminderEnabled(enabled)
-        rescheduleReminders()
+        updateEveningScheduleInternal(enabled = enabled, time = null)
     }
 
     override suspend fun setEveningReminderTime(value: String) {
-        appSettingsStore.setEveningReminderTime(value)
-        rescheduleReminders()
+        updateEveningScheduleInternal(enabled = null, time = value)
+    }
+
+    override suspend fun setEveningReminderSchedule(time: String, enabled: Boolean) {
+        updateEveningScheduleInternal(enabled = enabled, time = time)
+    }
+
+    private suspend fun updateMorningScheduleInternal(enabled: Boolean?, time: String?) {
+        reminderSettingsMutex.withLock {
+            withContext(NonCancellable) {
+                val previous = appSettingsStore.settingsFlow.first()
+                appSettingsStore.updateMorningReminder(enabled = enabled, time = time)
+                try {
+                    rescheduleReminders()
+                } catch (throwable: Throwable) {
+                    appSettingsStore.updateMorningReminder(
+                        enabled = previous.morningReminderEnabled,
+                        time = previous.morningReminderTime
+                    )
+                    runCatching { rescheduleReminders() }
+                    throw throwable
+                }
+                if (enabled == false) {
+                    NotificationManagerCompat.from(context).cancel(ReminderType.MORNING.notificationId)
+                }
+            }
+        }
+    }
+
+    private suspend fun updateEveningScheduleInternal(enabled: Boolean?, time: String?) {
+        reminderSettingsMutex.withLock {
+            withContext(NonCancellable) {
+                val previous = appSettingsStore.settingsFlow.first()
+                appSettingsStore.updateEveningReminder(enabled = enabled, time = time)
+                try {
+                    rescheduleReminders()
+                } catch (throwable: Throwable) {
+                    appSettingsStore.updateEveningReminder(
+                        enabled = previous.eveningReminderEnabled,
+                        time = previous.eveningReminderTime
+                    )
+                    runCatching { rescheduleReminders() }
+                    throw throwable
+                }
+                if (enabled == false) {
+                    NotificationManagerCompat.from(context).cancel(ReminderType.EVENING.notificationId)
+                }
+            }
+        }
     }
 
     override suspend fun setMedicationReminderEnabled(enabled: Boolean) {
@@ -165,8 +219,25 @@ class DefaultSettingsRepository(
         )
     }
 
-    override suspend fun clearAllData(): Result<ClearAllDataResult> {
-        var databaseCleared = false
+    override suspend fun clearAllData(): Result<ClearAllDataResult> =
+        deletionUndoManager?.clearData(::clearDataLocked) ?: clearDataLocked {}
+
+    private suspend fun clearDataLocked(onDatabaseCommitted: () -> Unit): Result<ClearAllDataResult> =
+        reminderSettingsMutex.withLock {
+            withContext(NonCancellable + Dispatchers.IO) { clearData(onDatabaseCommitted) }
+        }
+
+    private suspend fun clearData(onDatabaseCommitted: () -> Unit): Result<ClearAllDataResult> {
+        val warnings = mutableListOf<String>()
+        val databaseTimeIds = runCatching { database.medicationDao().getAllTimeIds() }
+            .onFailure { warnings += "未能读取数据库中的服药提醒时段" }
+            .getOrDefault(emptyList())
+        val storedTimeIds = runCatching {
+            val alarmState = appSettingsStore.medicationAlarms.first()
+            alarmState.triggers.keys + alarmState.legacyIds
+        }.onFailure { warnings += "未能读取已登记的服药提醒" }.getOrDefault(emptySet())
+        val knownMedicationTimeIds = (databaseTimeIds + storedTimeIds).toSet()
+
         try {
             database.withTransaction {
                 measurementSessionDao.deleteAllReadings()
@@ -180,7 +251,6 @@ class DefaultSettingsRepository(
                 database.medicationDao().deleteAllTimes()
                 database.medicationDao().deleteAllMedications()
             }
-            databaseCleared = true
         } catch (throwable: Throwable) {
             return Result.success(
                 ClearAllDataResult(
@@ -192,8 +262,19 @@ class DefaultSettingsRepository(
                 )
             )
         }
+        onDatabaseCommitted()
 
-        val warnings = mutableListOf<String>()
+        runCatching {
+            if (knownMedicationTimeIds.isNotEmpty()) {
+                val cancel = cancelRemovedMedicationNotifications
+                if (cancel != null) cancel(knownMedicationTimeIds)
+                else MedicationReminders.cancelNotifications(context, knownMedicationTimeIds)
+            }
+            MedicationReminders.cancelMeasurementNotifications(context)
+        }.onFailure {
+            warnings += "已发出的提醒通知清理失败"
+        }
+
         var settingsCleared = false
         var remindersRescheduled = true
         var widgetRefreshed = true
@@ -204,14 +285,14 @@ class DefaultSettingsRepository(
             // 在清空 DataStore 前先用持久化的旧时间点 id 取消药物闹钟，
             // 否则清空设置会丢失取消旧 PendingIntent 所需的 id。
             medicationResync?.invoke()
-        } catch (throwable: Throwable) {
+        } catch (_: Throwable) {
             remindersRescheduled = false
             warnings += "服药提醒同步失败"
         }
         try {
             appSettingsStore.clearAll()
             settingsCleared = true
-        } catch (throwable: Throwable) {
+        } catch (_: Throwable) {
             warnings += "设置重置失败"
         }
         FileSessionDraftRepository(context).clearAll().onFailure {
@@ -225,24 +306,24 @@ class DefaultSettingsRepository(
                     )
                 }
             }
-        } catch (throwable: Throwable) {
+        } catch (_: Throwable) {
             warnings += "医生报告缓存清理失败"
         }
         try {
             rescheduleReminders()
-        } catch (throwable: Throwable) {
+        } catch (_: Throwable) {
             remindersRescheduled = false
             warnings += "血压提醒同步失败"
         }
         try {
             onDataChanged?.invoke()
-        } catch (throwable: Throwable) {
+        } catch (_: Throwable) {
             widgetRefreshed = false
             warnings += "桌面小部件刷新失败"
         }
         return Result.success(
             ClearAllDataResult(
-                databaseCleared = databaseCleared,
+                databaseCleared = true,
                 settingsCleared = settingsCleared,
                 remindersRescheduled = remindersRescheduled,
                 widgetRefreshed = widgetRefreshed,
@@ -349,8 +430,12 @@ class DefaultSettingsRepository(
         }
     }
 
+    override suspend fun refreshMeasurementReminders() {
+        reminderSettingsMutex.withLock { rescheduleReminders() }
+    }
+
     override suspend fun refreshReminders() {
-        rescheduleReminders()
+        refreshMeasurementReminders()
         medicationResync?.invoke()
     }
 
@@ -391,11 +476,29 @@ class DefaultSettingsRepository(
         preview: BackupImportPreview,
         options: BackupImportOptions
     ): Result<String> = runCatching {
-        withContext(Dispatchers.IO) {
+        val manager = deletionUndoManager
+        if (manager == null) {
+            commitBackupImportLocked(preview, options) {}
+        } else {
+            manager.importBackup(
+                importedSessionIds = if (options.importMeasurements) preview.importedSessionIds else emptySet(),
+                restoredMedications = options.restoreMedications
+            ) { onDatabaseCommitted ->
+                commitBackupImportLocked(preview, options, onDatabaseCommitted)
+            }
+        }
+    }
+
+    private suspend fun commitBackupImportLocked(
+        preview: BackupImportPreview,
+        options: BackupImportOptions,
+        onDatabaseCommitted: () -> Unit
+    ): String = reminderSettingsMutex.withLock {
+        withContext(NonCancellable + Dispatchers.IO) {
             val result = BackupImportService(
                 database = database,
                 appSettingsStore = appSettingsStore
-            ).commitImport(preview, options)
+            ).commitImport(preview, options, onDatabaseCommitted)
             val followUpWarnings = mutableListOf<String>()
             if (options.restoreReminderSettings) {
                 runCatching { rescheduleReminders() }

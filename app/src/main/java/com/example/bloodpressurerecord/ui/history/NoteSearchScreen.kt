@@ -1,8 +1,18 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -42,18 +52,25 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.R
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.SessionChoiceChip
 import com.example.bloodpressurerecord.ui.common.navigationBarHeight
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
+import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.first
 
+private val QuickSearchTerms = listOf("头晕", "头痛", "胸闷", "没睡好", "刚运动", "漏服药")
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun NoteSearchScreen(
     viewModel: NoteSearchViewModel,
@@ -61,6 +78,7 @@ internal fun NoteSearchScreen(
     onOpenSession: (String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val reducedMotion = LocalReducedMotion.current
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -98,60 +116,99 @@ internal fun NoteSearchScreen(
                     value = state.query,
                     onValueChange = viewModel::updateQuery,
                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                    label = { Text(stringResource(R.string.note_search_input)) },
+                    placeholder = { Text(stringResource(R.string.note_search_input)) },
                     singleLine = true,
                     shape = MaterialTheme.shapes.medium,
-                    trailingIcon = if (state.query.isNotEmpty()) {
-                        {
+                    trailingIcon = {
+                        AnimatedVisibility(
+                            visible = state.query.isNotEmpty(),
+                            enter = if (reducedMotion) EnterTransition.None else fadeIn(AppMotion.floatMicro) + scaleIn(AppMotion.floatMicro, initialScale = 0.8f),
+                            exit = if (reducedMotion) ExitTransition.None else fadeOut(AppMotion.floatMicro) + scaleOut(AppMotion.floatMicro, targetScale = 0.8f)
+                        ) {
                             IconButton(onClick = { viewModel.updateQuery("") }) {
                                 Icon(Icons.Default.Clear, stringResource(R.string.note_search_clear))
                             }
                         }
-                    } else {
-                        null
                     }
                 )
             }
         )
-        when (val content = state.content) {
-            NoteSearchContent.Idle -> SearchMessage(stringResource(R.string.note_search_title))
-            NoteSearchContent.Loading -> SearchMessage(stringResource(R.string.note_search_loading))
-            NoteSearchContent.Empty -> SearchMessage(stringResource(R.string.note_search_empty))
-            NoteSearchContent.Error -> {
-                DataCard(
-                    modifier = Modifier.padding(
-                        horizontal = AppDimensions.pageHorizontalPadding,
-                        vertical = AppSpacing.medium
-                    )
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+        AnimatedContent(
+            targetState = state.content,
+            contentKey = { it::class },
+            transitionSpec = { AppMotion.fadeThrough(reducedMotion) },
+            label = "note_search_content"
+        ) { content ->
+            when (content) {
+                NoteSearchContent.Idle -> {
+                    Column(
+                        modifier = Modifier.padding(
+                            horizontal = AppDimensions.pageHorizontalPadding,
+                            vertical = AppSpacing.large
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)
+                    ) {
                         Text(
-                            stringResource(R.string.note_search_error),
-                            color = MaterialTheme.colorScheme.error
+                            text = stringResource(R.string.note_search_idle_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        TextButton(onClick = viewModel::retry) {
-                            Text(stringResource(R.string.note_search_retry))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                            verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+                        ) {
+                            QuickSearchTerms.forEach { term ->
+                                SessionChoiceChip(
+                                    text = term,
+                                    selected = false,
+                                    onClick = {
+                                        viewModel.updateQuery(term)
+                                        focusManager.clearFocus()
+                                        keyboard?.hide()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
-            }
-            is NoteSearchContent.Results -> {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = AppDimensions.pageHorizontalPadding,
-                        top = AppSpacing.medium,
-                        end = AppDimensions.pageHorizontalPadding,
-                        bottom = AppDimensions.pageBottomGap
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
-                ) {
-                    items(content.items, key = { it.id }) { item ->
-                        NoteSearchResultCard(item) {
-                            focusManager.clearFocus()
-                            keyboard?.hide()
-                            onOpenSession(item.id)
+                NoteSearchContent.Loading -> SearchMessage(stringResource(R.string.note_search_loading))
+                NoteSearchContent.Empty -> SearchMessage(stringResource(R.string.note_search_empty))
+                NoteSearchContent.Error -> {
+                    DataCard(
+                        modifier = Modifier.padding(
+                            horizontal = AppDimensions.pageHorizontalPadding,
+                            vertical = AppSpacing.medium
+                        )
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                            Text(
+                                stringResource(R.string.note_search_error),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            TextButton(onClick = viewModel::retry) {
+                                Text(stringResource(R.string.note_search_retry))
+                            }
+                        }
+                    }
+                }
+                is NoteSearchContent.Results -> {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = AppDimensions.pageHorizontalPadding,
+                            top = AppSpacing.medium,
+                            end = AppDimensions.pageHorizontalPadding,
+                            bottom = AppDimensions.pageBottomGap
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.large)
+                    ) {
+                        items(content.items, key = { it.id }) { item ->
+                            NoteSearchResultCard(item) {
+                                focusManager.clearFocus()
+                                keyboard?.hide()
+                                onOpenSession(item.id)
+                            }
                         }
                     }
                 }
@@ -185,12 +242,12 @@ private fun NoteSearchResultCard(item: NoteSearchItem, onClick: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
             Text(
                 text = measuredAt,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = TabularFeatureSettings),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 text = stringResource(R.string.note_search_average, item.avgSystolic, item.avgDiastolic),
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = TabularFeatureSettings),
                 fontFamily = NumberFontFamily
             )
             item.snippet?.let { snippet ->

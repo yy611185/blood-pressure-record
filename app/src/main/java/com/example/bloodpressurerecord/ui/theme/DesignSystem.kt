@@ -85,8 +85,8 @@ data class BloodPressureStatusStyle(
 )
 
 /**
- * 血压状态色（暖阳设计固定值）：
- * 正常走鼠尾草绿，偏高/高风险走陶土橙，偏低走浅橙提示。
+ * 血压状态色：
+ * 正常走鼠尾草绿，偏高/高风险走陶土橙/红，偏低走柔和蓝紫色系提示。
  */
 fun BloodPressureVisualStatus.style(colors: ColorScheme): BloodPressureStatusStyle = when (this) {
     BloodPressureVisualStatus.NORMAL -> BloodPressureStatusStyle(
@@ -140,37 +140,93 @@ data class BloodPressureChipColors(
     val dot: Color
 )
 
+/**
+ * 六级血压统一语义视觉 Token（首页大卡、分级芯片、历史日历、趋势分布条单一事实来源）。
+ */
+data class BpGradeVisual(
+    val soft: Color,
+    val ink: Color,
+    val mid: Color,
+    val body: Color,
+    val mood: String
+)
+
+data class BpGradePalette(
+    val isDark: Boolean,
+    val low: BpGradeVisual,
+    val normal: BpGradeVisual,
+    val highNormal: BpGradeVisual,
+    val stage1: BpGradeVisual,
+    val stage2: BpGradeVisual,
+    val stage3: BpGradeVisual
+) {
+    fun forCategory(category: String): BpGradeVisual = when {
+        category.equals("LOW", ignoreCase = true) || category.contains("偏低") -> low
+        category.equals("HIGH_NORMAL", ignoreCase = true) ||
+            category.equals("ELEVATED", ignoreCase = true) ||
+            category.contains("正常高值") -> highNormal
+        category.equals("STAGE1", ignoreCase = true) ||
+            category.contains("1级") || category.contains("一级") -> stage1
+        category.equals("STAGE2", ignoreCase = true) ||
+            category.contains("2级") || category.contains("二级") -> stage2
+        category.equals("STAGE3", ignoreCase = true) ||
+            category.contains("3级") || category.contains("三级") -> stage3
+        else -> normal
+    }
+}
+
+private fun buildBpGradePalette(dark: Boolean): BpGradePalette {
+    fun visual(softHex: Long, inkHex: Long, midHex: Long, bodyHex: Long, mood: String): BpGradeVisual {
+        val ink = Color(inkHex)
+        val mid = Color(midHex)
+        return BpGradeVisual(
+            soft = if (dark) ink.copy(alpha = 0.24f) else Color(softHex),
+            ink = if (dark) mid else ink,
+            mid = mid,
+            body = Color(bodyHex),
+            mood = mood
+        )
+    }
+    return BpGradePalette(
+        isDark = dark,
+        low = visual(0xFFE9E9FA, 0xFF55509B, 0xFF8E8BC8, 0xFF9F9CD1, "sleepy"),
+        normal = visual(0xFFDFF4E9, 0xFF287958, 0xFF69C49D, 0xFF85CBA9, "happy"),
+        highNormal = visual(0xFFEEF3D7, 0xFF61742E, 0xFFA5BF65, 0xFFB8CE7B, "calm"),
+        stage1 = visual(0xFFF7F0CF, 0xFF806625, 0xFFD9B55E, 0xFFE5C470, "meh"),
+        stage2 = visual(0xFFFBE5D7, 0xFF9F5335, 0xFFEAA27E, 0xFFEEB08C, "worried"),
+        stage3 = visual(0xFFFADDD9, 0xFFA03F39, 0xFFE58178, 0xFFE88E84, "worried")
+    )
+}
+
+val LightBpGradePalette = buildBpGradePalette(dark = false)
+val DarkBpGradePalette = buildBpGradePalette(dark = true)
+
+val LocalBpGradePalette = androidx.compose.runtime.staticCompositionLocalOf { LightBpGradePalette }
+
 /** 与根目录原稿 GradeChip 一致的六级色；高风险由独立阈值优先覆盖。 */
 fun bloodPressureChipColors(
     text: String,
     status: BloodPressureVisualStatus?,
-    colors: ColorScheme
+    colors: ColorScheme,
+    palette: BpGradePalette? = null
 ): BloodPressureChipColors {
     if (status == BloodPressureVisualStatus.HIGH_RISK || text.contains("高风险")) {
         return BloodPressureChipColors(colors.errorContainer, colors.onErrorContainer, colors.error)
     }
-    val dark = colors.background.red < 0.5f
-    val palette = when {
-        text.contains("偏低") || status == BloodPressureVisualStatus.LOW ->
-            Triple(0xFFE9E9FA, 0xFF55509B, 0xFF8E8BC8)
-        text.contains("正常高值") || status == BloodPressureVisualStatus.ELEVATED ->
-            Triple(0xFFEEF3D7, 0xFF61742E, 0xFFA5BF65)
-        text.contains("3级") || text.contains("三级") ->
-            Triple(0xFFFADDD9, 0xFFA03F39, 0xFFE58178)
-        text.contains("2级") || text.contains("二级") ->
-            Triple(0xFFFBE5D7, 0xFF9F5335, 0xFFEAA27E)
-        text.contains("1级") || text.contains("一级") ->
-            Triple(0xFFF7F0CF, 0xFF806625, 0xFFD9B55E)
-        text.contains("正常") || status == BloodPressureVisualStatus.NORMAL ->
-            Triple(0xFFDFF4E9, 0xFF287958, 0xFF69C49D)
-        status == BloodPressureVisualStatus.HIGH ->
-            Triple(0xFFFBE5D7, 0xFF9F5335, 0xFFEAA27E)
-        else -> Triple(0xFFDFF4E9, 0xFF287958, 0xFF69C49D)
+    val resolvedPalette = palette ?: if (colors.background.red < 0.5f) DarkBpGradePalette else LightBpGradePalette
+    val visual = when {
+        text.contains("偏低") || status == BloodPressureVisualStatus.LOW -> resolvedPalette.low
+        text.contains("正常高值") || status == BloodPressureVisualStatus.ELEVATED -> resolvedPalette.highNormal
+        text.contains("3级") || text.contains("三级") -> resolvedPalette.stage3
+        text.contains("2级") || text.contains("二级") -> resolvedPalette.stage2
+        text.contains("1级") || text.contains("一级") -> resolvedPalette.stage1
+        text.contains("正常") || status == BloodPressureVisualStatus.NORMAL -> resolvedPalette.normal
+        status == BloodPressureVisualStatus.HIGH -> resolvedPalette.stage2
+        else -> resolvedPalette.normal
     }
-    val ink = Color(palette.second)
     return BloodPressureChipColors(
-        container = if (dark) ink.copy(alpha = 0.24f) else Color(palette.first),
-        content = if (dark) Color(palette.third) else ink,
-        dot = Color(palette.third)
+        container = visual.soft,
+        content = visual.ink,
+        dot = visual.mid
     )
 }

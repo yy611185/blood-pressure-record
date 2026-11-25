@@ -1,12 +1,8 @@
 package com.example.bloodpressurerecord.ui.home
 
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.provider.Settings
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -23,17 +19,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -46,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.domain.model.BpZone
 import com.example.bloodpressurerecord.domain.model.BpZonePosition
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 import com.example.bloodpressurerecord.ui.theme.BpRangeDimensions
@@ -66,11 +58,12 @@ fun BpRangeBar(
     }
     val palette = LocalBpRangeColors.current
     val markerColor = MaterialTheme.colorScheme.onSurface
-    val animationEnabled = rememberBpRangeAnimationsEnabled()
+    val reducedMotion = LocalReducedMotion.current
+    val animationEnabled = !reducedMotion
     val targetPercent = ready?.position?.percent ?: 2f
     val animatedPercent by animateFloatAsState(
         targetValue = targetPercent,
-        animationSpec = if (animationEnabled) tween(BpRangeDimensions.markerAnimationMillis) else snap(),
+        animationSpec = if (animationEnabled) AppMotion.springGentle(reducedMotion = false) else snap(),
         label = "Bp range marker"
     )
     // 系统在动画过程中关闭动画时，也必须在这一帧直接显示目标位置。
@@ -108,14 +101,20 @@ fun BpRangeBar(
             }
             Row(Modifier.fillMaxWidth()) {
                 BpZone.entries.forEach { zone ->
+                    val isActive = ready?.position?.zone == zone
+                    val labelColor by animateColorAsState(
+                        targetValue = if (isActive) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        animationSpec = AppMotion.colorSpec(reducedMotion),
+                        label = "bp_zone_label_color"
+                    )
                     Text(
                         text = stringResource(zone.labelRes()),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = BpRangeDimensions.labelSize),
-                        fontWeight = if (ready?.position?.zone == zone) FontWeight.Bold else FontWeight.Normal,
-                        color = if (ready?.position?.zone == zone) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                        color = labelColor
                     )
                 }
             }
@@ -136,23 +135,6 @@ internal fun BpZone.labelRes(): Int = when (this) {
     BpZone.NORMAL -> R.string.bp_zone_normal
     BpZone.ELEVATED -> R.string.bp_zone_elevated
     BpZone.HIGH -> R.string.bp_zone_high
-}
-
-@Composable
-private fun rememberBpRangeAnimationsEnabled(): Boolean {
-    if (LocalInspectionMode.current) return false
-    val resolver = LocalContext.current.contentResolver
-    fun readEnabled() = Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
-    var enabled by remember(resolver) { mutableStateOf(readEnabled()) }
-    DisposableEffect(resolver) {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) { enabled = readEnabled() }
-        }
-        resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
-        enabled = readEnabled()
-        onDispose { resolver.unregisterContentObserver(observer) }
-    }
-    return enabled
 }
 
 @Preview(name = "Empty · light", showBackground = true)

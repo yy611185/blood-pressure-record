@@ -1,16 +1,19 @@
 package com.example.bloodpressurerecord.ui.history
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,16 +35,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.WbSunny
-import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -77,37 +74,30 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.example.bloodpressurerecord.R
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
+import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.common.StatusChip
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.LocalBpGradePalette
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
-import com.example.bloodpressurerecord.ui.theme.Sage200
-import com.example.bloodpressurerecord.ui.theme.Sage300
-import com.example.bloodpressurerecord.ui.theme.Sage900
-import com.example.bloodpressurerecord.ui.theme.Terracotta300
-import com.example.bloodpressurerecord.ui.theme.Terracotta600
-import com.example.bloodpressurerecord.ui.theme.Terracotta700
-import com.example.bloodpressurerecord.ui.theme.Terracotta800
-import com.example.bloodpressurerecord.ui.theme.Terracotta900
-import com.example.bloodpressurerecord.ui.theme.WarmError
-import com.example.bloodpressurerecord.ui.theme.WarmTextFaint
+import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
 import com.example.bloodpressurerecord.ui.theme.bloodPressureVisualStatus
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
-import androidx.compose.ui.graphics.luminance
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -139,7 +129,6 @@ fun HistoryScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val location by viewModel.location.collectAsStateWithLifecycle()
     var showMonthPicker by remember { mutableStateOf(false) }
-    val today = remember { LocalDate.now() }
     // 双击带备注红点的日期：选中后等当天记录加载完成，滚动到第一条带备注的记录卡片。
     var pendingNoteScrollDate by remember { mutableStateOf<LocalDate?>(null) }
 
@@ -321,7 +310,7 @@ fun HistoryScreen(
                                 targetSystolic = uiState.targetSystolic,
                                 targetDiastolic = uiState.targetDiastolic,
                                 selectedDate = uiState.selectedDate,
-                                today = today,
+                                today = uiState.today,
                                 onPreviousMonth = {
                                     viewModel.cancelLocation()
                                     viewModel.showPreviousMonth()
@@ -331,6 +320,10 @@ fun HistoryScreen(
                                     viewModel.showNextMonth()
                                 },
                                 onChooseMonth = { showMonthPicker = true },
+                                onJumpToToday = {
+                                    viewModel.cancelLocation()
+                                    viewModel.openDateWhenAvailable(uiState.today)
+                                },
                                 onDateSelected = {
                                     viewModel.cancelLocation()
                                     viewModel.selectDate(it)
@@ -411,15 +404,15 @@ fun HistoryScreen(
                         )
                     }
                     CalendarLoadingState.CONTENT -> {
-                        item {
-                            RecentSummaryCard(
-                                period = uiState.recentPeriod,
-                                summary = uiState.recentSummary
-                            )
-                        }
                         if (uiState.recentRecords.isEmpty()) {
                             item { EmptyRecentState(onAddMeasurement) }
                         } else {
+                            item {
+                                RecentSummaryCard(
+                                    period = uiState.recentPeriod,
+                                    summary = uiState.recentSummary
+                                )
+                            }
                             uiState.recentRecords
                                 .groupBy { it.measuredDate }
                                 .forEach { (date, records) ->
@@ -433,7 +426,6 @@ fun HistoryScreen(
                                     items(records, key = { it.id }) { session ->
                                         HistorySessionCard(
                                             session = session,
-                                            showDate = true,
                                             onClick = { onOpenDetail(session.id) }
                                         )
                                     }
@@ -443,31 +435,6 @@ fun HistoryScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun MonthEncouragementBar(month: Int, recordedDays: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.large)
-            .padding(horizontal = AppSpacing.large, vertical = AppSpacing.medium),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            Icons.Default.WbSunny,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(18.dp)
-        )
-        Spacer(Modifier.width(AppSpacing.small))
-        Text(
-            "$month 月你已经记录了 $recordedDays 天，真不错",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSecondaryContainer
-        )
     }
 }
 
@@ -583,9 +550,11 @@ private fun CalendarMonth(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onChooseMonth: () -> Unit,
+    onJumpToToday: () -> Unit,
     onDateSelected: (LocalDate?) -> Unit,
     onDateDoubleClick: (LocalDate) -> Unit
 ) {
+    val reducedMotion = LocalReducedMotion.current
     // 与 CalendarMonthLayout 一致：周一开头。
     val weekLabels = listOf(
         stringResource(R.string.weekday_monday),
@@ -596,9 +565,6 @@ private fun CalendarMonth(
         stringResource(R.string.weekday_saturday),
         stringResource(R.string.weekday_sunday)
     )
-    val weeks = remember(month) {
-        CalendarMonthLayout.cells(month).chunked(CalendarMonthLayout.COLUMN_COUNT)
-    }
     val currentOnDateSelected by rememberUpdatedState(onDateSelected)
     val currentOnDateDoubleClick by rememberUpdatedState(onDateDoubleClick)
     val monthRecordCount = summaries.values.sumOf { it.recordCount }
@@ -610,6 +576,8 @@ private fun CalendarMonth(
                 diastolic < targetDiastolic && systolic >= 90 && diastolic >= 60
         }
     } else null
+    val showBackToToday = month != YearMonth.from(today) || (selectedDate != null && selectedDate != today)
+
     Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -629,21 +597,37 @@ private fun CalendarMonth(
                 }
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    AnimatedContent(
-                        targetState = month,
-                        transitionSpec = { AppMotion.fadeThrough() },
-                        label = "calendarMonthTitle"
-                    ) { displayedMonth ->
-                        Text(
-                            "${displayedMonth.year}年${displayedMonth.monthValue}月",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = NumberFontFamily,
-                            fontWeight = FontWeight.ExtraBold
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AnimatedContent(
+                            targetState = month,
+                            transitionSpec = {
+                                AppMotion.directionalSlideFade(
+                                    forward = targetState > initialState,
+                                    distancePx = 32,
+                                    reducedMotion = reducedMotion
+                                )
+                            },
+                            label = "calendarMonthTitle"
+                        ) { displayedMonth ->
+                            Text(
+                                "${displayedMonth.year}年${displayedMonth.monthValue}月",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontFeatureSettings = TabularFeatureSettings
+                                ),
+                                fontFamily = NumberFontFamily,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Text(
                         if (targetDays == null) "${monthRecordCount} 次测量" else "${monthRecordCount} 次测量 · ${targetDays} 天达标",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -654,6 +638,21 @@ private fun CalendarMonth(
                 modifier = Modifier.size(AppDimensions.minimumTouchTarget)
             ) {
                 Icon(Icons.Default.ChevronRight, contentDescription = stringResource(R.string.next_month))
+            }
+        }
+
+        AnimatedVisibility(
+            visible = showBackToToday,
+            enter = AppMotion.expandVisibilityEnter(reducedMotion),
+            exit = AppMotion.expandVisibilityExit(reducedMotion)
+        ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                TextButton(
+                    onClick = onJumpToToday,
+                    modifier = Modifier.heightIn(min = AppDimensions.minimumTouchTarget)
+                ) {
+                    Text("回到今天", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
 
@@ -675,34 +674,51 @@ private fun CalendarMonth(
             }
         }
 
-        weeks.forEach { week ->
-            Row(Modifier.fillMaxWidth()) {
-                week.forEach { cell ->
-                    val date = cell.date
-                    if (date == null) {
-                        Spacer(
-                            Modifier
-                                .weight(1f)
-                                .heightIn(min = AppDimensions.calendarDayMinHeight)
-                        )
-                    } else {
-                        val onCellClick = remember(date) {
-                            { currentOnDateSelected(date) }
-                        }
-                        val onCellDoubleClick = remember(date) {
-                            { currentOnDateDoubleClick(date) }
-                        }
-                        key(date) {
-                            CalendarDay(
-                                date = date,
-                                summary = summaries[date],
-                                selected = selectedDate == date,
-                                today = today == date,
-                                currentDate = today,
-                                onClick = onCellClick,
-                                onDoubleClick = onCellDoubleClick,
-                                modifier = Modifier.weight(1f)
-                            )
+        AnimatedContent(
+            targetState = month,
+            transitionSpec = {
+                AppMotion.directionalSlideFade(
+                    forward = targetState > initialState,
+                    distancePx = 56,
+                    reducedMotion = reducedMotion
+                )
+            },
+            label = "calendarMonthGrid"
+        ) { displayedMonth ->
+            val weeks = remember(displayedMonth) {
+                CalendarMonthLayout.cells(displayedMonth).chunked(CalendarMonthLayout.COLUMN_COUNT)
+            }
+            Column {
+                weeks.forEach { week ->
+                    Row(Modifier.fillMaxWidth()) {
+                        week.forEach { cell ->
+                            val date = cell.date
+                            if (date == null) {
+                                Spacer(
+                                    Modifier
+                                        .weight(1f)
+                                        .heightIn(min = AppDimensions.calendarDayMinHeight)
+                                )
+                            } else {
+                                val onCellClick = remember(date) {
+                                    { currentOnDateSelected(date) }
+                                }
+                                val onCellDoubleClick = remember(date) {
+                                    { currentOnDateDoubleClick(date) }
+                                }
+                                key(date) {
+                                    CalendarDay(
+                                        date = date,
+                                        summary = summaries[date],
+                                        selected = selectedDate == date,
+                                        today = today == date,
+                                        currentDate = today,
+                                        onClick = onCellClick,
+                                        onDoubleClick = onCellDoubleClick,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -768,6 +784,7 @@ internal fun CalendarDay(
         }
     }
     val contentColor = if (summary != null) grade.second else MaterialTheme.colorScheme.onSurfaceVariant
+    val interactionSource = remember { MutableInteractionSource() }
     var cellModifier = modifier
         .heightIn(min = AppDimensions.calendarDayMinHeight)
         .semantics {
@@ -777,10 +794,14 @@ internal fun CalendarDay(
             if (!enabled) disabled()
         }
     if (enabled) {
-        cellModifier = cellModifier.combinedClickable(
-            onClick = onClick,
-            onDoubleClick = onDoubleClick
-        )
+        cellModifier = cellModifier
+            .pressableScale(interactionSource, enabled = true, pressedScale = 0.92f)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick,
+                onDoubleClick = onDoubleClick
+            )
     }
 
     Box(cellModifier, contentAlignment = Alignment.Center) {
@@ -840,7 +861,7 @@ internal fun CalendarDay(
     }
 }
 
-/** 日历图例可作为整体换行，避免大字模式丢项。 */
+/** 日历图例：圆角方色块表达 6 档分级、圆点表达有备注、红色 ! 表达高风险，与日历格一一对应。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CalendarLegend() {
@@ -849,39 +870,41 @@ internal fun CalendarLegend() {
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.medium),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
     ) {
-        LegendItem(color = historyGradeColors(BloodPressureCategory.NORMAL, false).first, label = "正常")
-        LegendItem(color = historyGradeColors(BloodPressureCategory.HIGH_NORMAL, false).first, label = "正常高值")
-        LegendItem(color = historyGradeColors(BloodPressureCategory.STAGE1, false).first, label = "1级")
-        LegendItem(color = historyGradeColors(BloodPressureCategory.STAGE2, false).first, label = "2级")
-        LegendItem(color = historyGradeColors(BloodPressureCategory.STAGE3, false).first, label = "3级")
-        LegendItem(color = historyGradeColors(BloodPressureCategory.LOW, false).first, label = "偏低")
-        LegendItem(color = MaterialTheme.colorScheme.primary, label = "有备注")
-        LegendItem(color = MaterialTheme.colorScheme.error, label = "高风险")
+        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.NORMAL, false).first, label = "正常")
+        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.HIGH_NORMAL, false).first, label = "正常高值")
+        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.STAGE1, false).first, label = "1级")
+        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.STAGE2, false).first, label = "2级")
+        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.STAGE3, false).first, label = "3级")
+        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.LOW, false).first, label = "偏低")
+        LegendDotItem(color = MaterialTheme.colorScheme.primary, label = "有备注")
+        LegendExclamationItem(color = MaterialTheme.colorScheme.error, label = "高风险")
     }
 }
 
 @Composable
-private fun LegendItem(
-    color: Color,
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null
-) {
+private fun LegendSwatchItem(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
-        } else {
-            Box(
-                Modifier
-                    .size(10.dp)
-                    .background(color, CircleShape)
-            )
-        }
+        Box(Modifier.size(11.dp).background(color, RoundedCornerShape(3.dp)))
         Spacer(Modifier.width(5.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun LegendDotItem(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(7.dp).background(color, CircleShape))
+        Spacer(Modifier.width(5.dp))
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun LegendExclamationItem(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("!", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = color)
+        Spacer(Modifier.width(4.dp))
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -890,22 +913,19 @@ private fun historyGradeColors(
     category: BloodPressureCategory?,
     containsHighRisk: Boolean
 ): Pair<Color, Color> {
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val palette = LocalBpGradePalette.current
     return when (category) {
-        BloodPressureCategory.NORMAL -> if (dark) Color(0xFF244B3B) to Color(0xFFC4F1D2)
-            else Color(0xFFDDF3DF) to Color(0xFF24563A)
-        BloodPressureCategory.HIGH_NORMAL -> if (dark) Color(0xFF414B25) to Color(0xFFE7F0AF)
-            else Color(0xFFEDF3D2) to Color(0xFF53612D)
-        BloodPressureCategory.STAGE1 -> if (dark) Color(0xFF554326) to Color(0xFFF6D79A)
-            else Color(0xFFFFEDC9) to Color(0xFF80582A)
-        BloodPressureCategory.STAGE2 -> if (dark) Color(0xFF603C2C) to Color(0xFFF8C6A5)
-            else Color(0xFFFCE1CC) to Color(0xFF904B2D)
-        BloodPressureCategory.STAGE3 -> if (dark) Color(0xFF622D32) to Color(0xFFFFC5C9)
-            else Color(0xFFF8D7D8) to Color(0xFF9E363F)
-        BloodPressureCategory.LOW -> if (dark) Color(0xFF303F60) to Color(0xFFC9DAFF)
-            else Color(0xFFDDE8FA) to Color(0xFF3E5A8C)
-        null -> if (containsHighRisk) MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
-            else MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        BloodPressureCategory.NORMAL -> palette.normal.soft to palette.normal.ink
+        BloodPressureCategory.HIGH_NORMAL -> palette.highNormal.soft to palette.highNormal.ink
+        BloodPressureCategory.STAGE1 -> palette.stage1.soft to palette.stage1.ink
+        BloodPressureCategory.STAGE2 -> palette.stage2.soft to palette.stage2.ink
+        BloodPressureCategory.STAGE3 -> palette.stage3.soft to palette.stage3.ink
+        BloodPressureCategory.LOW -> palette.low.soft to palette.low.ink
+        null -> if (containsHighRisk) {
+            MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        }
     }
 }
 
@@ -936,18 +956,31 @@ private fun SelectedDaySummary(state: HistoryUiState) {
 fun HistorySessionCard(
     session: HistorySessionItemUi,
     onClick: () -> Unit,
-    showDate: Boolean = false,
     highlighted: Boolean = false
 ) {
+    val reducedMotion = LocalReducedMotion.current
     val visualStatus = bloodPressureVisualStatus(category = session.category, containsHighRiskReading = false)
     val riskStatus = bloodPressureVisualStatus(category = session.category, containsHighRiskReading = true)
     val colors = MaterialTheme.colorScheme
     val background by animateColorAsState(
         targetValue = if (highlighted) lerp(colors.surface, colors.primaryContainer, 0.65f) else colors.surface,
-        animationSpec = AppMotion.colorFast,
+        animationSpec = AppMotion.colorSpec(reducedMotion),
         label = "historySessionHighlight"
     )
-    DataCard(onClick = onClick, containerColor = background) {
+    val borderColor by animateColorAsState(
+        targetValue = if (highlighted) colors.primary else Color.Transparent,
+        animationSpec = AppMotion.colorSpec(reducedMotion),
+        label = "historySessionBorder"
+    )
+    DataCard(
+        onClick = onClick,
+        containerColor = background,
+        modifier = if (highlighted) {
+            Modifier.border(1.5.dp, borderColor, MaterialTheme.shapes.medium)
+        } else {
+            Modifier
+        }
+    ) {
         Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -957,7 +990,7 @@ fun HistorySessionCard(
                 Column(modifier = Modifier.width(54.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         session.measuredAtText,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TabularFeatureSettings),
                         fontFamily = NumberFontFamily,
                         fontWeight = FontWeight.Bold
                     )
@@ -971,14 +1004,14 @@ fun HistorySessionCard(
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         session.avgBloodPressureText,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TabularFeatureSettings),
                         fontFamily = NumberFontFamily,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
                     Text(
                         "脉搏 ${session.avgPulseText}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1015,7 +1048,7 @@ private fun EmptyMonthState(onAdd: () -> Unit) {
     ) {
         Text(stringResource(R.string.calendar_empty_month), style = MaterialTheme.typography.titleMedium)
         AppPrimaryButton(
-            text = "新增测量",
+            text = "记一次血压",
             icon = Icons.Default.Add,
             onClick = onAdd
         )
@@ -1031,7 +1064,7 @@ private fun EmptyRecentState(onAdd: () -> Unit) {
     ) {
         Text("当前范围还没有血压记录", style = MaterialTheme.typography.titleMedium)
         AppPrimaryButton(
-            text = stringResource(R.string.add_measurement),
+            text = "记一次血压",
             icon = Icons.Default.Add,
             onClick = onAdd
         )
@@ -1053,11 +1086,7 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
     DataCard {
         Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
             Text(message, color = MaterialTheme.colorScheme.error)
-            Button(onClick = onRetry) {
-                Icon(Icons.Default.Refresh, contentDescription = null)
-                Spacer(Modifier.width(AppSpacing.xSmall))
-                Text("重试")
-            }
+            AppSecondaryButton(text = "重试", onClick = onRetry)
         }
     }
 }

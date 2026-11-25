@@ -1,11 +1,13 @@
 package com.example.bloodpressurerecord.reminder
 
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.core.app.NotificationManagerCompat
 import com.example.bloodpressurerecord.BuildConfig
 import com.example.bloodpressurerecord.data.calendar.MedicationCalendarSync
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
@@ -22,10 +24,37 @@ import kotlinx.coroutines.sync.withLock
 
 object MedicationReminders {
     val ACTION = "${BuildConfig.APPLICATION_ID}.REMINDER_MEDICATION"
+    val ACTION_MARK_TAKEN = "${BuildConfig.APPLICATION_ID}.ACTION_MEDICATION_MARK_TAKEN"
+    const val EXTRA_MEDICATION_ID = "medication_id"
     const val EXTRA_TIME_ID = "medication_time_id"
+    const val EXTRA_DATE_EPOCH_DAY = "medication_date_epoch_day"
     const val EXTRA_TRIGGER_AT = "medication_trigger_at"
     const val REQUEST_CODE_BASE = 72000
+    const val MARK_TAKEN_REQUEST_CODE_BASE = 92000
     const val NOTIFICATION_ID_BASE = 82000
+
+    fun notificationIdFor(timeId: Long): Int = (NOTIFICATION_ID_BASE + timeId).toInt()
+
+    fun notificationTagFor(timeId: Long): String = "medication:$timeId"
+
+    fun markTakenUri(timeId: Long, epochDay: Long): Uri =
+        Uri.parse("medication://mark-taken/$timeId/$epochDay")
+
+    fun cancelNotifications(context: Context, timeIds: Iterable<Long>) {
+        val manager = NotificationManagerCompat.from(context)
+        timeIds.forEach { timeId ->
+            val id = notificationIdFor(timeId)
+            manager.cancel(notificationTagFor(timeId), id)
+            manager.cancel(id) // 更新前遗留的无 tag 通知
+        }
+    }
+
+    fun cancelMeasurementNotifications(context: Context) {
+        runCatching {
+            val manager = NotificationManagerCompat.from(context)
+            ReminderType.entries.forEach { type -> manager.cancel(type.notificationId) }
+        }
+    }
 }
 
 internal class MedicationAlarmDay(date: LocalDate, time: LocalTime, zone: ZoneId) {
@@ -114,6 +143,28 @@ class MedicationReminderCoordinator(
         calendarSync.rebuild(synchronize())
     }
 
+    // 与 receive 串行。删除先提交 Room，再在该边界取消通知。
+    suspend fun cancelRemovedNotifications(timeIds: Collection<Long>) = alarmMutex.withLock {
+        MedicationReminders.cancelNotifications(context, timeIds)
+    }
+
+    suspend fun dismissTakenNotification(timeId: Long, epochDay: Long, legacyAction: Boolean) =
+        alarmMutex.withLock {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val id = MedicationReminders.notificationIdFor(timeId)
+            if (legacyAction) {
+                manager.cancel(id)
+            } else {
+                val tag = MedicationReminders.notificationTagFor(timeId)
+                val active = manager.activeNotifications.firstOrNull { it.id == id && it.tag == tag }
+                val activeDay = active?.notification?.extras?.getLong(
+                    MedicationReminders.EXTRA_DATE_EPOCH_DAY,
+                    Long.MIN_VALUE
+                )
+                if (activeDay == epochDay) manager.cancel(tag, id)
+            }
+        }
+
     private suspend fun synchronize(): List<MedicationSlot> = alarmMutex.withLock {
         val now = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
@@ -128,6 +179,16 @@ class MedicationReminderCoordinator(
             }
         }
         val next = MedicationAlarmState(triggers, old.legacyIds.intersect(triggers.keys))
+        val removedIds = (old.triggers.keys + old.legacyIds) - triggers.keys
+        if (removedIds.isNotEmpty()) {
+            MedicationReminders.cancelNotifications(context, removedIds)
+        }
+        if (!enabled) {
+            val allKnownIds = runCatching { medicationRepository.getAllTimeIds() }.getOrDefault(emptyList())
+            if (allKnownIds.isNotEmpty()) {
+                MedicationReminders.cancelNotifications(context, allKnownIds)
+            }
+        }
         for ((id, trigger) in old.triggers) {
             if (triggers[id] != trigger) scheduler.cancel(id, trigger)
         }
@@ -139,7 +200,7 @@ class MedicationReminderCoordinator(
     }
 
     /** 旧版本广播没有预定时刻，仅在迁移标记仍存在时接受一次。 */
-    suspend fun receive(timeId: Long, delivered: Long?, notify: (MedicationSlot) -> Unit) {
+    suspend fun receive(timeId: Long, delivered: Long?, notify: (MedicationSlot, LocalDate) -> Unit) {
         alarmMutex.withLock {
             val now = System.currentTimeMillis()
             val zone = ZoneId.systemDefault()
@@ -164,7 +225,7 @@ class MedicationReminderCoordinator(
             val next = MedicationAlarmState(triggers, old.legacyIds - timeId)
             if (old != next) appSettingsStore.setMedicationAlarms(next)
             try {
-                if (due && !slot.taken) notify(slot)
+                if (due && !slot.taken) notify(slot, date)
             } finally {
                 if (nextTrigger != null) scheduler.ensure(timeId, nextTrigger)
             }

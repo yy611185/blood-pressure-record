@@ -120,5 +120,7 @@ interface BloodPressureRepository {
     suspend fun saveSession(input: SaveSessionInput): Result<String>
     suspend fun updateSession(sessionId: String, input: SaveSessionInput): Result<Unit>
     suspend fun deleteSession(sessionId: String): Result<Unit>
+    suspend fun deleteSessionWithSnapshot(sessionId: String): Result<SessionRecord> =
+        Result.failure(UnsupportedOperationException("未提供记录删除快照"))
     suspend fun restoreSession(session: SessionRecord): Result<Unit>
 }

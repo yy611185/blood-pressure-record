@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.ui.home
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -24,12 +25,22 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.bloodpressurerecord.data.repository.ClearAllDataResult
 import com.example.bloodpressurerecord.data.repository.LatestSessionSummary
 import com.example.bloodpressurerecord.data.repository.SessionSummary
+import com.example.bloodpressurerecord.data.repository.SettingsBundle
+import com.example.bloodpressurerecord.data.repository.SettingsRepository
+import com.example.bloodpressurerecord.data.repository.UserProfile
+import com.example.bloodpressurerecord.domain.time.naturalWeekDates
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.settings.SettingsProfileScreen
+import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
+import java.lang.reflect.Proxy
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.flow.flowOf
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -88,16 +99,18 @@ class DashboardLayoutTest {
             composeRule.onNodeWithContentDescription("小压，点一下换一句话")
                 .performScrollTo().performClick()
         }
-        composeRule.onNodeWithText("尚未设置服药提醒").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("每天早晚各测一次，我会帮你记着～").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("今天的药都吃过啦，真棒！").assertDoesNotExist()
     }
 
     @Test
     fun weekCardKeepsStreakAndAllWeekdayLabelsVisibleInLargeText() {
-        val sunday = LocalDate.of(2026, 10, 11)
+        val today = LocalDate.of(2026, 10, 14) // 周三，所属自然周为周一(10-12)→周日(10-18)
         val state = DashboardUiState(
-            today = sunday.plusDays(2),
-            week = (0..6).map { DashboardWeekDay(sunday.plusDays(it.toLong()), recorded = it < 3) },
+            today = today,
+            week = naturalWeekDates(today).mapIndexed { index, date ->
+                DashboardWeekDay(date, recorded = index < 3)
+            },
             streakDays = 21,
             showTrendChart = false,
             loading = false
@@ -133,10 +146,56 @@ class DashboardLayoutTest {
         assertWeekCopyFits(streak, weekdays)
     }
 
+    @Test
+    fun profileGenderSegmentedOptionsStayUncroppedAt320DpAndFontScale2() {
+        val repo = Proxy.newProxyInstance(
+            SettingsRepository::class.java.classLoader,
+            arrayOf(SettingsRepository::class.java)
+        ) { _, method, _ ->
+            when (method.name) {
+                "observeSettings" -> flowOf(SettingsBundle(userProfile = UserProfile()))
+                "clearAllData" -> Result.success(ClearAllDataResult(true, true, true, true))
+                "toString" -> "ProfileTestSettingsRepository"
+                else -> Unit
+            }
+        } as SettingsRepository
+        val vm = SettingsViewModel(repo)
+
+        composeRule.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                BloodPressureRecordTheme {
+                    Surface(Modifier.width(320.dp).height(640.dp)) {
+                        SettingsProfileScreen(viewModel = vm, onBack = {})
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        listOf("男", "女", "不填").forEach { option ->
+            composeRule.onNodeWithText(option, useUnmergedTree = true)
+                .performScrollTo()
+                .assertIsDisplayed()
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            composeRule.onNodeWithText(option, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            layouts.forEach { layout ->
+                assertEquals("Option $option should stay on single line", 1, layout.lineCount)
+                assertFalse("Option $option must not exceed maxLines", layout.multiParagraph.didExceedMaxLines)
+                assertTrue(
+                    "Option $option overflows horizontally",
+                    layout.getLineRight(0) - layout.getLineLeft(0) <= layout.size.width + 1f
+                )
+                assertFalse("Option $option must not be ellipsized", layout.isLineEllipsized(0))
+            }
+        }
+    }
+
     private fun assertWeekCopyFits(streak: androidx.compose.ui.geometry.Rect, weekdays: androidx.compose.ui.geometry.Rect) {
         assertTextInside("21 天", streak)
         assertTextInside("连续记录", streak)
-        listOf("日", "一", "二", "三", "四", "五", "六").forEachIndexed { index, label ->
+        listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { index, label ->
             val node = composeRule.onNodeWithTag("week-day-label-$index").assertIsDisplayed()
             node.assertTextEquals(label)
             val bounds = node.fetchSemanticsNode().boundsInRoot

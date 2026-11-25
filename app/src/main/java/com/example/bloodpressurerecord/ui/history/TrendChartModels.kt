@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.compose.animation.core.animate
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
@@ -11,6 +12,12 @@ import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
+import com.example.bloodpressurerecord.ui.theme.AppMotion
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -75,6 +82,93 @@ class TrendTimeViewportState(
 
     private var domainStartMillis: Long = 0L
     private var domainEndMillis: Long = 1L
+    private var viewportAnimationJob: Job? = null
+    private var animationTarget: Pair<Double, Double>? = null
+
+    /** 手指按下图表或开始直接缩放/平移时立即中断在途视窗动画，确保手势 0ms 跟手。 */
+    fun cancelAnimation() {
+        val job = viewportAnimationJob ?: return
+        viewportAnimationJob = null
+        animationTarget = null
+        job.cancel()
+        onWindowChanged(startMillis(), endMillis())
+    }
+
+    /** Finish a programmatic animation at its last requested target. */
+    fun finishAnimation() {
+        val (start, end) = animationTarget ?: return
+        val job = viewportAnimationJob
+        viewportAnimationJob = null
+        animationTarget = null
+        job?.cancel()
+        setWindow(start, end, force = true)
+    }
+
+    /** 离散按钮触发的视窗过渡：无 UI 作用域或减少动态效果时同帧直达，否则平滑过渡且触碰即停。 */
+    fun animateWindowTo(
+        targetStart: Double,
+        targetEnd: Double,
+        scope: CoroutineScope?,
+        reducedMotion: Boolean = false
+    ) {
+        cancelAnimation()
+        val span = (targetEnd - targetStart).coerceIn(1e-9, 1.0)
+        val clampedStart = targetStart.coerceIn(0.0, (1.0 - span).coerceAtLeast(0.0))
+        val clampedEnd = clampedStart + span
+        if (scope == null || !scope.isActive || reducedMotion ||
+            (abs(clampedStart - startRatio) < 1e-6 && abs(clampedEnd - endRatio) < 1e-6)
+        ) {
+            setWindow(clampedStart, clampedEnd, force = true)
+            return
+        }
+        val fromStart = startRatio
+        val fromEnd = endRatio
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]
+            try {
+                animate(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = AppMotion.springGentle(reducedMotion = false)
+                ) { fraction, _ ->
+                    if (viewportAnimationJob !== self) return@animate
+                    val f = fraction.toDouble().coerceIn(0.0, 1.0)
+                    setWindow(
+                        fromStart + (clampedStart - fromStart) * f,
+                        fromEnd + (clampedEnd - fromEnd) * f
+                    )
+                }
+            } finally {
+                if (viewportAnimationJob === self) {
+                    viewportAnimationJob = null
+                    animationTarget = null
+                    // A disposed UI owner may cancel the coroutine during Activity recreation.
+                    setWindow(clampedStart, clampedEnd, force = true)
+                }
+            }
+        }
+        animationTarget = clampedStart to clampedEnd
+        viewportAnimationJob = job
+        // Rebuilds restore the command's destination, while drags persist their actual viewport.
+        onWindowChanged(millisAt(clampedStart), millisAt(clampedEnd))
+        if (!job.start()) finishAnimation()
+    }
+
+    fun targetRangeForCenterOn(timestamp: Long): Pair<Double, Double>? {
+        val span = spanRatio.coerceAtMost(1.0)
+        val maxStart = (1.0 - span).coerceAtLeast(0.0)
+        if (maxStart <= 0.0) return null
+        val ratio = ((timestamp - domainStartMillis).toDouble() / domainSpan().toDouble())
+            .coerceIn(0.0, 1.0)
+        val newStart = (ratio - span / 2.0).coerceIn(0.0, maxStart)
+        return newStart to (newStart + span)
+    }
+
+    fun targetRangeForLatest(timestamp: Long): Pair<Double, Double> {
+        val span = spanRatio.coerceAtMost(1.0)
+        val end = ((timestamp - domainStartMillis).toDouble() / domainSpan()).coerceIn(span, 1.0)
+        return (end - span) to end
+    }
 
     val spanRatio: Double
         get() = (endRatio - startRatio).coerceAtLeast(1e-9)
@@ -186,6 +280,7 @@ class TrendTimeViewportState(
 
     /** 回到 [reset] 设定的默认视野与位置。 */
     fun resetToDefault() {
+        cancelAnimation()
         setWindow(defaultStartRatio, defaultEndRatio, force = true)
     }
 
@@ -195,6 +290,7 @@ class TrendTimeViewportState(
      * 该点对应的时间在缩放前后保持在同一像素位置，即「以手势中心缩放」。
      */
     fun zoomBy(zoomChange: Float, focusRatio: Double, minSpanRatio: Double) {
+        cancelAnimation()
         val oldSpan = spanRatio
         // 域内不足 1ms 时无法再放大，直接跳过，避免出现零宽窗口。
         if (domainEndMillis - domainStartMillis <= 1L) return
@@ -215,6 +311,7 @@ class TrendTimeViewportState(
 
     /** 按归一化比例平移，并夹取在数据域内。 */
     fun panBy(deltaRatio: Double) {
+        cancelAnimation()
         val span = spanRatio.coerceAtMost(1.0)
         val maxStart = (1.0 - span).coerceAtLeast(0.0)
         val newStart = (startRatio + deltaRatio).coerceIn(0.0, maxStart)
@@ -238,7 +335,7 @@ class TrendTimeViewportState(
         zoom = (1.0 / span).toFloat()
         if (changed || force) {
             revision++
-            onWindowChanged(startMillis(), endMillis())
+            if (animationTarget == null) onWindowChanged(startMillis(), endMillis())
         }
     }
 }
@@ -331,25 +428,114 @@ data class ChartGeometry(
         get() = (bottom - top).coerceAtLeast(1f)
 
     companion object {
-        fun create(size: androidx.compose.ui.unit.IntSize, density: Float, bottomPadding: Float): ChartGeometry {
+        fun create(
+            size: androidx.compose.ui.unit.IntSize,
+            density: Float,
+            bottomPadding: Float,
+            leftPadding: Float = 38f * density,
+            topPadding: Float = 20f * density
+        ): ChartGeometry {
             val width = size.width.toFloat().coerceAtLeast(1f)
             val height = size.height.toFloat().coerceAtLeast(1f)
+            val safeLeft = leftPadding.coerceAtLeast(1f)
+            val safeTop = topPadding.coerceAtLeast(1f)
             return ChartGeometry(
                 width = width,
                 height = height,
-                left = 38f * density,
-                right = (width - 14f * density).coerceAtLeast(39f * density),
-                top = 20f * density,
-                bottom = (height - bottomPadding).coerceAtLeast(21f * density)
+                left = safeLeft,
+                right = (width - 14f * density).coerceAtLeast(safeLeft + density),
+                top = safeTop,
+                bottom = (height - bottomPadding).coerceAtLeast(safeTop + density)
             )
         }
     }
 }
 
+internal data class TargetLabelSpec(
+    val lineY: Float,
+    val width: Float,
+    val height: Float
+)
+
+internal data class TargetLabelPlacement(
+    val x: Float,
+    val y: Float
+)
+
 object TrendChartMath {
     private const val MINUTE_MILLIS = 60L * 1_000L
     private const val HOUR_MILLIS = 60L * MINUTE_MILLIS
     private const val DAY_MILLIS = 24L * HOUR_MILLIS
+
+    /**
+     * 计算个人目标参考线标签位置，保证始终落在绘图区内且两个相近目标标签绝不叠印。
+     */
+    internal fun resolveTargetLabelPositions(
+        specs: List<TargetLabelSpec>,
+        left: Float,
+        right: Float,
+        top: Float,
+        bottom: Float,
+        lineGapPx: Float,
+        labelGapPx: Float,
+        rightMarginPx: Float
+    ): List<TargetLabelPlacement> {
+        if (specs.isEmpty()) return emptyList()
+        fun baseX(spec: TargetLabelSpec): Float =
+            (right - spec.width - rightMarginPx).coerceAtLeast(left)
+
+        if (specs.size == 1) {
+            val s = specs[0]
+            val maxTop = (bottom - s.height).coerceAtLeast(top)
+            val above = s.lineY - s.height - lineGapPx
+            val y = if (above >= top) {
+                above.coerceIn(top, maxTop)
+            } else {
+                (s.lineY + lineGapPx).coerceIn(top, maxTop)
+            }
+            return listOf(TargetLabelPlacement(baseX(s), y))
+        }
+
+        val sortedIndices = specs.indices.sortedBy { specs[it].lineY }
+        val result = arrayOfNulls<TargetLabelPlacement>(specs.size)
+        val i0 = sortedIndices[0]
+        val i1 = sortedIndices[1]
+        val s0 = specs[i0]
+        val s1 = specs[i1]
+        val maxTop0 = (bottom - s0.height).coerceAtLeast(top)
+        val maxTop1 = (bottom - s1.height).coerceAtLeast(top)
+
+        var y0 = (s0.lineY - s0.height - lineGapPx).coerceIn(top, maxTop0)
+        val candidateAbove1 = s1.lineY - s1.height - lineGapPx
+        var y1 = if (candidateAbove1 >= y0 + s0.height + labelGapPx) {
+            candidateAbove1.coerceIn(top, maxTop1)
+        } else {
+            (s1.lineY + lineGapPx).coerceIn(top, maxTop1)
+        }
+
+        if (y1 < y0 + s0.height + labelGapPx) {
+            y1 = y0 + s0.height + labelGapPx
+            if (y1 > maxTop1) {
+                y1 = maxTop1
+                y0 = (y1 - s0.height - labelGapPx).coerceAtLeast(top)
+            }
+        }
+
+        val x0 = baseX(s0)
+        var x1 = baseX(s1)
+        if (y1 < y0 + s0.height + labelGapPx - 0.5f) {
+            x1 = (x0 - s1.width - labelGapPx * 2f).coerceAtLeast(left)
+        }
+        result[i0] = TargetLabelPlacement(x0, y0)
+        result[i1] = TargetLabelPlacement(x1, y1)
+        for (extraIdx in 2 until sortedIndices.size) {
+            val idx = sortedIndices[extraIdx]
+            val spec = specs[idx]
+            val maxTop = (bottom - spec.height).coerceAtLeast(top)
+            result[idx] = TargetLabelPlacement(baseX(spec), (spec.lineY - spec.height - lineGapPx).coerceIn(top, maxTop))
+        }
+        return result.map { checkNotNull(it) }
+    }
 
     /** Y 轴自适应时的数值稳定带：变化不超过该值就沿用旧轴，避免拖动时逐帧抖动。 */
     private const val Y_AXIS_STABLE_MMHG = 20

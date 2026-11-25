@@ -13,7 +13,7 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import com.example.bloodpressurerecord.domain.report.ReportLayoutPlan
 import com.example.bloodpressurerecord.domain.report.ReportPolicy
 import java.time.format.DateTimeFormatter
@@ -36,7 +36,7 @@ class ReportShare(private val context: Context, private val cache: ReportCache) 
     }
 
     /** Called on the background dispatcher by the export flow. */
-    suspend fun save(file: File, uri: Uri) = withContext(Dispatchers.IO) {
+    suspend fun save(file: File, uri: Uri) = runInterruptible(Dispatchers.IO) {
         val output = context.contentResolver.openOutputStream(uri, "wt")
             ?: throw IOException("Unable to open report destination")
         output.use { destination -> file.inputStream().use { source -> source.copyTo(destination) } }
@@ -53,7 +53,7 @@ class ReportShare(private val context: Context, private val cache: ReportCache) 
     }
 
     suspend fun saveSummaryImage(plan: ReportLayoutPlan, renderer: PdfReportRenderer, uri: Uri) =
-        withContext(Dispatchers.IO) {
+        runInterruptible(Dispatchers.IO) {
             val bitmap = renderer.summaryBitmap(plan)
             try {
                 val output = context.contentResolver.openOutputStream(uri, "wt")

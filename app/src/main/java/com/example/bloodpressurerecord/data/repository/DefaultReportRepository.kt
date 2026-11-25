@@ -15,6 +15,11 @@ import com.example.bloodpressurerecord.domain.report.ReportUserProfile
 import org.json.JSONArray
 
 class DefaultReportRepository(private val database: AppDatabase) : ReportRepository {
+    override suspend fun hasProfileIdentity(): Boolean {
+        val profile = database.userProfileDao().getProfile() ?: return false
+        return !profile.name.isNullOrBlank() || profile.age != null
+    }
+
     override suspend fun loadSnapshot(period: ReportPeriod, options: ReportOptions): ReportSnapshot {
         // 只在读取时持有事务，统计、排版和 PDF 绘制均由调用方在事务外完成。
         return database.withTransaction {
