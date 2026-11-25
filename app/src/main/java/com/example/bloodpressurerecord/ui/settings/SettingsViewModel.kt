@@ -19,6 +19,7 @@ import com.example.bloodpressurerecord.ui.home.BpZoneAxis
 import com.example.bloodpressurerecord.ui.home.BpZoneField
 import com.example.bloodpressurerecord.ui.home.BpZoneTargetDraft
 import com.example.bloodpressurerecord.ui.home.BpZoneTargetEditorUiState
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +48,8 @@ data class SettingsUiState(
     val eveningReminderTime: String = "21:00",
     val medicationReminderEnabled: Boolean = true,
     val medicationCalendarSyncEnabled: Boolean = false,
+    val medicationCalendarId: Long? = null,
+    val medicationCalendarIncludeDetails: Boolean = false,
     val medications: List<MedicationWithTimes> = emptyList(),
     val name: String = "",
     val ageText: String = "",
@@ -72,7 +75,7 @@ data class SettingsUiState(
     val exportVolumeRecords: Int = 0,
     val exportEncrypted: Boolean = false,
     val exportFileName: String = "",
-    val showSaveExportVolume: Boolean = false,
+    val exportVolumeRequestId: String? = null,
     val isDataActionRunning: Boolean = false,
     val lastSuccessfulExportAt: Long? = null,
     val ageError: String? = null,
@@ -108,7 +111,9 @@ class SettingsViewModel(
 
     /** 门控随实际任务结束释放，离开数据管理页面也不会提前解除。 */
     private fun launchDataAction(block: suspend CoroutineScope.() -> Unit) {
+        if (_uiState.value.isDataActionRunning) return
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            _uiState.update { it.copy(isDataActionRunning = true) }
             val release = updatePromptGate?.hold()
             try {
                 block()
@@ -120,8 +125,20 @@ class SettingsViewModel(
     }
 
     override fun onCleared() {
-        pendingExportPassphrase?.fill('\u0000')
+        discardExportPlan()
         super.onCleared()
+    }
+
+    private fun discardExportPlan() {
+        pendingExportPassphrase?.fill('\u0000')
+        pendingExportPassphrase = null
+        pendingExportPlan = null
+        pendingExportBaseName = ""
+        _uiState.update {
+            it.copy(showBackupExportConfirm = false, showExportPassphraseDialog = false,
+                exportVolumeRequestId = null, exportVolumeIndex = 0, exportVolumeCount = 0, exportTotalRecords = 0,
+                exportVolumeRecords = 0, exportEncrypted = false, exportFileName = "")
+        }
     }
 
     init {
@@ -153,6 +170,8 @@ class SettingsViewModel(
                         medicationReminderEnabled = bundle.appSettings.medicationReminderEnabled,
                         medicationCalendarSyncEnabled =
                             bundle.appSettings.medicationCalendarSyncEnabled,
+                        medicationCalendarId = bundle.appSettings.medicationCalendarId,
+                        medicationCalendarIncludeDetails = bundle.appSettings.medicationCalendarIncludeDetails,
                         name = profileName,
                         ageText = profileAge,
                         gender = profileGender,
@@ -273,14 +292,23 @@ class SettingsViewModel(
         }
     }
 
-    fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
+    suspend fun getWritableMedicationCalendars() = repository.getWritableMedicationCalendars()
+
+    fun setMedicationCalendarSyncEnabled(
+        enabled: Boolean,
+        calendarId: Long? = null,
+        includeDetails: Boolean = false
+    ) {
         viewModelScope.launch {
-            runCatching { repository.setMedicationCalendarSyncEnabled(enabled) }
+            runCatching {
+                val targetId = if (enabled) requireNotNull(calendarId) { "请选择系统日历" } else null
+                repository.setMedicationCalendar(targetId, includeDetails)
+            }
                 .onSuccess {
                     _uiState.update {
                         it.copy(
                             message = if (enabled) {
-                                "已开启同步：服药时间会写入系统日历的每日日程。"
+                                "已将服药时间同步到所选日历。"
                             } else {
                                 "已关闭日历同步，本应用创建的服药日程已清理。"
                             }
@@ -289,7 +317,11 @@ class SettingsViewModel(
                 }
                 .onFailure { throwable ->
                     _uiState.update {
-                        it.copy(message = "日历同步失败：${throwable.message ?: "请稍后重试"}")
+                        it.copy(message = if (enabled) {
+                            "日历同步失败：${throwable.message ?: "请稍后重试"}"
+                        } else {
+                            "日历同步更新未完成：${throwable.message ?: "请稍后重试"}"
+                        })
                     }
                 }
         }
@@ -572,7 +604,6 @@ class SettingsViewModel(
                 it.copy(
                     showBackupExportConfirm = false,
                     showExportPassphraseDialog = false,
-                    isDataActionRunning = true,
                     message = if (passphrase != null) {
                         "正在导出加密备份，请稍候..."
                     } else {
@@ -582,12 +613,11 @@ class SettingsViewModel(
             }
             repository.exportBackupXlsxToUri(uri, fileNameHint, passphrase)
                 .onSuccess { msg ->
-                    _uiState.update { it.copy(isDataActionRunning = false, message = msg) }
+                    _uiState.update { it.copy(message = msg) }
                 }
                 .onFailure { throwable ->
                     _uiState.update {
                         it.copy(
-                            isDataActionRunning = false,
                             message = throwable.message ?: "导出失败，请重新选择保存位置后再试"
                         )
                     }
@@ -596,29 +626,31 @@ class SettingsViewModel(
     }
 
     fun prepareBackupExport(baseName: String, passphrase: CharArray? = null) {
-        if (_uiState.value.isDataActionRunning) return
+        if (_uiState.value.isDataActionRunning) {
+            passphrase?.fill('\u0000')
+            return
+        }
         if (pendingExportPlan != null) {
             passphrase?.fill('\u0000')
-            _uiState.update { it.copy(showSaveExportVolume = true, showBackupExportConfirm = false, showExportPassphraseDialog = false) }
+            showCurrentExportVolume()
             return
         }
         pendingExportPassphrase?.fill('\u0000')
         pendingExportPassphrase = passphrase
         pendingExportBaseName = baseName
-        _uiState.update { it.copy(showBackupExportConfirm = false, showExportPassphraseDialog = false, isDataActionRunning = true) }
         launchDataAction {
+            _uiState.update { it.copy(showBackupExportConfirm = false, showExportPassphraseDialog = false) }
             repository.prepareBackupExport().onSuccess { plan ->
                 pendingExportPlan = plan
                 _uiState.update {
-                    it.copy(isDataActionRunning = false, exportVolumeIndex = 0,
+                    it.copy(exportVolumeIndex = 0,
                         exportVolumeCount = plan.volumes.size, exportTotalRecords = plan.totalRecords,
                         exportEncrypted = passphrase != null, message = "已准备 ${plan.volumes.size} 个备份文件，请依次保存全部文件。")
                 }
                 showCurrentExportVolume()
             }.onFailure { error ->
-                pendingExportPassphrase?.fill('\u0000')
-                pendingExportPassphrase = null
-                _uiState.update { it.copy(isDataActionRunning = false, message = error.message ?: "备份准备失败") }
+                discardExportPlan()
+                _uiState.update { it.copy(message = error.message ?: "备份准备失败") }
             }
         }
     }
@@ -628,44 +660,45 @@ class SettingsViewModel(
         val index = _uiState.value.exportVolumeIndex
         val extension = if (pendingExportPassphrase == null) "xlsx" else "bpx"
         val suffix = if (plan.volumes.size > 1) "_第${index + 1}卷_共${plan.volumes.size}卷" else ""
-        _uiState.update { it.copy(showSaveExportVolume = true,
+        val requestId = UUID.randomUUID().toString()
+        _uiState.update { it.copy(exportVolumeRequestId = requestId,
             exportFileName = "$pendingExportBaseName$suffix.$extension",
             exportVolumeRecords = plan.volumes[index].measurements.size) }
     }
 
-    fun exportCurrentVolume(uri: Uri) {
+    fun onExportLocationResult(requestId: String, uri: Uri?) {
         val plan = pendingExportPlan ?: return
-        if (_uiState.value.isDataActionRunning) return
-        val index = _uiState.value.exportVolumeIndex
-        _uiState.update { it.copy(showSaveExportVolume = false, isDataActionRunning = true) }
+        val state = _uiState.value
+        if (state.isDataActionRunning || state.exportVolumeRequestId != requestId) return
+        val index = state.exportVolumeIndex
+        if (uri == null) {
+            _uiState.update { it.copy(message = "保存已取消；已保存 $index/${plan.volumes.size} 卷。可继续保存当前卷。") }
+            showCurrentExportVolume()
+            return
+        }
         launchDataAction {
+            _uiState.update { it.copy(exportVolumeRequestId = null) }
             repository.exportBackupVolumeToUri(plan, index, uri, pendingExportPassphrase)
                 .onSuccess {
                     if (index == plan.volumes.lastIndex) {
-                        pendingExportPlan = null
-                        pendingExportPassphrase?.fill('\u0000')
-                        pendingExportPassphrase = null
-                        _uiState.update { it.copy(isDataActionRunning = false, exportVolumeCount = 0,
-                            message = "全部 ${plan.volumes.size} 卷已导出，共 ${plan.totalRecords} 条测量记录。恢复时请逐卷导入；第一卷含资料、设置和用药数据。") }
+                        discardExportPlan()
+                        _uiState.update { it.copy(
+                            message = "全部 ${plan.volumes.size} 卷已导出，共 ${plan.totalRecords} 条测量记录。请从第一卷起逐卷恢复。") }
                     } else {
-                        _uiState.update { it.copy(isDataActionRunning = false, exportVolumeIndex = index + 1,
+                        _uiState.update { it.copy(exportVolumeIndex = index + 1,
                             message = "已保存 ${index + 1}/${plan.volumes.size} 卷，备份尚未完整，请继续保存。") }
                         showCurrentExportVolume()
                     }
                 }.onFailure { error ->
-                    _uiState.update { it.copy(isDataActionRunning = false, message = error.message ?: "当前卷保存失败，请重试") }
+                    _uiState.update { it.copy(message = error.message ?: "当前卷保存失败，请重试") }
                     showCurrentExportVolume()
                 }
         }
     }
 
-    fun onExportLocationCancelled() {
-        _uiState.update { it.copy(message = "保存已取消；已保存 ${it.exportVolumeIndex}/${it.exportVolumeCount} 卷。可继续保存当前卷。") }
-        showCurrentExportVolume()
-    }
-
     fun pauseBackupExport() {
-        _uiState.update { it.copy(showSaveExportVolume = false,
+        if (pendingExportPlan == null) return
+        _uiState.update { it.copy(exportVolumeRequestId = null,
             message = "备份未完成：已保存 ${it.exportVolumeIndex}/${it.exportVolumeCount} 卷。点击导出可继续；离开页面或重启后请重新导出全部卷。") }
     }
 
@@ -700,7 +733,6 @@ class SettingsViewModel(
             _uiState.update {
                 it.copy(
                     showBackupImportConfirm = false,
-                    isDataActionRunning = true,
                     message = "正在验证备份并生成导入预览..."
                 )
             }
@@ -709,11 +741,10 @@ class SettingsViewModel(
                     pendingImportUri = null
                     _uiState.update {
                         it.copy(
-                            isDataActionRunning = false,
                             backupImportPreview = preview,
                             showImportPassphraseDialog = false,
                             importPassphraseError = null,
-                            importMeasurementsSelected = true,
+                            importMeasurementsSelected = preview.validRecordCount > 0,
                             restoreUserProfileSelected = false,
                             restoreDisplaySettingsSelected = false,
                             restoreReminderSettingsSelected = false,
@@ -728,7 +759,6 @@ class SettingsViewModel(
                             pendingImportUri = uri
                             _uiState.update {
                                 it.copy(
-                                    isDataActionRunning = false,
                                     showImportPassphraseDialog = true,
                                     importPassphraseError = null,
                                     message = "该备份文件已加密。"
@@ -739,7 +769,6 @@ class SettingsViewModel(
                             pendingImportUri = uri
                             _uiState.update {
                                 it.copy(
-                                    isDataActionRunning = false,
                                     showImportPassphraseDialog = true,
                                     importPassphraseError = throwable.message,
                                     message = throwable.message ?: "备份口令错误。"
@@ -749,7 +778,6 @@ class SettingsViewModel(
                         else -> {
                             _uiState.update {
                                 it.copy(
-                                    isDataActionRunning = false,
                                     message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
                                 )
                             }
@@ -800,7 +828,7 @@ class SettingsViewModel(
         if (!state.hasImportSelection || state.isDataActionRunning) return
         launchDataAction {
             _uiState.update {
-                it.copy(isDataActionRunning = true, message = "正在提交导入，请稍候...")
+                it.copy(message = "正在提交导入，请稍候...")
             }
             repository.commitBackupImport(
                 preview = preview,
@@ -815,7 +843,6 @@ class SettingsViewModel(
                 isProfileDirty = false
                 _uiState.update {
                     it.copy(
-                        isDataActionRunning = false,
                         backupImportPreview = null,
                         message = message
                     )
@@ -823,7 +850,6 @@ class SettingsViewModel(
             }.onFailure { throwable ->
                 _uiState.update {
                     it.copy(
-                        isDataActionRunning = false,
                         message = "导入失败：${throwable.message ?: "文件格式不受支持"}"
                     )
                 }
@@ -837,14 +863,20 @@ class SettingsViewModel(
 
     fun confirmClearAll() {
         launchDataAction {
-            _uiState.update { it.copy(isDataActionRunning = true, message = "正在清空本地数据...") }
+            _uiState.update { it.copy(message = "正在清空本地数据...") }
             repository.clearAllData()
                 .onSuccess { result ->
-                    isProfileDirty = false
+                    if (result.databaseCleared) {
+                        discardExportPlan()
+                        dismissBackupImport()
+                        dismissImportPassphrase()
+                        isProfileDirty = false
+                        _uiState.update { it.copy(name = "", ageText = "", gender = "", targetSystolicText = "",
+                            targetDiastolicText = "", ageError = null, targetSystolicError = null, targetDiastolicError = null) }
+                    }
                     _uiState.update {
                         it.copy(
                             showClearConfirm = false,
-                            isDataActionRunning = false,
                             message = result.toUserMessage()
                         )
                     }
@@ -853,7 +885,6 @@ class SettingsViewModel(
                     _uiState.update {
                         it.copy(
                             showClearConfirm = false,
-                            isDataActionRunning = false,
                             message = "清空失败：${throwable.message ?: "请稍后重试"}"
                         )
                     }

@@ -7,6 +7,8 @@ import com.example.bloodpressurerecord.data.repository.ClearAllDataResult
 import com.example.bloodpressurerecord.data.repository.SettingsBundle
 import com.example.bloodpressurerecord.data.repository.SettingsRepository
 import com.example.bloodpressurerecord.data.repository.UserProfile
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPayload
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.domain.model.BpZoneConfig
 import com.example.bloodpressurerecord.domain.model.BpZoneCuts
 import com.example.bloodpressurerecord.ui.home.BpZoneAxis
@@ -32,6 +34,52 @@ import org.junit.Test
 class SettingsViewModelTest {
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+
+    @Test
+    fun `clearing records discards a paused backup and rejects its file picker result`() = runTest {
+        val clearGate = CompletableDeferred<Unit>()
+        var clearCalls = 0
+        val repository = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun prepareBackupExport() = Result.success(BackupExportPlan.fromPayload(
+                BackupExportPayload(instructions = emptyList(), measurements = emptyList(),
+                    userProfile = emptyList(), meta = emptyList())
+            ))
+
+            override suspend fun clearAllData(): Result<ClearAllDataResult> {
+                clearCalls++
+                if (clearCalls == 1) return Result.success(ClearAllDataResult(false, false, false, false))
+                clearGate.await()
+                return Result.success(ClearAllDataResult(true, false, true, true, listOf("设置未重置")))
+            }
+        }
+        val vm = SettingsViewModel(repository)
+        val passphrase = "private-test".toCharArray()
+        vm.prepareBackupExport("old", passphrase)
+        vm.pauseBackupExport()
+        vm.confirmClearAll()
+        assertEquals(1, vm.uiState.value.exportVolumeCount)
+        assertEquals("private-test", passphrase.concatToString())
+
+        vm.requestBackupExport()
+        val oldRequest = requireNotNull(vm.uiState.value.exportVolumeRequestId)
+        vm.pauseBackupExport()
+        vm.confirmClearAll()
+        vm.confirmClearAll()
+        assertEquals(2, clearCalls)
+        assertTrue(vm.uiState.value.isDataActionRunning)
+        clearGate.complete(Unit)
+        advanceUntilIdle()
+        assertTrue(passphrase.all { it == '\u0000' })
+        assertEquals(0, vm.uiState.value.exportVolumeCount)
+        assertEquals("", vm.uiState.value.exportFileName)
+        assertFalse(vm.uiState.value.exportEncrypted)
+        vm.requestBackupExport()
+        assertTrue(vm.uiState.value.showBackupExportConfirm)
+        vm.prepareBackupExport("new")
+        val newState = vm.uiState.value
+        vm.onExportLocationResult(oldRequest, null)
+        assertEquals(newState, vm.uiState.value)
+    }
 
     @Test
     fun `early target editor waits for first persisted config`() = runTest {
@@ -204,7 +252,9 @@ internal class FakeTargetSettingsRepository : SettingsRepository {
     override suspend fun setEveningReminderEnabled(enabled: Boolean) = Unit
     override suspend fun setEveningReminderTime(value: String) = Unit
     override suspend fun setMedicationReminderEnabled(enabled: Boolean) = Unit
-    override suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) = Unit
+    override suspend fun getWritableMedicationCalendars() =
+        emptyList<com.example.bloodpressurerecord.data.calendar.MedicationCalendarTarget>()
+    override suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean) = Unit
     override suspend fun refreshReminders() = Unit
     override suspend fun saveUserProfile(profile: UserProfile) = Unit
     override suspend fun clearAllData(): Result<ClearAllDataResult> = Result.success(

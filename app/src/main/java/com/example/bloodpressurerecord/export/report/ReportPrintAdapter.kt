@@ -29,6 +29,7 @@ class ReportPrintAdapter(
     private val cache: ReportCache
 ) : PrintDocumentAdapter() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val cacheGeneration = cache.generation
     private var writeJob: Job? = null
     private val documentName: String = "血压报告_${plan.report.period.startDate.format(DateTimeFormatter.BASIC_ISO_DATE)}-" +
         "${plan.report.period.endDate.format(DateTimeFormatter.BASIC_ISO_DATE)}.pdf"
@@ -85,13 +86,15 @@ class ReportPrintAdapter(
         pages: Array<out PageRange>, destination: ParcelFileDescriptor, cancellationSignal: CancellationSignal
     ): Array<PageRange> = withContext(Dispatchers.IO) {
         val taskContext = currentCoroutineContext()
-        val cancelled = { cancellationSignal.isCanceled || !taskContext.isActive }
+        val cancelled = {
+            cancellationSignal.isCanceled || !taskContext.isActive || cache.generation != cacheGeneration
+        }
         if (cancelled()) throw CancellationException("Print cancelled")
         val selected = ReportPrintPages.select(pages, plan.pageCount)
         require(selected.isNotEmpty()) { "No report pages selected" }
         var temporary: File? = null
         try {
-            val file = cache.create(plan.report.period).also { temporary = it }
+            val file = cache.create(plan.report.period, cacheGeneration).also { temporary = it }
             renderer.render(plan, file, selected, cancelled)
             // A duplicate descriptor prevents closing the framework-owned destination.
             ParcelFileDescriptor.AutoCloseOutputStream(

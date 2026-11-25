@@ -30,6 +30,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,39 +60,6 @@ fun SettingsDataManagementScreen(
     onOpenDoctorReport: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var exportPassphrase by remember { mutableStateOf("") }
-    var exportPassphraseConfirm by remember { mutableStateOf("") }
-    var importPassphrase by remember { mutableStateOf("") }
-
-    val backupExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    ) { uri ->
-        if (uri != null) {
-            viewModel.exportCurrentVolume(uri)
-        } else {
-            viewModel.onExportLocationCancelled()
-        }
-    }
-    val encryptedExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri ->
-        if (uri != null) {
-            viewModel.exportCurrentVolume(uri)
-        } else {
-            viewModel.onExportLocationCancelled()
-        }
-    }
-    val backupImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.previewBackupXlsxFromUri(uri)
-        } else {
-            viewModel.dismissBackupImport()
-        }
-    }
 
     if (uiState.showBackupExportConfirm) {
         AlertDialog(
@@ -127,6 +95,8 @@ fun SettingsDataManagementScreen(
     }
 
     if (uiState.showExportPassphraseDialog) {
+        var exportPassphrase by remember { mutableStateOf("") }
+        var exportPassphraseConfirm by remember { mutableStateOf("") }
         val passphraseValid = exportPassphrase.length >= 8 &&
             exportPassphrase == exportPassphraseConfirm
         AlertDialog(
@@ -182,24 +152,28 @@ fun SettingsDataManagementScreen(
         )
     }
 
-    if (uiState.showSaveExportVolume) {
+    uiState.exportVolumeRequestId?.let { requestId ->
+        val mime = if (uiState.exportEncrypted) "application/octet-stream"
+            else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        val launcher = key(requestId) {
+            rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mime)) { uri ->
+                viewModel.onExportLocationResult(requestId, uri)
+            }
+        }
         AlertDialog(
             onDismissRequest = viewModel::pauseBackupExport,
             title = { Text("保存第 ${uiState.exportVolumeIndex + 1}/${uiState.exportVolumeCount} 卷") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("共 ${uiState.exportTotalRecords} 条测量，每卷最多 5000 条；本卷 ${uiState.exportVolumeRecords} 条。每次测量和原始组会完整保留。")
-                    Text(if (uiState.exportVolumeIndex == 0) "第一卷还包含用户资料、设置和全部用药数据。" else "本卷仅含测量记录；资料、设置和用药数据在第一卷。")
+                    Text("用户资料和设置在第一卷，用药数据可能分布在多卷。")
                     Text("请依次保存全部 ${uiState.exportVolumeCount} 卷，恢复时逐卷导入。" +
                         if (uiState.exportEncrypted) "全部卷使用同一口令。" else "文件为明文 Excel。")
                     Text(uiState.exportFileName, style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (uiState.exportEncrypted) encryptedExportLauncher.launch(uiState.exportFileName)
-                    else backupExportLauncher.launch(uiState.exportFileName)
-                }) { Text("选择本卷保存位置") }
+                TextButton(onClick = { launcher.launch(uiState.exportFileName) }) { Text("选择本卷保存位置") }
             },
             dismissButton = {
                 TextButton(onClick = viewModel::pauseBackupExport) { Text("稍后继续") }
@@ -208,6 +182,7 @@ fun SettingsDataManagementScreen(
     }
 
     if (uiState.showImportPassphraseDialog) {
+        var importPassphrase by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = viewModel::dismissImportPassphrase,
             title = { Text("输入备份口令") },
@@ -246,6 +221,11 @@ fun SettingsDataManagementScreen(
     }
 
     if (uiState.showBackupImportConfirm) {
+        val backupImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (viewModel.uiState.value.showBackupImportConfirm) {
+                if (uri != null) viewModel.previewBackupXlsxFromUri(uri) else viewModel.dismissBackupImport()
+            }
+        }
         AlertDialog(
             onDismissRequest = viewModel::dismissBackupImport,
             title = { Text("导入 Excel 备份") },
@@ -315,7 +295,8 @@ fun SettingsDataManagementScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = uiState.importMeasurementsSelected,
-                            onCheckedChange = viewModel::setImportMeasurementsSelected
+                            onCheckedChange = viewModel::setImportMeasurementsSelected,
+                            enabled = preview.validRecordCount > 0
                         )
                         Text("导入测量记录（覆盖同 record_id）")
                     }
@@ -351,7 +332,8 @@ fun SettingsDataManagementScreen(
                         )
                         Text(
                             "恢复提醒设置" +
-                                if (preview.changesReminderTimes || preview.changesReminderEnabled) "（有变化）" else ""
+                                (if (preview.hasMedicationReminderSetting) "（含服药提醒开关）" else "") +
+                                (if (preview.changesReminderTimes || preview.changesReminderEnabled) "（有变化）" else "")
                         )
                     }
                 }
@@ -374,7 +356,7 @@ fun SettingsDataManagementScreen(
             title = { Text("再次确认清空数据") },
             text = { Text("此操作会永久删除所有测量记录和用户资料，且无法撤销。建议先导出 Excel 备份。") },
             confirmButton = {
-                TextButton(onClick = viewModel::confirmClearAll) {
+                TextButton(enabled = !uiState.isDataActionRunning, onClick = viewModel::confirmClearAll) {
                     Text("永久清空", color = MaterialTheme.colorScheme.error)
                 }
             },

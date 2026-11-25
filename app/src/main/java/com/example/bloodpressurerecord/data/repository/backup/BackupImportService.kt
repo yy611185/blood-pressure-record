@@ -33,6 +33,9 @@ import org.json.JSONArray
 object BackupImportLimits {
     const val MAX_FILE_BYTES = 10 * 1024 * 1024
     const val MAX_RECORDS = 5_000
+    const val MAX_MEDICATIONS = 1_000
+    const val MAX_MEDICATION_TIMES = 10_000
+    const val MAX_MEDICATION_LOGS = 50_000
     const val MAX_TOTAL_READING_ROWS = MAX_RECORDS * MeasurementInputRules.MAX_READING_COUNT
     const val MAX_RECORD_ID_LENGTH = 200
     const val MAX_ZIP_ENTRIES = 512
@@ -124,6 +127,8 @@ class BackupImportPreview internal constructor(
     var volumeDescription: String? = null
         internal set
     val hasSettings: Boolean get() = userProfile.isNotEmpty()
+    val hasMedicationReminderSetting: Boolean
+        get() = userProfile["medication_reminder_enabled"]?.toBooleanStrictOrNull() != null
     val errorCount: Int
         get() = errors.size
 }
@@ -211,7 +216,7 @@ class BackupImportService(
             val total = document.meta["backup_volume_count"]
             if (volume != null && total != null) {
                 preview.volumeDescription = "分卷备份第 $volume/$total 卷（共 ${document.meta["backup_total_records"].orEmpty()} 条记录）。" +
-                    "请逐卷恢复全部文件；资料、设置和用药数据仅在第一卷。"
+                    "请逐卷恢复全部文件，含药品的卷需勾选恢复用药数据。用户资料和设置只在第一卷。"
             }
         }
     }
@@ -283,13 +288,15 @@ class BackupImportService(
         if (preview.medications.isEmpty()) return
         val dao = database.medicationDao()
         val existing = dao.getMedicationsWithTimes()
+        // 旧数据可能有同名同剂量、创建时刻也相同的行，沿用原先的最小 id 匹配。
+        val medicationsByIdentity = existing.asReversed().associateBy {
+            Triple(it.medication.name, it.medication.dosage, it.medication.createdAt)
+        }
+        val timesBySlot = existing.flatMap { it.times }.sortedByDescending { it.id }
+            .associateBy { it.medicationId to it.timeText }.toMutableMap()
         val medicationIds = mutableMapOf<String, Long>()
         preview.medications.forEach { source ->
-            val match = existing.firstOrNull {
-                it.medication.name == source.name &&
-                    it.medication.dosage == source.dosage &&
-                    it.medication.createdAt == source.createdAt
-            }
+            val match = medicationsByIdentity[Triple(source.name, source.dosage, source.createdAt)]
             val localId = if (match != null) {
                 dao.updateMedication(
                     match.medication.copy(
@@ -313,25 +320,27 @@ class BackupImportService(
             medicationIds[source.backupId] = localId
         }
 
-        val timeIds = mutableMapOf<String, Long>()
+        val localTimes = mutableMapOf<String, MedicationTimeEntity>()
         preview.medicationTimes.forEach { source ->
             val medicationId = requireNotNull(medicationIds[source.medicationBackupId])
-            val existingTime = dao.getTimesForMedication(medicationId)
-                .firstOrNull { it.timeText == source.timeText }
-            val localTimeId = existingTime?.id ?: dao.insertTime(
-                MedicationTimeEntity(medicationId = medicationId, timeText = source.timeText, active = source.active)
-            )
-            if (existingTime != null) dao.setTimeActive(localTimeId, source.active)
-            timeIds[source.backupId] = localTimeId
+            val slot = medicationId to source.timeText
+            val existingTime = timesBySlot[slot]
+            val time = if (existingTime == null) {
+                val newTime = MedicationTimeEntity(medicationId = medicationId, timeText = source.timeText, active = source.active)
+                newTime.copy(id = dao.insertTime(newTime))
+            } else {
+                if (existingTime.active != source.active) dao.setTimeActive(existingTime.id, source.active)
+                existingTime.copy(active = source.active)
+            }
+            timesBySlot[slot] = time
+            localTimes[source.backupId] = time
         }
         preview.medicationLogs.forEach { source ->
-            val timeId = requireNotNull(timeIds[source.timeBackupId])
-            val medicationBackupId = preview.medicationTimes
-                .first { it.backupId == source.timeBackupId }.medicationBackupId
+            val time = localTimes.getValue(source.timeBackupId)
             dao.insertLog(
                 MedicationIntakeLogEntity(
-                    medicationId = requireNotNull(medicationIds[medicationBackupId]),
-                    timeId = timeId,
+                    medicationId = time.medicationId,
+                    timeId = time.id,
                     epochDay = source.epochDay,
                     takenAt = source.takenAt
                 )
@@ -340,16 +349,16 @@ class BackupImportService(
     }
 
     private fun validateMedicationDocument(document: BackupImportDocument) {
-        if (document.medications.size > MAX_MEDICATIONS ||
-            document.medicationTimes.size > MAX_MEDICATION_TIMES ||
-            document.medicationLogs.size > MAX_MEDICATION_LOGS
+        if (document.medications.size > BackupImportLimits.MAX_MEDICATIONS ||
+            document.medicationTimes.size > BackupImportLimits.MAX_MEDICATION_TIMES ||
+            document.medicationLogs.size > BackupImportLimits.MAX_MEDICATION_LOGS
         ) {
             throw BackupFormatException("用药数据超过允许上限")
         }
-        val medicationIds = document.medications.map { it.backupId }
-        val timeIds = document.medicationTimes.map { it.backupId }
-        if (medicationIds.size != medicationIds.distinct().size ||
-            timeIds.size != timeIds.distinct().size ||
+        val medicationIds = document.medications.mapTo(hashSetOf()) { it.backupId }
+        val timeIds = document.medicationTimes.mapTo(hashSetOf()) { it.backupId }
+        if (medicationIds.size != document.medications.size ||
+            timeIds.size != document.medicationTimes.size ||
             document.medicationTimes.any { it.medicationBackupId !in medicationIds } ||
             document.medicationLogs.any { it.timeBackupId !in timeIds }
         ) {
@@ -454,16 +463,16 @@ class BackupImportService(
             source.backupLevel?.takeIf { it.isNotBlank() }
                 ?: CategoryCalculator.calculate(average.avgSystolic, average.avgDiastolic).name
         } else derived.category.name
-        val highRisk = if (backupAverage != null) {
-            source.backupHighAlert ?: BloodPressureRules.containsHighRiskReading(readingValues, average)
-        } else derived.containsHighRiskReading
+        // 保留历史风险提示，并检查每组原始读数及实际恢复的代表值。
+        val highRisk = source.backupHighAlert == true ||
+            BloodPressureRules.containsHighRiskReading(readingValues, average)
         val createdAt = parseDateTime(source.createdAt, zoneId) ?: measuredAt
         val updatedAt = parseDateTime(source.updatedAt, zoneId) ?: createdAt
         val (symptomsJson, symptomsCorrected) = normalizeSymptomsJson(source.symptomsJson)
         val corrected = source.backupGroupCount != readingValues.size ||
             backupAverage == null ||
             source.backupLevel.isNullOrBlank() ||
-            source.backupHighAlert == null ||
+            source.backupHighAlert != highRisk ||
             parseDateTime(source.createdAt, zoneId) == null ||
             parseDateTime(source.updatedAt, zoneId) == null ||
             symptomsCorrected
@@ -551,7 +560,9 @@ class BackupImportService(
             values["morning_reminder_enabled"]?.toBooleanStrictOrNull()
                 ?.let { it != current.morningReminderEnabled },
             values["evening_reminder_enabled"]?.toBooleanStrictOrNull()
-                ?.let { it != current.eveningReminderEnabled }
+                ?.let { it != current.eveningReminderEnabled },
+            values["medication_reminder_enabled"]?.toBooleanStrictOrNull()
+                ?.let { it != current.medicationReminderEnabled }
         ).any { it == true }
     }
 
@@ -608,9 +619,6 @@ class BackupImportService(
 
     companion object {
         private const val DATABASE_BATCH_SIZE = 250
-        private const val MAX_MEDICATIONS = 1_000
-        private const val MAX_MEDICATION_TIMES = 10_000
-        private const val MAX_MEDICATION_LOGS = 50_000
         private val DATE_TIME_FORMATTER = DateTimeFormatter
             .ofPattern("uuuu-MM-dd HH:mm:ss")
             .withResolverStyle(ResolverStyle.STRICT)

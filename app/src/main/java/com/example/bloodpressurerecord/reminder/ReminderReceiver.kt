@@ -14,7 +14,6 @@ import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.MainActivity
 import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
-import java.time.LocalDate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,24 +52,18 @@ class ReminderReceiver : BroadcastReceiver() {
     private fun handleMedicationReminder(context: Context, intent: Intent) {
         val timeId = intent.getLongExtra(MedicationReminders.EXTRA_TIME_ID, -1L)
         if (timeId < 0) return
+        val triggerAt = intent.getLongExtra(MedicationReminders.EXTRA_TRIGGER_AT, -1L).takeIf { it >= 0 }
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val appContext = context.applicationContext
                 val application = appContext as? BloodPressureApplication ?: return@launch
-                val settings = AppSettingsStore(appContext).settingsFlow.first()
-                val slot = application.appContainer.medicationRepository
-                    .getSlotsForDay(LocalDate.now())
-                    .firstOrNull { it.timeId == timeId }
-                ReminderNotifications.ensureChannel(appContext)
-                // 时间点已被删除/停用时静默跳过，旧闹钟自然失效。
-                if (slot != null &&
-                    settings.medicationReminderEnabled &&
-                    ReminderAuthorization.status(appContext) == ReminderAuthorizationStatus.GRANTED
-                ) {
-                    showMedicationNotification(appContext, timeId, slot.name, slot.dosage)
+                application.appContainer.medicationReminderCoordinator.receive(timeId, triggerAt) { slot ->
+                    ReminderNotifications.ensureChannel(appContext)
+                    if (ReminderAuthorization.status(appContext) == ReminderAuthorizationStatus.GRANTED) {
+                        showMedicationNotification(appContext, timeId, slot.name, slot.dosage)
+                    }
                 }
-                application.appContainer.medicationReminderCoordinator.resyncAlarms()
             } finally {
                 pendingResult.finish()
             }

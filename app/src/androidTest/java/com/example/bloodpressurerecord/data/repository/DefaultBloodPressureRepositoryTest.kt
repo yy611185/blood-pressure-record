@@ -3,8 +3,15 @@ package com.example.bloodpressurerecord.data.repository
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.db.AppDatabase
+import com.example.bloodpressurerecord.data.db.entity.BloodPressureMeasurementEntity
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportService
+import com.example.bloodpressurerecord.data.repository.backup.BackupFileWriter
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
 import com.example.bloodpressurerecord.domain.time.MeasurementTimestampValidator
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -28,13 +35,58 @@ class DefaultBloodPressureRepositoryTest {
             AppDatabase::class.java
         ).allowMainThreadQueries().build()
         repository = DefaultBloodPressureRepository(
-            sessionDao = database.measurementSessionDao()
+            database = database
         )
     }
 
     @After
     fun tearDown() {
         database.close()
+    }
+
+    @Test
+    fun deletingImportedLegacyRecordsKeepsThemOutOfBackupUntilUndo() = runBlocking {
+        val measurements = database.measurementDao()
+        val old = BloodPressureMeasurementEntity(7, "甲", 120, 80, 70, 1_700_000_000_000L, "NORMAL")
+        measurements.insert(old)
+        val sql = database.openHelper.writableDatabase
+        sql.execSQL(
+            """CREATE TABLE blood_pressure_records (
+                id INTEGER PRIMARY KEY, memberName TEXT, systolic INTEGER, diastolic INTEGER,
+                pulse INTEGER, measuredAtMillis INTEGER, level TEXT, remark TEXT)"""
+        )
+        sql.execSQL(
+            "INSERT INTO blood_pressure_records VALUES (7, '乙', 122, 82, 72, 1700000000000, 'HIGH_NORMAL', '备注')"
+        )
+        val settings = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val export = BackupExportService(database.measurementSessionDao(), measurements, database.userProfileDao(), settings)
+        val initial = export.buildPayload("test", "test")
+        val bytes = ByteArrayOutputStream().use { output ->
+            BackupFileWriter().writeXlsx(initial, output)
+            output.toByteArray()
+        }
+        val importer = BackupImportService(database, settings)
+        importer.commitImport(importer.previewXlsx(bytes.inputStream()), BackupImportOptions())
+
+        measurements.insert(old.copy(id = 8))
+        assertTrue(repository.deleteSession("bp_measurements:8").isFailure)
+        for (id in listOf("bp_measurements:7", "blood_pressure_records:7")) {
+            val snapshot = requireNotNull(repository.observeSession(id).first())
+            repository.deleteSession(id).getOrThrow()
+            val afterDelete = export.buildPayload("test", "test").measurements.map { it.recordId }
+            val expected = setOf("bp_measurements:7", "blood_pressure_records:7", "bp_measurements:8")
+            assertEquals(expected - id, afterDelete.toSet())
+
+            repository.restoreSession(snapshot).getOrThrow()
+            assertEquals(snapshot, repository.observeSession(id).first())
+            val restored = export.buildPayload("test", "test").measurements
+            assertEquals(1, restored.count { it.recordId == id })
+        }
+
+        // 新设备仍可删除从别处恢复的旧记录，即使本机没有该可选的历史表。
+        sql.execSQL("DROP TABLE blood_pressure_records")
+        repository.deleteSession("blood_pressure_records:7").getOrThrow()
+        assertEquals(listOf(8L), measurements.getAll().map { it.id })
     }
 
     @Test
@@ -161,7 +213,7 @@ class DefaultBloodPressureRepositoryTest {
     fun repository_rejects_future_measurement_time() = runBlocking {
         val fixedNow = 1_700_000_000_000L
         val guardedRepository = DefaultBloodPressureRepository(
-            sessionDao = database.measurementSessionDao(),
+            database = database,
             nowMillis = { fixedNow }
         )
 

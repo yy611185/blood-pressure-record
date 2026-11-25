@@ -2,6 +2,13 @@ package com.example.bloodpressurerecord.export.report
 
 import com.example.bloodpressurerecord.domain.report.ReportPeriod
 import java.io.File
+import java.io.IOException
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
@@ -10,12 +17,47 @@ class ReportCache(
     private val root: File,
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) {
-    fun create(period: ReportPeriod): File {
+    @Volatile
+    internal var generation = 0L
+        private set
+
+    @Synchronized
+    fun create(period: ReportPeriod, expectedGeneration: Long = generation): File {
+        check(expectedGeneration == generation) { "Report cache was cleared" }
         check(root.mkdirs() || root.isDirectory)
         val directory = File(root, UUID.randomUUID().toString())
         check(directory.mkdir())
         val formatter = DateTimeFormatter.BASIC_ISO_DATE
         return File(directory, "血压报告_${period.startDate.format(formatter)}-${period.endDate.format(formatter)}.pdf")
+    }
+
+    /** Clears even recently shared reports. The tree walk never follows symbolic links. */
+    @Synchronized
+    fun clearAll(revokePdf: (File) -> Unit) {
+        generation++
+        val cachePath = root.toPath()
+        if (Files.notExists(cachePath, LinkOption.NOFOLLOW_LINKS)) return
+        var revokeFailure: Exception? = null
+        Files.walkFileTree(cachePath, object : SimpleFileVisitor<Path>() {
+            override fun visitFile(file: Path, attributes: BasicFileAttributes): FileVisitResult {
+                if (attributes.isRegularFile && file.toFile().extension.equals("pdf", ignoreCase = true)) {
+                    try {
+                        revokePdf(file.toFile())
+                    } catch (error: Exception) {
+                        revokeFailure = error
+                    }
+                }
+                Files.deleteIfExists(file)
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun postVisitDirectory(directory: Path, error: IOException?): FileVisitResult {
+                if (error != null) throw error
+                Files.deleteIfExists(directory)
+                return FileVisitResult.CONTINUE
+            }
+        })
+        revokeFailure?.let { throw it }
     }
 
     fun markShared(file: File) {

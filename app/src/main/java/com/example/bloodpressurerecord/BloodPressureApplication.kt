@@ -22,6 +22,9 @@ class BloodPressureApplication : Application() {
         applicationScope.launch(Dispatchers.IO) {
             cleanupLegacyUpdateFiles(filesDir, cacheDir)
         }
+        applicationScope.launch {
+            runCatching { appContainer.medicationReminderCoordinator.cleanUnconfiguredCalendarEvents() }
+        }
         // 自愈：提醒链依赖“上一次广播里排下一次”。个别 ROM 吞掉一次广播后链条会断，
         // 这里在每次进程启动时按当前设置重排，保证提醒最迟在下次打开应用后恢复。
         applicationScope.launch {

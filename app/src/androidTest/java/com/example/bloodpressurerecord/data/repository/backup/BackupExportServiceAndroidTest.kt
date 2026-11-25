@@ -165,7 +165,7 @@ class BackupExportServiceAndroidTest {
         val bytes = exportSingleSession(
             sessionId = sessionId,
             values = listOf(
-                Triple(160, 100, 90),
+                Triple(180, 100, 90),
                 Triple(120, 80, 60),
                 Triple(122, 82, 62)
             ),
@@ -181,12 +181,14 @@ class BackupExportServiceAndroidTest {
         database.measurementSessionDao().deleteAllReadings()
         database.measurementSessionDao().deleteAllSessions()
 
-        BackupImportService(
+        val result = BackupImportService(
             database,
             AppSettingsStore(ApplicationProvider.getApplicationContext())
         ).importXlsx(ByteArrayInputStream(bytes))
         val restored = database.measurementSessionDao().getSessionWithReadings(sessionId)?.session
 
+        assertEquals(1, result.correctedCount)
+        assertTrue(restored?.containsHighRiskReading == true)
         assertEquals("DISCARD_FIRST", restored?.averageStrategy)
         assertEquals(121, restored?.avgSystolic)
         assertEquals(81, restored?.avgDiastolic)
@@ -282,6 +284,32 @@ class BackupExportServiceAndroidTest {
         assertEquals(150, restored?.session?.avgSystolic)
         assertEquals(80, restored?.session?.avgDiastolic)
         assertTrue(restored?.session?.containsHighRiskReading == true)
+    }
+
+    @Test
+    fun import_checksStoredRepresentativeAndRetainsHistoricalRiskFlag() = runTest {
+        val bytes = mutateWorkbook(exportTwoSessions()) { workbook ->
+            val sheet = workbook.getSheet("测量记录")
+            for (index in 1..2) {
+                val row = sheet.getRow(index)
+                if (row.getCell(0).stringCellValue == "rollback-1") {
+                    row.getCell(5).setCellValue(180.0)
+                } else {
+                    row.getCell(9).setCellValue(true)
+                }
+            }
+        }
+        val dao = database.measurementSessionDao()
+        dao.deleteAllReadings()
+        dao.deleteAllSessions()
+        val result = BackupImportService(database, AppSettingsStore(ApplicationProvider.getApplicationContext()))
+            .importXlsx(ByteArrayInputStream(bytes))
+
+        assertEquals(1, result.correctedCount)
+        val storedRepresentative = requireNotNull(dao.getSessionWithReadings("rollback-1")).session
+        assertEquals(180, storedRepresentative.avgSystolic)
+        assertTrue(storedRepresentative.containsHighRiskReading)
+        assertTrue(requireNotNull(dao.getSessionWithReadings("rollback-2")).session.containsHighRiskReading)
     }
 
     @Test

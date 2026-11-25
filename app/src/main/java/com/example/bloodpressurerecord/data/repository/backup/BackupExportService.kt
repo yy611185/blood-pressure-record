@@ -36,8 +36,11 @@ class BackupExportService(
 
     suspend fun buildPayload(appName: String, appVersion: String): BackupExportPayload {
         val payload = buildSnapshot(appName, appVersion)
-        require(payload.measurements.size <= BackupImportLimits.MAX_RECORDS) {
-            "记录共 ${payload.measurements.size} 条，请使用数据管理页面的分卷导出。"
+        require(payload.measurements.size <= BackupImportLimits.MAX_RECORDS &&
+            payload.medications.size <= BackupImportLimits.MAX_MEDICATIONS &&
+            payload.medicationTimes.size <= BackupImportLimits.MAX_MEDICATION_TIMES &&
+            payload.medicationLogs.size <= BackupImportLimits.MAX_MEDICATION_LOGS) {
+            "测量或用药数据超过单卷上限，请使用数据管理页面的分卷导出。"
         }
         return payload
     }
@@ -262,7 +265,8 @@ class BackupExportService(
             BackupUserProfileItem("morning_reminder_enabled", settings.morningReminderEnabled.toString()),
             BackupUserProfileItem("morning_reminder_time", settings.morningReminderTime),
             BackupUserProfileItem("evening_reminder_enabled", settings.eveningReminderEnabled.toString()),
-            BackupUserProfileItem("evening_reminder_time", settings.eveningReminderTime)
+            BackupUserProfileItem("evening_reminder_time", settings.eveningReminderTime),
+            BackupUserProfileItem("medication_reminder_enabled", settings.medicationReminderEnabled.toString())
         )
     }
 

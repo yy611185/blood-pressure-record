@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.data.repository
 
 import com.example.bloodpressurerecord.data.datastore.AppSettings
+import com.example.bloodpressurerecord.data.calendar.MedicationCalendarTarget
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
@@ -31,7 +32,7 @@ data class ClearAllDataResult(
 ) {
     fun toUserMessage(): String {
         if (!databaseCleared) return "清空失败：本地数据未完整删除，请重试。"
-        if (warnings.isNotEmpty()) return "健康记录已删除，但部分设置未能重置。"
+        if (warnings.isNotEmpty()) return "健康记录已删除，但部分清理未完成：${warnings.joinToString("、")}。"
         return "全部数据已清空。"
     }
 }
@@ -65,7 +66,8 @@ interface SettingsRepository {
 
     suspend fun setMedicationReminderEnabled(enabled: Boolean)
 
-    suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean)
+    suspend fun getWritableMedicationCalendars(): List<MedicationCalendarTarget>
+    suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean)
 
     suspend fun refreshReminders()
 

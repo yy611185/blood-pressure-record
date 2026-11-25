@@ -63,4 +63,24 @@ class ReportCacheTest {
         assertThrows(IllegalArgumentException::class.java) { cache.markShared(foreign) }
         assertTrue(foreign.exists())
     }
+
+    @Test fun clearAll_removesRecentlySharedReportsAndInvalidatesOldGeneration() {
+        val root = temporary.newFolder("reports")
+        val cache = ReportCache(root)
+        val generation = cache.generation
+        val shared = cache.create(period).apply { writeText("shared pdf") }
+        cache.markShared(shared)
+        val preview = cache.create(period)
+        File(preview.parentFile, "report.partial").writeText("incomplete")
+        val other = temporary.newFile("outside.pdf")
+        val revoked = mutableListOf<File>()
+
+        cache.clearAll { revoked += it }
+
+        assertEquals(listOf(shared), revoked)
+        assertFalse(root.exists())
+        assertTrue(other.exists())
+        assertThrows(IllegalStateException::class.java) { cache.create(period, generation) }
+        assertTrue(cache.create(period).parentFile!!.isDirectory)
+    }
 }

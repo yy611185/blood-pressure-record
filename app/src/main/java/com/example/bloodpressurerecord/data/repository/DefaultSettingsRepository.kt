@@ -1,7 +1,9 @@
 package com.example.bloodpressurerecord.data.repository
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import com.example.bloodpressurerecord.data.calendar.MedicationCalendarSync
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.data.db.dao.BloodPressureMeasurementDao
@@ -12,13 +14,18 @@ import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportPayload
 import com.example.bloodpressurerecord.data.repository.backup.BackupExportService
+import com.example.bloodpressurerecord.data.repository.backup.BackupFileReader
 import com.example.bloodpressurerecord.data.repository.backup.BackupFileWriter
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
+import com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
@@ -26,6 +33,9 @@ import kotlinx.coroutines.flow.first
 import com.example.bloodpressurerecord.reminder.ReminderScheduler
 import java.io.ByteArrayOutputStream
 import com.example.bloodpressurerecord.ui.common.FileSessionDraftRepository
+import com.example.bloodpressurerecord.export.report.ReportCache
+import com.example.bloodpressurerecord.export.report.ReportShare
+import java.io.File
 
 class DefaultSettingsRepository(
     private val context: Context,
@@ -39,8 +49,11 @@ class DefaultSettingsRepository(
     /** 导入、清空等批量变更后刷新桌面小部件。 */
     private val onDataChanged: (() -> Unit)? = null,
     /** 应用内提醒开关只影响闹钟，不依赖可选的日历授权。 */
-    private val medicationAlarmResync: (suspend () -> Unit)? = null
+    private val medicationAlarmResync: (suspend () -> Unit)? = null,
+    private val reportCache: ReportCache = ReportCache(File(context.cacheDir, "reports"))
 ) : SettingsRepository {
+    private val calendarSettingsMutex = Mutex()
+
     override fun observeTrendAggregationPreference(): Flow<TrendAggregation?> =
         appSettingsStore.trendAggregationPreference
 
@@ -114,15 +127,27 @@ class DefaultSettingsRepository(
         }
     }
 
-    override suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
-        val previous = appSettingsStore.settingsFlow.first().medicationCalendarSyncEnabled
-        appSettingsStore.setMedicationCalendarSyncEnabled(enabled)
-        try {
-            medicationResync?.invoke()
-        } catch (throwable: Throwable) {
-            appSettingsStore.setMedicationCalendarSyncEnabled(previous)
-            runCatching { medicationResync?.invoke() }
-            throw throwable
+    override suspend fun getWritableMedicationCalendars() =
+        MedicationCalendarSync(context).loadTargets()
+
+    override suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean) {
+        calendarSettingsMutex.withLock {
+            val previous = appSettingsStore.settingsFlow.first()
+            appSettingsStore.setMedicationCalendar(calendarId, includeDetails)
+            try {
+                medicationResync?.invoke()
+            } catch (throwable: Throwable) {
+                // 关闭同步后即使暂时无法清理旧日程，也不能恢复原来的写入授权。
+                if (calendarId != null) {
+                    withContext(NonCancellable) {
+                        appSettingsStore.setMedicationCalendar(
+                            previous.medicationCalendarId, previous.medicationCalendarIncludeDetails
+                        )
+                        runCatching { medicationResync?.invoke() }
+                    }
+                }
+                throw throwable
+            }
         }
     }
 
@@ -191,6 +216,17 @@ class DefaultSettingsRepository(
         }
         FileSessionDraftRepository(context).clearAll().onFailure {
             warnings += "测量草稿清理失败"
+        }
+        try {
+            withContext(Dispatchers.IO) {
+                reportCache.clearAll { file ->
+                    context.revokeUriPermission(
+                        ReportShare.reportUri(context, file), Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
+        } catch (throwable: Throwable) {
+            warnings += "医生报告缓存清理失败"
         }
         try {
             rescheduleReminders()
@@ -277,7 +313,7 @@ class DefaultSettingsRepository(
     }
 
     private fun writeBackupPayload(uri: Uri, payload: BackupExportPayload, passphrase: CharArray?) {
-        require(payload.measurements.size <= com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits.MAX_RECORDS)
+        require(payload.measurements.size <= BackupImportLimits.MAX_RECORDS)
         // 先在内存中生成 xlsx，再按需加密后一次性写出，避免把明文临时落盘。
         val xlsxBytes = ByteArrayOutputStream().use { buffer ->
             val writer = BackupFileWriter()
@@ -295,13 +331,14 @@ class DefaultSettingsRepository(
             buffer.toByteArray()
         }
 
+        BackupFileReader().validateExportArchive(xlsxBytes)
         val exportBytes = if (passphrase != null) {
             BackupCrypto.encrypt(xlsxBytes, passphrase)
         } else {
             xlsxBytes
         }
-        require(exportBytes.size <= com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits.MAX_FILE_BYTES) {
-            "生成的备份超过 10 MB，无法保证可恢复；请减少范围后分批导出。"
+        require(exportBytes.size <= BackupImportLimits.MAX_FILE_BYTES) {
+            "加密后的备份卷超过 10 MB，无法保存为可恢复的备份。"
         }
         val outputStream = context.contentResolver.openOutputStream(uri)
             ?: error("无法写入所选文件，请重新选择保存位置")
@@ -367,6 +404,9 @@ class DefaultSettingsRepository(
             if (options.restoreMedications) {
                 runCatching { medicationResync?.invoke() }
                     .onFailure { followUpWarnings += "服药提醒与日历待重试" }
+            } else if (options.restoreReminderSettings && preview.hasMedicationReminderSetting) {
+                runCatching { medicationAlarmResync?.invoke() }
+                    .onFailure { followUpWarnings += "服药提醒待重试" }
             }
             runCatching { onDataChanged?.invoke() }
                 .onFailure { followUpWarnings += "桌面小部件待刷新" }

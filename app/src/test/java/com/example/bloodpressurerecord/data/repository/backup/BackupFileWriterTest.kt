@@ -4,12 +4,50 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.util.Locale
+import org.apache.poi.util.LocaleUtil
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackupFileWriterTest {
+    @Test
+    fun readXlsx_preservesMedicationTimestampsFromNumericAndTextCellsAcrossLocales() {
+        val createdAt = 1_795_432_167_891L
+        val takenAt = 1_795_432_234_567L
+        val payload = samplePayload().copy(
+            medications = listOf(BackupMedicationRow("med", "药品", "1片", true, createdAt)),
+            medicationTimes = listOf(BackupMedicationTimeRow("time", "med", "08:00")),
+            medicationLogs = listOf(BackupMedicationLogRow("time", 20_780, takenAt))
+        )
+        val numeric = ByteArrayOutputStream().use { output ->
+            BackupFileWriter().writeXlsx(payload, output)
+            output.toByteArray()
+        }
+        val text = XSSFWorkbook(numeric.inputStream()).use { workbook ->
+            workbook.getSheet("药品").getRow(1).getCell(4).setCellValue(" ${createdAt} ")
+            workbook.getSheet("服药打卡").getRow(1).getCell(2).setCellValue(takenAt.toString())
+            ByteArrayOutputStream().use { output ->
+                workbook.write(output)
+                output.toByteArray()
+            }
+        }
+
+        try {
+            for (locale in listOf(Locale.US, Locale.GERMANY)) {
+                LocaleUtil.setUserLocale(locale)
+                for (bytes in listOf(numeric, text)) {
+                    val document = BackupFileReader().readXlsx(bytes.inputStream())
+                    assertEquals(payload.medications, document.medications)
+                    assertEquals(payload.medicationLogs, document.medicationLogs)
+                }
+            }
+        } finally {
+            LocaleUtil.resetUserLocale()
+        }
+    }
+
     @Test
     fun writeXlsx_createsVersion6SheetsWithExplicitAverageStrategyAndNotes() {
         val payload = samplePayload()

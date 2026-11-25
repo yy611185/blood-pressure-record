@@ -7,6 +7,8 @@ import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -34,10 +37,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +70,8 @@ import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import java.time.LocalTime
 import com.example.bloodpressurerecord.BuildConfig
+import com.example.bloodpressurerecord.data.calendar.MedicationCalendarTarget
+import kotlinx.coroutines.CancellationException
 import com.example.bloodpressurerecord.update.UpdateViewModel
 import com.example.bloodpressurerecord.update.UpdateSettingsContent
 
@@ -152,20 +159,6 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             )
         }
     }
-    val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        val granted = grants[Manifest.permission.READ_CALENDAR] == true &&
-            grants[Manifest.permission.WRITE_CALENDAR] == true
-        if (granted) {
-            viewModel.setMedicationCalendarSyncEnabled(true)
-        } else {
-            viewModel.showReminderAuthorizationRequired(
-                "日历权限未授予，暂时无法把服药提醒写入系统日历。"
-            )
-        }
-    }
-
     DisposableEffect(lifecycleOwner, context) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -280,37 +273,11 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 viewModel.setMedicationReminderEnabled(false)
             }
         }
-        Text("系统日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        SettingsSwitchRow(
-            "同步到系统日历",
-            uiState.medicationCalendarSyncEnabled
-        ) { enabled ->
-            if (enabled) {
-                val hasCalendarPermission =
-                    ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.READ_CALENDAR
-                    ) == PackageManager.PERMISSION_GRANTED &&
-                        ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.WRITE_CALENDAR
-                        ) == PackageManager.PERMISSION_GRANTED
-                if (hasCalendarPermission) {
-                    viewModel.setMedicationCalendarSyncEnabled(true)
-                } else {
-                    calendarPermissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.READ_CALENDAR,
-                            Manifest.permission.WRITE_CALENDAR
-                        )
-                    )
-                }
-            } else {
-                viewModel.setMedicationCalendarSyncEnabled(false)
-            }
-        }
-        Text(
-            "开启后会在系统日历中创建每日重复的服药日程（含日历提醒），与应用内提醒互为双保险；关闭时自动清理。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        MedicationCalendarSettings(
+            enabled = uiState.medicationCalendarSyncEnabled,
+            calendarId = uiState.medicationCalendarId,
+            includeDetails = uiState.medicationCalendarIncludeDetails,
+            viewModel = viewModel
         )
 
         Text("药品与服药时间", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -382,6 +349,118 @@ fun SettingsReminderScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         }
 
         SettingsMessage(uiState.message)
+    }
+}
+
+@Composable
+private fun MedicationCalendarSettings(
+    enabled: Boolean,
+    calendarId: Long?,
+    includeDetails: Boolean,
+    viewModel: SettingsViewModel
+) {
+    val context = LocalContext.current
+    val permissions = remember { arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR) }
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var calendars by remember(enabled, calendarId, editing) { mutableStateOf<List<MedicationCalendarTarget>?>(null) }
+    fun hasPermissions() = permissions.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (hasPermissions()) editing = true
+        else viewModel.showReminderAuthorizationRequired("需要日历权限才能选择服药提醒的目标日历。")
+    }
+    fun configure() {
+        if (hasPermissions()) editing = true else permissionLauncher.launch(permissions)
+    }
+    LaunchedEffect(enabled, calendarId, editing) {
+        if (!editing && !enabled) return@LaunchedEffect
+        if (!hasPermissions()) {
+            if (editing) {
+                editing = false
+                viewModel.showReminderAuthorizationRequired("日历权限已关闭，请重新授权后选择日历。")
+            }
+            return@LaunchedEffect
+        }
+        try {
+            val targets = viewModel.getWritableMedicationCalendars()
+            calendars = targets
+            if (editing && targets.isEmpty()) {
+                editing = false
+                viewModel.showReminderAuthorizationRequired("未找到可写入的日历，请先在系统日历中添加日历。")
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (editing) {
+                editing = false
+                viewModel.showReminderAuthorizationRequired("无法读取系统日历，请检查日历权限后重试。")
+            }
+        }
+    }
+
+    Text("系统日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    SettingsSwitchRow("同步到系统日历", enabled) { checked ->
+        if (checked) configure() else viewModel.setMedicationCalendarSyncEnabled(false)
+    }
+    if (enabled) {
+        val target = calendars?.find { it.id == calendarId }
+        val summary = target?.let {
+            listOf(it.displayName, it.accountName).filter(String::isNotBlank).distinct().joinToString(" · ")
+        }
+        Text(summary?.let { "当前日历：$it" } ?: "当前日历名称暂不可用")
+        OutlinedButton(onClick = ::configure, modifier = Modifier.fillMaxWidth()) { Text("更改日历或提醒内容") }
+    }
+
+    if (editing) {
+        var selectedId by rememberSaveable { mutableStateOf(calendarId.takeIf { enabled }) }
+        var showDetails by rememberSaveable { mutableStateOf(enabled && includeDetails) }
+        val targets = calendars
+        val selected = targets?.find { it.id == selectedId }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("选择服药提醒日历") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("服药时间会写入所选日历。账户日历可能同步到云端，共享日历的其他成员也可能看到提醒内容。")
+                    if (targets == null) Text("正在读取日历…")
+                    Column(Modifier.selectableGroup()) {
+                        targets.orEmpty().forEach { target ->
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                    .selectable(selectedId == target.id, role = Role.RadioButton, onClick = {
+                                        if (selectedId != target.id) showDetails = false
+                                        selectedId = target.id
+                                    }),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                RadioButton(selected = selectedId == target.id, onClick = null)
+                                Column {
+                                    Text(target.displayName)
+                                    if (target.accountName.isNotBlank() && target.accountName != target.displayName) {
+                                        Text(target.accountName, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SettingsSwitchRow("在日程标题中显示药名和剂量", showDetails) { showDetails = it }
+                    Text(
+                        if (showDetails) "日程标题格式为「服药提醒：药名 剂量」。"
+                        else "日程标题为「服药提醒」。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = selected != null, onClick = {
+                    selected?.let { viewModel.setMedicationCalendarSyncEnabled(true, it.id, showDetails) }
+                    editing = false
+                }) { Text(if (enabled) "保存" else "开启同步") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } }
+        )
     }
 }
 

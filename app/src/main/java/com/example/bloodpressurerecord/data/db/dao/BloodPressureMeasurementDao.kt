@@ -38,4 +38,7 @@ interface BloodPressureMeasurementDao {
 
     @Query("DELETE FROM bp_measurements")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM bp_measurements WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }

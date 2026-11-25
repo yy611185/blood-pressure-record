@@ -101,6 +101,7 @@ class DefaultSettingsRepositoryAndroidTest {
         store.clearAll()
         try {
             store.setAppearanceMode("dark")
+            store.setMedicationReminderEnabled(false)
             val dao = database.medicationDao()
             val medicationId = dao.insertMedicationWithTimes(
                 MedicationEntity(name = "test", dosage = "1", enabled = false, createdAt = 100),
@@ -122,18 +123,21 @@ class DefaultSettingsRepositoryAndroidTest {
             dao.setTimeActive(time.id, true)
             dao.deleteAllLogs()
             store.setAppearanceMode("light")
-            store.setMedicationReminderEnabled(false)
-            store.setMedicationCalendarSyncEnabled(true)
+            store.setMedicationReminderEnabled(true)
+            store.setMedicationCalendar(calendarId = 1L, includeDetails = true)
             val beforeMedications = dao.getMedicationsWithTimes()
             val beforeLogs = dao.getAllLogs()
             val beforeSettings = store.settingsFlow.first()
             var medicationResyncCalls = 0
+            val alarmSettings = mutableListOf<Boolean>()
             val guardedRepository = DefaultSettingsRepository(context, store, database,
                 database.userProfileDao(), database.measurementSessionDao(), database.measurementDao(),
-                medicationResync = { medicationResyncCalls++ })
+                medicationResync = { medicationResyncCalls++ },
+                medicationAlarmResync = { alarmSettings += store.settingsFlow.first().medicationReminderEnabled })
             val service = BackupImportService(database, store)
             val preview = service.previewXlsx(ByteArrayInputStream(bytes))
             assertEquals(1, preview.medicationCount)
+            assertTrue(preview.changesReminderEnabled)
             listOf(
                 BackupImportOptions(importMeasurements = false, restoreDisplaySettings = true),
                 BackupImportOptions(importMeasurements = false, restoreUserProfile = true),
@@ -147,18 +151,41 @@ class DefaultSettingsRepositoryAndroidTest {
             }
             assertEquals("dark", store.settingsFlow.first().appearanceMode)
             assertEquals(beforeSettings.medicationReminderEnabled, store.settingsFlow.first().medicationReminderEnabled)
-            assertEquals(beforeSettings.medicationCalendarSyncEnabled, store.settingsFlow.first().medicationCalendarSyncEnabled)
+            assertEquals(beforeSettings.medicationCalendarId, store.settingsFlow.first().medicationCalendarId)
+            assertEquals(beforeSettings.medicationCalendarIncludeDetails, store.settingsFlow.first().medicationCalendarIncludeDetails)
             val none = BackupImportOptions(importMeasurements = false)
             assertTrue(guardedRepository.commitBackupImport(preview, none).isFailure)
             assertEquals(beforeMedications, dao.getMedicationsWithTimes())
             assertEquals(0, medicationResyncCalls)
-            // 明确勾选用药才能恢复，并且只在这种情况下重排相关提醒。
+            // 用药与提醒开关独立选择。只恢复用药时沿用本机开关。
             guardedRepository.commitBackupImport(preview,
                 BackupImportOptions(importMeasurements = false, restoreMedications = true)).getOrThrow()
             assertFalse(dao.getMedicationsWithTimes().single().medication.enabled)
             assertFalse(dao.getMedicationsWithTimes().single().times.single().active)
             assertEquals(1, dao.getAllLogs().size)
             assertEquals(1, medicationResyncCalls)
+            assertTrue(store.settingsFlow.first().medicationReminderEnabled)
+            assertTrue(alarmSettings.isEmpty())
+
+            val remindersOnly = BackupImportOptions(importMeasurements = false, restoreReminderSettings = true)
+            guardedRepository.commitBackupImport(preview, remindersOnly).getOrThrow()
+            assertFalse(store.settingsFlow.first().medicationReminderEnabled)
+            assertEquals(listOf(false), alarmSettings)
+            assertEquals(1, medicationResyncCalls)
+
+            // 旧备份没有该键。关闭的开关不因读取旧备份而重置。
+            val legacyBytes = ByteArrayOutputStream().use {
+                val legacy = payload.copy(userProfile = payload.userProfile.filterNot { item ->
+                    item.key == "medication_reminder_enabled"
+                })
+                BackupFileWriter().writeXlsx(legacy, it)
+                it.toByteArray()
+            }
+            val legacy = service.previewXlsx(ByteArrayInputStream(legacyBytes))
+            assertFalse(legacy.changesReminderEnabled)
+            guardedRepository.commitBackupImport(legacy, remindersOnly).getOrThrow()
+            assertFalse(store.settingsFlow.first().medicationReminderEnabled)
+            assertEquals(listOf(false), alarmSettings)
         } finally {
             store.clearAll()
         }

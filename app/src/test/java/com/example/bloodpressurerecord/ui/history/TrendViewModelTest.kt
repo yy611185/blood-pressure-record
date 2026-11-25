@@ -575,7 +575,9 @@ class TrendViewModelTest {
         override suspend fun setEveningReminderEnabled(enabled: Boolean) = Unit
         override suspend fun setEveningReminderTime(value: String) = Unit
         override suspend fun setMedicationReminderEnabled(enabled: Boolean) = Unit
-        override suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) = Unit
+        override suspend fun getWritableMedicationCalendars() =
+            emptyList<com.example.bloodpressurerecord.data.calendar.MedicationCalendarTarget>()
+        override suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean) = Unit
         override suspend fun refreshReminders() = Unit
         override suspend fun saveUserProfile(profile: UserProfile) = Unit
         override suspend fun clearAllData(): Result<com.example.bloodpressurerecord.data.repository.ClearAllDataResult> =

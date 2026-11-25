@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.data.repository
 
-import com.example.bloodpressurerecord.data.db.dao.MeasurementSessionDao
+import androidx.room.withTransaction
+import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.entity.MeasurementReadingEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionWithReadings
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
@@ -17,11 +18,12 @@ import org.json.JSONArray
 import java.util.UUID
 
 class DefaultBloodPressureRepository(
-    private val sessionDao: MeasurementSessionDao,
+    private val database: AppDatabase,
     /** 数据变化后的回调（用于刷新桌面小部件等）。 */
     private val onDataChanged: (() -> Unit)? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis
 ) : BloodPressureRepository {
+    private val sessionDao = database.measurementSessionDao()
 
     override fun observeSession(sessionId: String): Flow<SessionRecord?> {
         return sessionDao.observeSessionWithReadings(sessionId).map { it?.toRecord() }
@@ -168,8 +170,26 @@ class DefaultBloodPressureRepository(
     }
 
     override suspend fun deleteSession(sessionId: String): Result<Unit> = runCatching {
-        check(sessionDao.deleteSessionById(sessionId) == 1) { "记录不存在，无法删除" }
+        database.withTransaction {
+            check(sessionDao.deleteSessionById(sessionId) == 1) { "记录不存在，无法删除" }
+            deleteLegacySource(sessionId)
+        }
         onDataChanged?.invoke()
+    }
+
+    private suspend fun deleteLegacySource(sessionId: String) {
+        // 备份以“表名:主键”标识旧行。只删除与本次已删会话完全同名的来源。
+        val legacyId = sessionId.substringAfter(':', "").toLongOrNull() ?: return
+        when (sessionId) {
+            "bp_measurements:$legacyId" -> database.measurementDao().deleteById(legacyId)
+            "blood_pressure_records:$legacyId" -> {
+                if (database.measurementDao().tableExists("blood_pressure_records") > 0) {
+                    database.openHelper.writableDatabase.execSQL(
+                        "DELETE FROM blood_pressure_records WHERE id = ?", arrayOf(legacyId)
+                    )
+                }
+            }
+        }
     }
 
     override suspend fun restoreSession(session: SessionRecord): Result<Unit> = runCatching {

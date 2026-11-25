@@ -69,7 +69,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
 
     override val bloodPressureRepository: BloodPressureRepository by lazy {
         DefaultBloodPressureRepository(
-            sessionDao = database.measurementSessionDao(),
+            database = database,
             onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
         )
     }
@@ -95,7 +95,8 @@ class DefaultAppContainer(context: Context) : AppContainer {
             measurementDao = database.measurementDao(),
             medicationResync = { medicationReminderCoordinator.resyncAll() },
             medicationAlarmResync = { medicationReminderCoordinator.resyncAlarms() },
-            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) }
+            onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) },
+            reportCache = reportCache
         )
     }
 

@@ -22,8 +22,15 @@ data class AppSettings(
     val lastSuccessfulExportAt: Long? = null,
     /** 服药提醒总开关。默认开启：添加药品后立即生效，符合用户预期。 */
     val medicationReminderEnabled: Boolean = true,
-    /** 服药提醒同步写入系统日历（需要日历读写权限）。 */
-    val medicationCalendarSyncEnabled: Boolean = false
+    val medicationCalendarId: Long? = null,
+    val medicationCalendarIncludeDetails: Boolean = false
+) {
+    val medicationCalendarSyncEnabled: Boolean get() = medicationCalendarId != null
+}
+
+data class MedicationAlarmState(
+    val triggers: Map<Long, Long>,
+    val legacyIds: Set<Long>
 )
 
 class AppSettingsStore(
@@ -58,8 +65,9 @@ class AppSettingsStore(
             discardFirstReading = prefs[PreferenceKeys.DISCARD_FIRST_READING] ?: false,
             lastSuccessfulExportAt = prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT],
             medicationReminderEnabled = prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] ?: true,
-            medicationCalendarSyncEnabled =
-                prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false
+            medicationCalendarId = prefs[PreferenceKeys.MEDICATION_CALENDAR_ID],
+            medicationCalendarIncludeDetails =
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS] ?: false
         )
     }
 
@@ -132,18 +140,34 @@ class AppSettingsStore(
         }
     }
 
-    suspend fun setMedicationCalendarSyncEnabled(enabled: Boolean) {
+    suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean = false) {
         context.appDataStore.edit { prefs ->
-            prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] = enabled
+            if (prefs.remove(PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED) == true &&
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] == null
+            ) {
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = true
+            }
+            if (calendarId == null) {
+                prefs.remove(PreferenceKeys.MEDICATION_CALENDAR_ID)
+                prefs.remove(PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS)
+            } else {
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_ID] = calendarId
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS] = includeDetails
+            }
         }
     }
 
-    val scheduledMedicationTimeIds: Flow<Set<Long>> = context.appDataStore.data.map { prefs ->
-        prefs[PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS]
-            .orEmpty()
-            .split(',')
-            .mapNotNull { it.trim().toLongOrNull() }
-            .toSet()
+    val medicationAlarms: Flow<MedicationAlarmState> = context.appDataStore.data.map { prefs ->
+        val triggers = buildMap {
+            for (entry in prefs[PreferenceKeys.MEDICATION_ALARM_TRIGGERS].orEmpty()) {
+                val id = entry.substringBefore('@').toLongOrNull() ?: continue
+                val trigger = entry.substringAfter('@', "").toLongOrNull() ?: continue
+                put(id, trigger)
+            }
+        }
+        val legacyIds = prefs[PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS]
+            .orEmpty().split(',').mapNotNull { it.trim().toLongOrNull() }.toSet()
+        MedicationAlarmState(triggers, legacyIds)
     }
 
     /** 创建前记录，清理成功后清除；兼容旧版本已经开启日历同步的用户。 */
@@ -156,13 +180,12 @@ class AppSettingsStore(
         context.appDataStore.edit { it[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = value }
     }
 
-    suspend fun setScheduledMedicationTimeIds(ids: Collection<Long>) {
+    suspend fun setMedicationAlarms(state: MedicationAlarmState) {
         context.appDataStore.edit { prefs ->
-            prefs[PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS] = ids
-                .filter { it >= 0L }
-                .distinct()
-                .sorted()
-                .joinToString(",")
+            prefs[PreferenceKeys.MEDICATION_ALARM_TRIGGERS] =
+                state.triggers.mapTo(mutableSetOf()) { (id, trigger) -> "$id@$trigger" }
+            if (state.legacyIds.isEmpty()) prefs.remove(PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS)
+            else prefs[PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS] = state.legacyIds.joinToString(",")
         }
     }
 
@@ -209,6 +232,9 @@ class AppSettingsStore(
                 }
                 values["evening_reminder_enabled"]?.toBooleanStrictOrNull()?.let {
                     prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] = it
+                }
+                values["medication_reminder_enabled"]?.toBooleanStrictOrNull()?.let {
+                    prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] = it
                 }
             }
         }

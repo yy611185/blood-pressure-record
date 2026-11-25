@@ -20,7 +20,7 @@ import java.time.format.DateTimeFormatter
 
 class ReportShare(private val context: Context, private val cache: ReportCache) {
     fun share(file: File, title: String = ReportPolicy.TITLE) {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.reports.files", file)
+        val uri = reportUri(context, file)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = PDF_MIME_TYPE
             putExtra(Intent.EXTRA_STREAM, uri)
@@ -75,6 +75,9 @@ class ReportShare(private val context: Context, private val cache: ReportCache) 
     }
 
     companion object {
+        internal fun reportUri(context: Context, file: File): Uri =
+            FileProvider.getUriForFile(context, "${context.packageName}.reports.files", file)
+
         const val PDF_MIME_TYPE = "application/pdf"
         const val PNG_MIME_TYPE = "image/png"
         private const val PNG_QUALITY = 100

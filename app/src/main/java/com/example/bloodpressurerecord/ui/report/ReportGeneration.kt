@@ -26,14 +26,17 @@ class DefaultReportGenerator(
     private val cache: ReportCache
 ) : ReportGenerator {
     override suspend fun generate(report: BpReport): ReportArtifact {
+        val cacheGeneration = cache.generation
         var pendingFile: File? = null
         try {
             return withContext(Dispatchers.IO) {
                 val taskContext = currentCoroutineContext()
                 val plan = ReportLayoutPlanner.plan(report, ReportTheme.layoutSpec, renderer.textMetrics())
-                val file = cache.create(report.period)
+                val file = cache.create(report.period, cacheGeneration)
                 pendingFile = file
-                renderer.render(plan, file, isCancelled = { !taskContext.isActive })
+                renderer.render(plan, file, isCancelled = {
+                    !taskContext.isActive || cache.generation != cacheGeneration
+                })
                 ReportArtifact(file, plan)
             }
         } catch (error: Throwable) {

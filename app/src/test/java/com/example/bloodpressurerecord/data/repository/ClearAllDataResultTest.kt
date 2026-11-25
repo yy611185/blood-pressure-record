@@ -27,6 +27,6 @@ class ClearAllDataResultTest {
             warnings = listOf("settings reset failed", "widget refresh failed")
         )
 
-        assertEquals("健康记录已删除，但部分设置未能重置。", result.toUserMessage())
+        assertEquals("健康记录已删除，但部分清理未完成：settings reset failed、widget refresh failed。", result.toUserMessage())
     }
 }

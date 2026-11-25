@@ -18,56 +18,74 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+data class MedicationCalendarTarget(
+    val id: Long,
+    val displayName: String,
+    val accountName: String
+)
+
 /**
  * 把服药提醒写入系统日历：每个服药时间点一条“每日重复”日程（带日历提醒），
  * 由系统日历应用负责通知/闹钟，与应用内精确闹钟互为双保险。
  *
- * 事件通过 CUSTOM_APP_PACKAGE + 描述标记识别归属，每次同步先删旧后建新（全量重建），
+ * 事件通过 CUSTOM_APP_PACKAGE + 描述标记识别归属，每次同步全量重建，
  * 修改时间、删除药品或关闭开关后不会留下孤儿日程。
  */
 class MedicationCalendarSync(
     private val context: Context,
     private val zoneId: ZoneId = ZoneId.systemDefault()
 ) {
-    private val rebuildMutex = Mutex()
     private val settingsStore = AppSettingsStore(context)
 
-    fun hasPermission(): Boolean =
+    private fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) ==
             PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) ==
             PackageManager.PERMISSION_GRANTED
 
-    /**
-     * 全量重建本应用创建的服药日程。
-     * @param slots 当前启用的全部服药时间点（taken 字段在此无意义）
-     * @param enabled 日历同步开关；关闭时仅清理已有日程
-     * @return 成功创建的日程数；无权限或无可写日历时返回 null
-     */
-    suspend fun rebuild(slots: List<MedicationSlot>, enabled: Boolean): Int? =
-        rebuildMutex.withLock {
-            withContext(Dispatchers.IO) {
-            if (!hasPermission()) {
-                // 从未创建日程的用户不需要为关闭的可选功能授权。
-                return@withContext if (!enabled && !settingsStore.calendarEventsMayExist.first()) 0 else null
+    suspend fun loadTargets(): List<MedicationCalendarTarget> = withContext(Dispatchers.IO) {
+        check(hasPermission()) { "请先授权日历读写权限" }
+        cleanUnconfiguredEvents()
+        findWritableCalendars()
+    }
+
+    /** 旧版开启过同步但未明确选择日历，移除这些旧日程并等待用户重新确认。 */
+    suspend fun cleanUnconfiguredEvents() = rebuildMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (!settingsStore.settingsFlow.first().medicationCalendarSyncEnabled &&
+                settingsStore.calendarEventsMayExist.first() && hasPermission()
+            ) {
+                findOurEventIds().forEach(::deleteEvent)
+                settingsStore.setCalendarEventsMayExist(false)
+            }
+        }
+    }
+
+    suspend fun rebuild(slots: List<MedicationSlot>) = rebuildMutex.withLock {
+        withContext(Dispatchers.IO) {
+            val settings = settingsStore.settingsFlow.first()
+            val calendarId = settings.medicationCalendarId
+            val mayHaveEvents = settingsStore.calendarEventsMayExist.first()
+            if (calendarId == null && !mayHaveEvents) return@withContext
+            check(hasPermission()) {
+                if (calendarId == null) "请授予日历读写权限以清理旧日程"
+                else "请授予日历读写权限以同步服药提醒"
             }
             val existingEventIds = findOurEventIds()
-            if (existingEventIds.isNotEmpty()) settingsStore.setCalendarEventsMayExist(true)
-            if (!enabled) {
+            if (calendarId == null) {
                 existingEventIds.forEach(::deleteEvent)
                 settingsStore.setCalendarEventsMayExist(false)
-                return@withContext 0
+                return@withContext
             }
-            // 先确认目标日历可写，再改动旧日程；没有可写日历时保留现状。
-            val calendarId = findWritableCalendarId() ?: return@withContext null
+            check(findWritableCalendars().any { it.id == calendarId }) {
+                "所选日历已不可写，请重新选择"
+            }
             // 先记状态再创建，进程退出或创建失败时仍能重试清理。
             if (slots.isNotEmpty()) settingsStore.setCalendarEventsMayExist(true)
-            var created = 0
             val createdEventIds = mutableListOf<Long>()
             try {
                 slots.forEach { slot ->
-                    createdEventIds += insertDailyEvent(calendarId, slot)
-                    created += 1
+                    createdEventIds += insertDailyEvent(calendarId, slot, settings.medicationCalendarIncludeDetails)
                 }
                 // 新集合完整创建后才移除旧集合，创建阶段失败不会丢失原有提醒。
                 existingEventIds.forEach(::deleteEvent)
@@ -79,9 +97,8 @@ class MedicationCalendarSync(
                 }
                 throw throwable
             }
-            created
-            }
         }
+    }
 
     private fun findOurEventIds(): List<Long> {
         val resolver = context.contentResolver
@@ -111,16 +128,17 @@ class MedicationCalendarSync(
         check(deleted == 1) { "无法删除本应用的日历日程 $eventId" }
     }
 
-    private fun findWritableCalendarId(): Long? {
+    private fun findWritableCalendars(): List<MedicationCalendarTarget> {
         val resolver = context.contentResolver
-        var fallback: Long? = null
+        val calendars = mutableListOf<MedicationCalendarTarget>()
         val cursor = resolver.query(
             CalendarContract.Calendars.CONTENT_URI,
             arrayOf(
                 CalendarContract.Calendars._ID,
                 CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL,
-                CalendarContract.Calendars.IS_PRIMARY,
-                CalendarContract.Calendars.VISIBLE
+                CalendarContract.Calendars.VISIBLE,
+                CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                CalendarContract.Calendars.ACCOUNT_NAME
             ),
             null,
             null,
@@ -130,23 +148,26 @@ class MedicationCalendarSync(
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(0)
                 val access = cursor.getInt(1)
-                val isPrimary = cursor.getInt(2) == 1
-                val visible = cursor.getInt(3) == 1
+                val visible = cursor.getInt(2) == 1
                 if (access >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR && visible) {
-                    if (isPrimary) return id
-                    if (fallback == null) fallback = id
+                    calendars += MedicationCalendarTarget(
+                        id = id,
+                        displayName = cursor.getString(3).orEmpty().ifBlank { "日历 $id" },
+                        accountName = cursor.getString(4).orEmpty()
+                    )
                 }
             }
         }
-        return fallback
+        return calendars.sortedWith(compareBy({ it.displayName }, { it.accountName }, { it.id }))
     }
 
-    private fun insertDailyEvent(calendarId: Long, slot: MedicationSlot): Long {
+    private fun insertDailyEvent(calendarId: Long, slot: MedicationSlot, includeDetails: Boolean): Long {
         val time = LocalTime.parse(slot.timeText)
         val start = LocalDate.now(zoneId).atTime(time).atZone(zoneId).toInstant().toEpochMilli()
+        val title = if (includeDetails) "服药提醒：${slot.name} ${slot.dosage}".trimEnd() else "服药提醒"
         val values = ContentValues().apply {
             put(CalendarContract.Events.CALENDAR_ID, calendarId)
-            put(CalendarContract.Events.TITLE, "服药提醒：${slot.name} ${slot.dosage}")
+            put(CalendarContract.Events.TITLE, title)
             put(CalendarContract.Events.DESCRIPTION, EVENT_DESCRIPTION)
             put(CalendarContract.Events.DTSTART, start)
             // 重复日程用 DURATION（RFC5545），不能用 DTEND。
@@ -181,6 +202,7 @@ class MedicationCalendarSync(
     }
 
     companion object {
+        private val rebuildMutex = Mutex()
         const val EVENT_DESCRIPTION = "由「血压记录」App自动创建的服药提醒日程"
     }
 }

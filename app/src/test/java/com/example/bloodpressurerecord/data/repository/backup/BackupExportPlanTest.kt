@@ -40,6 +40,61 @@ class BackupExportPlanTest {
     }
 
     @Test
+    fun splitMedicationsKeepsEachVolumeReadableWithoutItsPredecessor() {
+        val sample = payload(0)
+        val medicines = (0..BackupImportLimits.MAX_MEDICATIONS).map { index ->
+            BackupMedicationRow("med-$index", "药品 $index", "1", true, index.toLong())
+        }
+        val lastTime = BackupMedicationTimeRow("last-time", medicines.last().backupId, "08:30")
+        val log = BackupMedicationLogRow(lastTime.backupId, 20_000, 1_795_432_167_891)
+        val plan = BackupExportPlan.fromPayload(sample.copy(
+            medications = medicines, medicationTimes = listOf(lastTime), medicationLogs = listOf(log)
+        ))
+        assertEquals(listOf(1_000, 1), plan.volumes.map { it.medications.size })
+
+        val reader = BackupFileReader()
+        val restored = plan.volumes.map { volume ->
+            val bytes = ByteArrayOutputStream().use { output ->
+                BackupFileWriter().writeXlsx(volume, output)
+                output.toByteArray()
+            }
+            reader.validateExportArchive(bytes)
+            reader.readXlsx(bytes.inputStream())
+        }
+        assertEquals(medicines, restored.flatMap { it.medications })
+        assertEquals(listOf(lastTime), restored.last().medicationTimes)
+        assertEquals(listOf(log), restored.last().medicationLogs)
+    }
+
+    @Test
+    fun splitTimesAndLogsRepeatsOnlyTheirParentsAndKeepsEveryLogOnce() {
+        val sample = payload(0)
+        val medicines = (0..10).map { sample.medications.single().copy(backupId = "med-$it", createdAt = it.toLong()) }
+        val times = (0..BackupImportLimits.MAX_MEDICATION_TIMES).map { index ->
+            val minute = index % 1_000
+            val hhmm = (minute / 60).toString().padStart(2, '0') + ":" + (minute % 60).toString().padStart(2, '0')
+            BackupMedicationTimeRow("time-$index", medicines[index / 1_000].backupId, hhmm)
+        }
+        val timesPlan = BackupExportPlan.fromPayload(sample.copy(
+            medications = medicines, medicationTimes = times, medicationLogs = emptyList()
+        ))
+        assertEquals(listOf(10_000, 1), timesPlan.volumes.map { it.medicationTimes.size })
+        assertEquals(times, timesPlan.volumes.flatMap { it.medicationTimes })
+        assertEquals(listOf(medicines.last()), timesPlan.volumes.last().medications)
+
+        val logs = (0..BackupImportLimits.MAX_MEDICATION_LOGS).map { day ->
+            BackupMedicationLogRow("time", day.toLong(), 1_700_000_000_000L + day * 86_400_000L)
+        }
+        val logsPlan = BackupExportPlan.fromPayload(sample.copy(medicationLogs = logs))
+        assertEquals(listOf(50_000, 1), logsPlan.volumes.map { it.medicationLogs.size })
+        assertEquals(logs, logsPlan.volumes.flatMap { it.medicationLogs })
+        assertTrue(logsPlan.volumes.all { volume ->
+            volume.medications == sample.medications && volume.medicationTimes == sample.medicationTimes
+        })
+        assertTrue(logsPlan.volumes.last().userProfile.isEmpty())
+    }
+
+    @Test
     fun fiveThousandAndOneRecordsRoundTripEveryPlainAndEncryptedVolume() {
         val payload = payload(5_001)
         val plan = BackupExportPlan.fromPayload(payload)

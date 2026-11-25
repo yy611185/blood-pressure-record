@@ -3,6 +3,7 @@ package com.example.bloodpressurerecord.data.datastore
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 
@@ -23,6 +24,9 @@ object PreferenceKeys {
     val LAST_SUCCESSFUL_EXPORT_AT = longPreferencesKey("last_successful_export_at")
     val MEDICATION_REMINDER_ENABLED = booleanPreferencesKey("medication_reminder_enabled")
     val MEDICATION_CALENDAR_SYNC_ENABLED = booleanPreferencesKey("medication_calendar_sync_enabled")
+    val MEDICATION_CALENDAR_ID = longPreferencesKey("medication_calendar_id")
+    val MEDICATION_CALENDAR_INCLUDE_DETAILS = booleanPreferencesKey("medication_calendar_include_details")
     val MEDICATION_CALENDAR_EVENTS_MAY_EXIST = booleanPreferencesKey("medication_calendar_events_may_exist")
     val SCHEDULED_MEDICATION_TIME_IDS = stringPreferencesKey("scheduled_medication_time_ids")
+    val MEDICATION_ALARM_TRIGGERS = stringSetPreferencesKey("medication_alarm_triggers")
 }

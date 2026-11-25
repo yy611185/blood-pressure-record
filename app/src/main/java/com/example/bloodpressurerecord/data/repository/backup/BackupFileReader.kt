@@ -5,11 +5,14 @@ import java.io.InputStream
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.util.Locale
-import java.util.zip.ZipFile
+import org.apache.commons.compress.archivers.zip.ZipFile
+import org.apache.commons.compress.utils.SeekableInMemoryByteChannel
 import org.apache.poi.openxml4j.util.ZipSecureFile
+import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
 import org.apache.poi.ss.usermodel.Sheet
+import org.apache.poi.xssf.usermodel.XSSFCell
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 
 data class BackupImportReading(
@@ -103,7 +106,7 @@ class BackupFileReader {
                 tempFile
             }
             try {
-                preflightZip(sourceFile)
+                preflightZip { ZipFile.builder().setFile(sourceFile).get() }
                 // 10 MB 的文件上限只限制压缩后字节；下面的中央目录和实际解压读取
                 // 共同限制条目数、单条目大小、总解压大小和压缩炸弹比例。
                 ZipSecureFile.setMinInflateRatio(BackupImportLimits.MIN_INFLATE_RATIO)
@@ -193,15 +196,25 @@ class BackupFileReader {
         return BackupCrypto.isEncryptedContainer(header)
     }
 
+    /** 明文和加密导出在保存前均使用导入端的压缩包限制，明文只在内存中校验。 */
+    internal fun validateExportArchive(xlsxBytes: ByteArray) {
+        if (xlsxBytes.size > BackupImportLimits.MAX_FILE_BYTES) {
+            throw BackupFormatException("生成的备份超过 10 MB，无法保存为可恢复的备份。")
+        }
+        preflightZip {
+            ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(xlsxBytes)).get()
+        }
+    }
+
     /** 在交给 POI 解析前先按 ZIP 中央目录和实际解压字节做有界预检。 */
-    private fun preflightZip(file: File) {
+    private fun preflightZip(openArchive: () -> ZipFile) {
         try {
-            ZipFile(file).use { zip ->
+            openArchive().use { zip ->
                 val names = hashSetOf<String>()
                 var entryCount = 0
                 var worksheetXmlCount = 0
                 var totalUncompressed = 0L
-                val entries = zip.entries()
+                val entries = zip.entries
                 while (entries.hasMoreElements()) {
                     val entry = entries.nextElement()
                     entryCount += 1
@@ -471,9 +484,14 @@ class BackupFileReader {
     }
 
     private fun Row.strictLong(columns: Map<String, Int>, name: String): Long? {
-        val value = text(columns, name).trim()
-        if (value.isBlank()) return null
-        return runCatching { BigDecimal(value).stripTrailingZeros().longValueExact() }.getOrNull()
+        val cell = getCell(columns.getValue(name)) as? XSSFCell ?: return null
+        // Excel 的 General 显示格式会将毫秒时间戳舍入为科学计数法，直接读文件内的数值。
+        val value = when (cell.cellType) {
+            CellType.NUMERIC -> cell.rawValue ?: return null
+            CellType.STRING -> cell.stringCellValue.trim()
+            else -> return null
+        }
+        return runCatching { BigDecimal(value).longValueExact() }.getOrNull()
     }
 
     private fun Row.strictBoolean(columns: Map<String, Int>, name: String): Boolean? {
