@@ -330,6 +330,19 @@ fun BloodPressureAppRoot(
             ) {
                 composable(AppDestination.Measure.route) { backStack ->
                     val dashboardVm: DashboardViewModel = viewModel(factory = factory)
+                    val openHistoryDate: (LocalDate) -> Unit = { targetDate ->
+                        if (navController.currentBackStackEntry == backStack) {
+                            navController.navigate(AppDestination.History.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                            navController.currentBackStackEntry?.savedStateHandle?.set(
+                                "history_open_date",
+                                targetDate.toString()
+                            )
+                        }
+                    }
                     DashboardScreen(
                         viewModel = dashboardVm,
                         onAddMeasurement = openAddMeasurement,
@@ -345,19 +358,8 @@ fun BloodPressureAppRoot(
                                 }
                             }
                         },
-                        onViewTodayRecords = {
-                            if (navController.currentBackStackEntry == backStack) {
-                                navController.navigate(AppDestination.History.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                                navController.currentBackStackEntry?.savedStateHandle?.set(
-                                    "history_open_date",
-                                    LocalDate.now().toString()
-                                )
-                            }
-                        },
+                        onViewTodayRecords = { openHistoryDate(LocalDate.now()) },
+                        onViewDateRecords = openHistoryDate,
                         onOpenSessionDetail = { sessionId ->
                             if (sessionId.isNotBlank()) {
                                 navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))

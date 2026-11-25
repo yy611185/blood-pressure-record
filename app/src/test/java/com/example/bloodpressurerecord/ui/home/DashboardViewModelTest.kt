@@ -226,12 +226,52 @@ class DashboardViewModelTest {
         assertEquals(yesterday, state.week[4].date)
         assertEquals(110, state.week[4].averageSystolic)
         assertEquals(70, state.week[4].averageDiastolic)
+        assertEquals(1, state.week[4].sessionCount)
         assertEquals(today, state.week[5].date)
         assertEquals(135, state.week[5].averageSystolic)
         assertEquals(86, state.week[5].averageDiastolic)
+        assertEquals(4, state.week[5].sessionCount)
         assertTrue(state.week[5].recorded)
         assertEquals(null, state.week[3].averageSystolic)
+        assertEquals(0, state.week[3].sessionCount)
         assertFalse(state.week[3].recorded)
+        // 本周 5 条记录：收缩压 (150+130+110+140+120)/5 = 130，舒张压 (90+85+70+90+80)/5 = 83
+        assertEquals(130, state.weekAverageSystolic)
+        assertEquals(83, state.weekAverageDiastolic)
+        assertEquals(0, state.weekHighRiskCount)
+    }
+
+    @Test
+    fun `week propagates high risk flag and follows configured normal cuts`() = runTest {
+        val today = LocalDate.of(2026, 7, 22) // 周三
+        val customConfig = BpZoneConfig.Default.copy(
+            sys = BpZoneConfig.Default.sys.copy(cuts = BpZoneCuts(90, 125, 140)),
+            dia = BpZoneConfig.Default.dia.copy(cuts = BpZoneCuts(60, 85, 95))
+        )
+        val repo = FakeRepository(
+            countsByRangeStart = emptyMap(),
+            summaries = listOf(
+                summary("normal-am", today, 8, 0, 118, 76),
+                summary("risk-pm", today, 20, 0, 184, 110).copy(containsHighRiskReading = true)
+            )
+        )
+        val vm = DashboardViewModel(
+            repository = repo,
+            zoneId = zone,
+            todayTicks = flowOf(today),
+            zoneConfigRepository = FakeZoneConfigRepository(initial = customConfig)
+        )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(125, state.normalSystolicCut)
+        assertEquals(85, state.normalDiastolicCut)
+        assertEquals(1, state.weekHighRiskCount)
+        assertTrue(state.week[2].containsHighRiskReading)
+        assertEquals(2, state.week[2].sessionCount)
+        assertEquals(151, state.weekAverageSystolic)
+        assertEquals(93, state.weekAverageDiastolic)
     }
 
     @Test

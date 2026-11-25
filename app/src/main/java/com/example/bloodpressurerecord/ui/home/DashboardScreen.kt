@@ -3,7 +3,6 @@ package com.example.bloodpressurerecord.ui.home
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,8 +27,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,7 +36,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Icon
@@ -82,7 +78,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bloodpressurerecord.data.repository.MedicationSlot
 import com.example.bloodpressurerecord.data.repository.SessionSummary
-import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
@@ -102,14 +97,13 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.max
-import kotlin.math.min
 
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onAddMeasurement: () -> Unit,
     onViewTodayRecords: () -> Unit,
+    onViewDateRecords: (LocalDate) -> Unit = { onViewTodayRecords() },
     onOpenMedicationSettings: () -> Unit = {},
     onOpenTrend: () -> Unit = {},
     onOpenSessionDetail: (String) -> Unit = {}
@@ -238,7 +232,7 @@ fun DashboardScreen(
                 if (state.showTrendChart) "看趋势" else null,
                 if (state.showTrendChart) onOpenTrend else null
             )
-            WeekCard(state)
+            WeekCard(state, onOpenDateRecords = onViewDateRecords)
         }
         SnackbarHost(
             snackbarHostState,
@@ -506,7 +500,7 @@ private fun HeroPressureValue(sys: Int, dia: Int, color: Color, modifier: Modifi
 }
 
 @Composable
-private fun RiskChip() {
+internal fun RiskChip() {
     Text(
         "高风险读数",
         style = MaterialTheme.typography.labelMedium,
@@ -727,7 +721,7 @@ internal fun MeasurementSlot(
 }
 
 @Composable
-private fun GradeChip(
+internal fun GradeChip(
     label: String,
     look: GradeLook,
     compact: Boolean = false,
@@ -889,211 +883,3 @@ private fun PillGlyph(primary: Color, secondary: Color) {
         }
     }
 }
-
-@Composable
-internal fun WeekCard(state: DashboardUiState) {
-    val colors = MaterialTheme.colorScheme
-    val reducedMotion = LocalReducedMotion.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .testTag("week-card")
-            .clip(RoundedCornerShape(26.dp))
-            .background(colors.surface)
-            .padding(8.dp)
-    ) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val compact = maxWidth < 240.dp * LocalDensity.current.fontScale
-            val headerModifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(colors.primaryContainer)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
-            if (compact) {
-                Column(headerModifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    WeekStreakSummary(state, Modifier.fillMaxWidth())
-                    WeekdayIndicators(state, Modifier.fillMaxWidth())
-                }
-            } else {
-                Row(
-                    headerModifier,
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(WeekSpacing)
-                ) {
-                    WeekStreakSummary(state, Modifier.weight(1f))
-                    WeekdayIndicators(state, Modifier.width(166.dp))
-                }
-            }
-        }
-        if (state.showTrendChart) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(138.dp)
-                    .padding(horizontal = 6.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(WeekSpacing),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                state.week.forEach { day ->
-                    val targetHeight = weekBarHeight(day)
-                    val animatedHeightState = animateDpAsState(
-                        targetValue = targetHeight,
-                        animationSpec = AppMotion.springGentle(reducedMotion),
-                        label = "week_bar_height"
-                    )
-                    val animatedHeight = if (reducedMotion) targetHeight else animatedHeightState.value
-                    val targetBarColor = if (day.averageSystolic == null) {
-                        colors.surfaceContainerHighest
-                    } else {
-                        gradeLook(day.categoryName()).mid
-                    }
-                    val animatedBarColorState = animateColorAsState(
-                        targetValue = targetBarColor,
-                        animationSpec = AppMotion.colorSpec(reducedMotion),
-                        label = "week_bar_color"
-                    )
-                    val animatedBarColor = if (reducedMotion) targetBarColor else animatedBarColorState.value
-                    Column(
-                        Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text(
-                            day.averageSystolic?.toString() ?: "",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = NumberFontFamily,
-                                fontSize = 11.sp,
-                                fontFeatureSettings = TabularFeatureSettings
-                            ),
-                            color = colors.onSurfaceVariant
-                        )
-                        Box(
-                            Modifier
-                                .widthIn(max = 26.dp)
-                                .fillMaxWidth()
-                                .height(animatedHeight)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(animatedBarColor)
-                        )
-                        val today = day.date == state.today
-                        Text(
-                            weekdayLabel(day.date),
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                            fontWeight = if (today) FontWeight.ExtraBold else FontWeight.SemiBold,
-                            color = if (today) colors.onSurface else colors.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Clip
-                        )
-                    }
-                }
-            }
-            Text(
-                "柱子数字为当天高压平均值",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)
-            )
-        } else {
-            Text(
-                "每天记一记，连续记录会显示在上方。",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun WeekStreakSummary(state: DashboardUiState, modifier: Modifier = Modifier) {
-    val colors = MaterialTheme.colorScheme
-    val titleText = when {
-        state.streakDays <= 0 -> "今天开始"
-        state.streakCapped -> "${state.streakDays}+ 天"
-        else -> "${state.streakDays} 天"
-    }
-    val subtitleText = if (state.streakDays <= 0) "每天记一记，养成好习惯" else "连续记录"
-    Row(
-        modifier.testTag("week-streak-summary"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(WeekSpacing)
-    ) {
-        Icon(Icons.Outlined.LocalFireDepartment, null, Modifier.size(25.dp), tint = colors.primary)
-        Column {
-            Text(
-                titleText,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = NumberFontFamily,
-                    fontSize = if (state.streakDays <= 0) 20.sp else 25.sp,
-                    fontFeatureSettings = TabularFeatureSettings
-                ),
-                color = colors.onPrimaryContainer
-            )
-            Text(subtitleText, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = colors.onPrimaryContainer)
-        }
-    }
-}
-
-@Composable
-private fun WeekdayIndicators(state: DashboardUiState, modifier: Modifier = Modifier) {
-    val colors = MaterialTheme.colorScheme
-    Row(
-        modifier.testTag("week-day-indicators"),
-        horizontalArrangement = Arrangement.spacedBy(WeekSpacing),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        state.week.forEachIndexed { index, day ->
-            val today = day.date == state.today
-            val future = day.date.isAfter(state.today)
-            val container = when {
-                today -> colors.primary.copy(alpha = 0.22f)
-                day.recorded -> colors.primary
-                future -> colors.surfaceContainerHighest
-                else -> colors.primary.copy(alpha = 0.18f)
-            }
-            val content = when {
-                today -> colors.onPrimaryContainer
-                day.recorded -> colors.onPrimary
-                future -> colors.onSurfaceVariant.copy(alpha = 0.55f)
-                else -> colors.onPrimaryContainer
-            }
-            Box(
-                Modifier
-                    .weight(1f)
-                    .heightIn(min = 22.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(container)
-                    .then(if (today) Modifier.border(1.dp, colors.primary, RoundedCornerShape(8.dp)) else Modifier),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    weekdayLabel(day.date),
-                    modifier = Modifier.testTag("week-day-label-$index"),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
-                    fontWeight = FontWeight.ExtraBold,
-                    color = content
-                )
-            }
-        }
-    }
-}
-
-/** 自然周固定 7 格，格间距与柱状图保持一致。 */
-private val WeekSpacing = 2.dp
-
-/** 柱高只由收缩压平均值决定，圆点行与柱状图共用同一份自然周数据。 */
-private fun weekBarHeight(day: DashboardWeekDay): androidx.compose.ui.unit.Dp =
-    if (day.averageSystolic == null) 8.dp
-    else max(14f, min(84f, (day.averageSystolic - 95f) * 1.4f)).dp
-
-private fun DashboardWeekDay.categoryName(): String =
-    if (averageSystolic != null && averageDiastolic != null) {
-        CategoryCalculator.calculate(averageSystolic, averageDiastolic).name
-    } else {
-        ""
-    }
-
-/** 自然周固定顺序：周一起，与历史月历及“本周”统计完全统一。 */
-private val WeekDayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
-
-internal fun weekdayLabel(date: LocalDate): String = WeekDayLabels[date.dayOfWeek.value - 1]

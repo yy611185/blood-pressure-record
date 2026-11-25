@@ -60,6 +60,15 @@ data class DashboardUiState(
     val todayOtherSessions: List<SessionSummary> = emptyList(),
     /** 自然周（周一→周日，固定 7 天）的每日均值与打卡状态。 */
     val week: List<DashboardWeekDay> = emptyList(),
+    /** 本自然周（周一至今）所有记录的收缩压平均值，与历史页「本周」口径一致。 */
+    val weekAverageSystolic: Int? = null,
+    /** 本自然周（周一至今）所有记录的舒张压平均值，与历史页「本周」口径一致。 */
+    val weekAverageDiastolic: Int? = null,
+    /** 本自然周内包含高风险读数的测量次数。 */
+    val weekHighRiskCount: Int = 0,
+    /** 正常区间参考上界（跟随 BpZoneConfig，默认 120/80）。 */
+    val normalSystolicCut: Int = BpZoneConfig.Default.sys.cuts.normal,
+    val normalDiastolicCut: Int = BpZoneConfig.Default.dia.cuts.normal,
     val userName: String? = null,
     val showTrendChart: Boolean = true,
     val showBuddy: Boolean = true,
@@ -81,8 +90,13 @@ data class DashboardWeekDay(
     val date: LocalDate,
     val averageSystolic: Int? = null,
     val averageDiastolic: Int? = null,
+    val sessionCount: Int = 0,
+    val containsHighRiskReading: Boolean = false,
     val recorded: Boolean = false
-)
+) {
+    val hasReadings: Boolean
+        get() = averageSystolic != null && averageDiastolic != null
+}
 
 data class MedicationFeedback(
     val slot: MedicationSlot,
@@ -94,6 +108,7 @@ private data class MeasurementSources(
     val latest: LatestSessionSummary?,
     val latestSession: SessionRecord?,
     val bpRange: BpRangeUiState,
+    val zoneConfig: BpZoneConfig,
     val todayStatistics: PeriodStatistics,
     val recentSummaries: List<CalendarSessionSummary>,
     val weekSummaries: List<SessionSummary>
@@ -159,6 +174,7 @@ class DashboardViewModel(
                     latest = latestPair.first,
                     latestSession = latestPair.second,
                     bpRange = buildBpRangeState(latestPair.first, config),
+                    zoneConfig = config,
                     todayStatistics = todayStatistics,
                     recentSummaries = recentSummaries,
                     weekSummaries = weekSummaries
@@ -191,6 +207,17 @@ class DashboardViewModel(
                     !SessionStatisticsCalculator.isMorning(it.measuredAt, activeZone) &&
                         !SessionStatisticsCalculator.isEvening(it.measuredAt, activeZone)
                 }
+                val weekAverageSystolic = weekSummaries
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it.avgSystolic }
+                    ?.average()
+                    ?.roundToInt()
+                val weekAverageDiastolic = weekSummaries
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it.avgDiastolic }
+                    ?.average()
+                    ?.roundToInt()
+                val weekHighRiskCount = weekSummaries.count { it.containsHighRiskReading }
                 DashboardUiState(
                     today = today,
                     latest = latest,
@@ -207,9 +234,16 @@ class DashboardViewModel(
                                 ?.map { it.avgSystolic }?.average()?.roundToInt(),
                             averageDiastolic = sessions.takeIf { it.isNotEmpty() }
                                 ?.map { it.avgDiastolic }?.average()?.roundToInt(),
+                            sessionCount = sessions.size,
+                            containsHighRiskReading = sessions.any { it.containsHighRiskReading },
                             recorded = date in recordedDates
                         )
                     },
+                    weekAverageSystolic = weekAverageSystolic,
+                    weekAverageDiastolic = weekAverageDiastolic,
+                    weekHighRiskCount = weekHighRiskCount,
+                    normalSystolicCut = measurements.zoneConfig.sys.cuts.normal,
+                    normalDiastolicCut = measurements.zoneConfig.dia.cuts.normal,
                     userName = settings.userProfile.name?.trim()?.takeIf { it.isNotEmpty() },
                     showTrendChart = settings.appSettings.showTrendChart,
                     showBuddy = settings.appSettings.showBuddy,

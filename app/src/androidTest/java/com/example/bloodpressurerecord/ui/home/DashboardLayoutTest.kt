@@ -147,6 +147,96 @@ class DashboardLayoutTest {
     }
 
     @Test
+    fun weekCardRangeChartSwitchesSelectedDayAndOpensDateRecords() {
+        val today = LocalDate.of(2026, 11, 25) // 周三
+        val weekDates = naturalWeekDates(today)
+        var openedDate: LocalDate? = null
+        val state = DashboardUiState(
+            today = today,
+            week = weekDates.mapIndexed { index, date ->
+                when (index) {
+                    0 -> DashboardWeekDay(date, averageSystolic = 112, averageDiastolic = 76, sessionCount = 2, recorded = true)
+                    1 -> DashboardWeekDay(date, averageSystolic = 111, averageDiastolic = 74, sessionCount = 1, recorded = true)
+                    2 -> DashboardWeekDay(date, averageSystolic = 105, averageDiastolic = 70, sessionCount = 3, recorded = true)
+                    else -> DashboardWeekDay(date, recorded = false)
+                }
+            },
+            weekAverageSystolic = 109,
+            weekAverageDiastolic = 73,
+            streakDays = 82,
+            showTrendChart = true,
+            loading = false
+        )
+
+        composeRule.setContent {
+            BloodPressureRecordTheme {
+                Surface {
+                    Column(Modifier.width(360.dp).padding(horizontal = 20.dp)) {
+                        WeekCard(state, onOpenDateRecords = { openedDate = it })
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // 保留连续记录 + 右侧显示本周均值，默认选中本周最近有记录日（周三 105/70）
+        composeRule.onNodeWithText("82 天", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("连续记录", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("109/73", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("105/70", useUnmergedTree = true).assertIsDisplayed()
+
+        // 点击周一列切换单日详情条，并触发跳转历史指定日期
+        composeRule.onNodeWithTag("week-day-column-0").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("112/76", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("week-view-day-action").performClick()
+        composeRule.waitForIdle()
+        assertEquals(weekDates[0], openedDate)
+    }
+
+    @Test
+    fun weekCardRangeChartFitsAt320DpAndFontScale2() {
+        val today = LocalDate.of(2026, 11, 25)
+        val weekDates = naturalWeekDates(today)
+        val state = DashboardUiState(
+            today = today,
+            week = weekDates.mapIndexed { index, date ->
+                when (index) {
+                    0 -> DashboardWeekDay(date, averageSystolic = 142, averageDiastolic = 91, sessionCount = 2, recorded = true)
+                    1 -> DashboardWeekDay(date, averageSystolic = 128, averageDiastolic = 82, sessionCount = 2, recorded = true)
+                    2 -> DashboardWeekDay(date, averageSystolic = 112, averageDiastolic = 76, sessionCount = 2, recorded = true)
+                    else -> DashboardWeekDay(date, recorded = false)
+                }
+            },
+            weekAverageSystolic = 127,
+            weekAverageDiastolic = 83,
+            streakDays = 82,
+            showTrendChart = true,
+            loading = false
+        )
+
+        setAt320DpFontScale2 {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                WeekCard(state)
+            }
+        }
+
+        val streak = composeRule.onNodeWithTag("week-streak-summary").fetchSemanticsNode().boundsInRoot
+        val average = composeRule.onNodeWithTag("week-average-summary").fetchSemanticsNode().boundsInRoot
+        assertTrue("Large-text header should stack weekly average below streak", average.top >= streak.bottom - 1f)
+        assertTextInside("82 天", streak)
+        assertTextInside("连续记录", streak)
+        assertTextInside("127/83", average)
+        assertTextLayoutFits("112/76")
+        assertTextLayoutFits("查看当天")
+        listOf("一", "二", "三", "四", "五", "六", "日").forEachIndexed { index, label ->
+            val node = composeRule.onNodeWithTag("week-day-label-$index", useUnmergedTree = true).assertIsDisplayed()
+            node.assertTextEquals(label)
+            assertTextLayoutFits("week-day-label-$index")
+        }
+    }
+
+    @Test
     fun profileGenderSegmentedOptionsStayUncroppedAt320DpAndFontScale2() {
         val repo = Proxy.newProxyInstance(
             SettingsRepository::class.java.classLoader,
