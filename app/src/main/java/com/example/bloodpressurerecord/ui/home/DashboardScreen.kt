@@ -409,6 +409,7 @@ internal fun ReadingHero(
                 .clip(readingShape)
                 .indication(readingInteraction, LocalIndication.current)
                 .focusRing(readingInteraction, readingShape)
+                .padding(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
