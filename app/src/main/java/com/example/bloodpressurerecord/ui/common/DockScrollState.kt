@@ -39,6 +39,13 @@ class DockScrollState(
         }
     }
 
+    /** 恢复展开态（例如从全屏趋势退出回竖屏首屏时同步复位）。 */
+    fun expand() {
+        isCompact = false
+        distance = 0f
+        direction = 0
+    }
+
     private fun observe(deltaY: Float) {
         val nextDirection = if (deltaY < 0f) -1 else 1
         if (nextDirection != direction) {

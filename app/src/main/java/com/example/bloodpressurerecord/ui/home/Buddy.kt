@@ -1,6 +1,5 @@
 package com.example.bloodpressurerecord.ui.home
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -11,6 +10,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -30,6 +31,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.common.appMotionColor
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 
 /** 供资料页复用的友好状态小压；category 可传中文分级或仓库 enum 名。 */
@@ -123,15 +126,17 @@ internal fun Buddy(
         }
     }
 
-    val bodyColorState = animateColorAsState(
+    val bodyColor = appMotionColor(
         targetValue = look.body,
-        animationSpec = AppMotion.colorSpec(reducedMotion, AppMotion.Medium),
-        label = "buddy_body_color"
+        reducedMotion = reducedMotion,
+        label = "buddy_body_color",
+        duration = AppMotion.Medium
     )
-    val midColorState = animateColorAsState(
+    val midColor = appMotionColor(
         targetValue = look.mid,
-        animationSpec = AppMotion.colorSpec(reducedMotion, AppMotion.Medium),
-        label = "buddy_mid_color"
+        reducedMotion = reducedMotion,
+        label = "buddy_mid_color",
+        duration = AppMotion.Medium
     )
 
     val bodyPath = remember { Path() }
@@ -139,18 +144,23 @@ internal fun Buddy(
     val rightLeafPath = remember { Path() }
     val mouthPath = remember { Path() }
 
+    val interactionSource = remember { MutableInteractionSource() }
     Canvas(
         modifier
             .then(
                 if (onClick != null) {
                     Modifier
                         .semantics { contentDescription = "小压，点一下换一句话" }
-                        .clickable {
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null
+                        ) {
                             if (motionEnabled) {
                                 taps += 1
                             }
                             onClick()
                         }
+                        .focusRing(interactionSource, RoundedCornerShape(20.dp))
                 } else {
                     Modifier
                 }
@@ -168,8 +178,6 @@ internal fun Buddy(
                 }
             }
     ) {
-        val bodyColor = if (reducedMotion) look.body else bodyColorState.value
-        val midColor = if (reducedMotion) look.mid else midColorState.value
         val blink = if (idleMotionEnabled) (blinkState?.value ?: 0f) else 0f
         val sx = size.width / 100f
         val sy = size.height / 94f

@@ -2,8 +2,6 @@ package com.example.bloodpressurerecord.ui.home
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -12,6 +10,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +64,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -76,13 +77,17 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.data.repository.MedicationSlot
 import com.example.bloodpressurerecord.data.repository.SessionSummary
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.common.appMotionColor
+import com.example.bloodpressurerecord.ui.common.appMotionFloat
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
@@ -161,11 +166,19 @@ fun DashboardScreen(
             ) { heroState ->
                 when {
                     heroState.loading -> EmptyHero("正在读取最近记录…", null, heroState.showBuddy)
-                    heroState.latest == null -> EmptyHero("你好呀，我是小压！测完血压记下来，我会陪着你～", onAddMeasurement, heroState.showBuddy)
+                    heroState.latest == null -> EmptyHero(
+                        if (heroState.showBuddy) {
+                            "你好呀，我是小压！测完血压记下来，我陪你一起看变化。"
+                        } else {
+                            "还没有血压记录，测完血压后点下方按钮记下来吧。"
+                        },
+                        onAddMeasurement,
+                        heroState.showBuddy
+                    )
                     else -> ReadingHero(heroState, onOpenDetail = onOpenSessionDetail)
                 }
             }
-            SectionHeader("今天的测量", "早晚各一次最好")
+            SectionHeader("今天的测量", "建议早晚各测一次")
             MeasurementSlotsSection(
                 morning = state.todayMorning,
                 evening = state.todayEvening,
@@ -179,18 +192,21 @@ fun DashboardScreen(
             ) {
                 val otherCount = state.todayOtherSessions.size
                 val otherInteraction = remember { MutableInteractionSource() }
+                val otherShape = RoundedCornerShape(16.dp)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = AppSpacing.small)
-                        .pressableScale(otherInteraction, pressedScale = 0.985f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surface)
                         .clickable(
                             interactionSource = otherInteraction,
-                            indication = LocalIndication.current,
+                            indication = null,
                             onClick = onViewTodayRecords
                         )
+                        .pressableScale(otherInteraction, pressedScale = 0.985f)
+                        .clip(otherShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .indication(otherInteraction, LocalIndication.current)
+                        .focusRing(otherInteraction, otherShape)
                         .heightIn(min = 48.dp)
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -289,37 +305,58 @@ internal fun ReadingHero(
     val detail = state.latestSession
     val reducedMotion = LocalReducedMotion.current
     val look = gradeLook(latest.category)
-    val softState = animateColorAsState(
+    val animatedSoft = appMotionColor(
         targetValue = look.soft,
-        animationSpec = AppMotion.colorSpec(reducedMotion, AppMotion.Medium),
-        label = "hero_soft_bg"
+        reducedMotion = reducedMotion,
+        label = "hero_soft_bg",
+        duration = AppMotion.Medium
     )
-    val inkState = animateColorAsState(
+    val animatedInk = appMotionColor(
         targetValue = look.ink,
-        animationSpec = AppMotion.colorSpec(reducedMotion, AppMotion.Medium),
-        label = "hero_ink"
+        reducedMotion = reducedMotion,
+        label = "hero_ink",
+        duration = AppMotion.Medium
     )
-    val animatedSoft = if (reducedMotion) look.soft else softState.value
-    val animatedInk = if (reducedMotion) look.ink else inkState.value
     val risk = latest.containsHighRiskReading
     val time = Instant.ofEpochMilli(latest.measuredAt).atZone(ZoneId.systemDefault())
-    val day = if (time.toLocalDate() == state.today) "今天" else time.format(DateTimeFormatter.ofPattern("M月d日"))
+    val isToday = time.toLocalDate() == state.today
+    val day = if (isToday) "今天" else time.format(DateTimeFormatter.ofPattern("M月d日"))
     val guidance = when {
-        risk -> "这次读数很高，先休息一下，再复测一次好吗？"
-        latest.category.equals("LOW", true) -> "有点偏低哦，起身慢一点，多喝点水～"
-        latest.category.equals("NORMAL", true) -> "漂亮！今天的血压很听话 ✓"
-        latest.category.equals("HIGH_NORMAL", true) || latest.category.equals("ELEVATED", true) -> "还不错，稍微留意一下盐和睡眠。"
-        latest.category.equals("STAGE1", true) -> "有点偏高，放松一下，过会儿再测一次？"
-        latest.category.equals("STAGE2", true) -> "偏高了，记得按时吃药，不舒服要联系医生。"
-        else -> "读数很高！请休息后复测，持续偏高请及时就医。"
+        risk -> "读数达到高风险范围，请先查看下方提示：若有胸痛、呼吸困难等不适请立即就医；无不适请静坐休息后复测。"
+        latest.category.equals("LOW", true) -> "读数偏低，起身慢一点；如感头晕、眼前发黑或乏力，请坐卧休息并及时咨询医生。"
+        latest.category.equals("NORMAL", true) -> if (isToday) {
+            "本次读数在正常范围，继续保持。"
+        } else {
+            "上次（$day）血压正常，今天记得量一量。"
+        }
+        latest.category.equals("HIGH_NORMAL", true) || latest.category.equals("ELEVATED", true) -> if (isToday) {
+            "处于正常高值，平时注意清淡饮食、规律作息，继续观察变化。"
+        } else {
+            "上次（$day）处于正常高值，今天记得规律测量观察变化。"
+        }
+        latest.category.equals("STAGE1", true) -> if (isToday) {
+            "本次读数偏高，请静坐休息片刻再复测；若持续偏高，请咨询医生。"
+        } else {
+            "上次（$day）读数偏高，记得规律测量并关注变化。"
+        }
+        latest.category.equals("STAGE2", true) -> "读数明显偏高，请静坐休息后复测；如已遵医嘱服药请注意规律用药，持续偏高或不适请及时联系医生。"
+        else -> "本次读数很高，请静坐休息后复测；若伴有胸痛、剧烈头痛等不适或持续偏高，请及时就医。"
     }
     val nextMedication = state.medicationSlots.firstOrNull { !it.taken }
     val messages = listOf(
         guidance,
-        "测血压前先静坐休息 5 分钟，结果更准哦～",
-        if (state.streakDays > 1) "已经连续记录 ${state.streakDays} 天啦，继续保持！" else "平时少吃咸，睡个好觉，血压更平稳～",
-        nextMedication?.let { "今天 ${it.timeText} 记得吃${it.name}" }
-            ?: if (state.medicationSlots.isEmpty()) "每天早晚各测一次，我会帮你记着～" else "今天的药都吃过啦，真棒！"
+        "测血压前先静坐休息 5 分钟，读数更准确。",
+        if (state.streakDays > 1) {
+            if (state.streakCapped) {
+                "已经连续记录 ${state.streakDays} 天以上啦，继续保持！"
+            } else {
+                "已经连续记录 ${state.streakDays} 天，继续保持！"
+            }
+        } else {
+            "平时少盐饮食、睡个好觉，有助于血压平稳。"
+        },
+        nextMedication?.let { "今天 ${it.timeText} 有「${it.name}」的服药计划，别忘了打卡。" }
+            ?: if (state.medicationSlots.isEmpty()) "每天早晚各测一次，记在这里方便回看变化。" else "今天的服药计划都打卡啦，真棒！"
     )
     var messageIndex by remember(latest.id) { mutableIntStateOf(0) }
     val readingInteraction = remember { MutableInteractionSource() }
@@ -357,18 +394,21 @@ internal fun ReadingHero(
         }
         Spacer(Modifier.height(8.dp))
         // 可点击读数区：直达最近一次记录详情，核对原始读数或修改备注一步到位。
+        val readingShape = RoundedCornerShape(16.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .pressableScale(readingInteraction, pressedScale = 0.985f)
-                .clip(RoundedCornerShape(16.dp))
                 .clickable(
                     interactionSource = readingInteraction,
-                    indication = LocalIndication.current,
+                    indication = null,
                     role = Role.Button,
                     onClickLabel = "查看最近一次测量详情",
                     onClick = { onOpenDetail(latest.id) }
                 )
+                .pressableScale(readingInteraction, pressedScale = 0.985f)
+                .clip(readingShape)
+                .indication(readingInteraction, LocalIndication.current)
+                .focusRing(readingInteraction, readingShape)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -437,7 +477,7 @@ internal fun ReadingHero(
                 if (count != null) {
                     Text(
                         if (detail.averageStrategy == AverageStrategy.DISCARD_FIRST && count >= 2) {
-                            "弃第1组 · ${count - 1} 组平均"
+                            "弃第 1 组 · ${count - 1} 组平均"
                         } else {
                             "$count 组平均"
                         },
@@ -455,7 +495,7 @@ internal fun ReadingHero(
             exit = AppMotion.expandVisibilityExit(reducedMotion)
         ) {
             Text(
-                "有读数达到 180/120 以上。请静坐休息后复测；伴胸痛、剧烈头痛等请立即就医。",
+                stringResource(R.string.high_risk_reading_guidance),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onError,
@@ -649,29 +689,33 @@ internal fun MeasurementSlot(
     val base = if (session == null) {
         modifier
             .heightIn(min = 104.dp)
-            .pressableScale(interactionSource, pressedScale = 0.97f)
-            .clip(shape)
-            .border(2.dp, colors.outlineVariant, shape)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 role = Role.Button,
                 onClickLabel = "记录$label 血压",
                 onClick = onClick
             )
+            .pressableScale(interactionSource, pressedScale = 0.97f)
+            .clip(shape)
+            .border(2.dp, colors.outlineVariant, shape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, shape)
     } else {
         modifier
             .heightIn(min = 104.dp)
-            .pressableScale(interactionSource, pressedScale = 0.97f)
-            .clip(shape)
-            .background(colors.surface)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 role = Role.Button,
                 onClickLabel = "查看$label 测量详情",
                 onClick = onClick
             )
+            .pressableScale(interactionSource, pressedScale = 0.97f)
+            .clip(shape)
+            .background(colors.surface)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, shape)
     }
     Column(
         base
@@ -750,17 +794,20 @@ internal fun GradeChip(
 @Composable
 private fun EmptyMedication(onOpenSettings: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(22.dp)
     Row(
         Modifier
             .fillMaxWidth()
-            .pressableScale(interactionSource, pressedScale = 0.985f)
-            .clip(RoundedCornerShape(22.dp))
-            .background(MaterialTheme.colorScheme.surface)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onOpenSettings
             )
+            .pressableScale(interactionSource, pressedScale = 0.985f)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, shape)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -776,14 +823,15 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
     val reducedMotion = LocalReducedMotion.current
     val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
-    val checkBackground by animateColorAsState(
+    val checkBackground = appMotionColor(
         targetValue = if (slot.taken) colors.secondaryContainer else colors.surfaceContainerHighest,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
+        reducedMotion = reducedMotion,
         label = "Medication background"
     )
-    val checkScale by animateFloatAsState(
+    val checkScale = appMotionFloat(
         targetValue = if (slot.taken) 1f else 0.72f,
-        animationSpec = AppMotion.springCheck(reducedMotion),
+        reducedMotion = reducedMotion,
+        spec = AppMotion.springCheck(reducedMotion = false),
         label = "Medication check scale"
     )
     Row(
@@ -813,30 +861,35 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                "${slot.timeText} · ${slot.dosage}",
+                if (slot.dosage.isBlank()) slot.timeText else "${slot.timeText} · ${slot.dosage}",
                 style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = TabularFeatureSettings),
                 color = colors.onSurfaceVariant,
                 maxLines = 1
             )
         }
+        val checkShape = RoundedCornerShape(15.dp)
         Box(
             Modifier
-                .size(68.dp, 48.dp)
-                .pressableScale(interactionSource, enabled = !pending, pressedScale = 0.92f)
-                .clip(RoundedCornerShape(15.dp))
-                .background(checkBackground)
+                .widthIn(min = 76.dp)
+                .heightIn(min = 48.dp)
+                .semantics {
+                    contentDescription = if (slot.taken) "${slot.name}，已打卡，点击取消" else "${slot.name}，点击打卡"
+                }
                 .clickable(
                     interactionSource = interactionSource,
-                    indication = LocalIndication.current,
+                    indication = null,
                     enabled = !pending,
+                    role = Role.Button,
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         onToggle()
                     }
                 )
-                .semantics {
-                    contentDescription = if (slot.taken) "${slot.name}，已服用，点击取消" else "${slot.name}，点击打卡"
-                },
+                .pressableScale(interactionSource, enabled = !pending, pressedScale = 0.92f)
+                .clip(checkShape)
+                .background(checkBackground)
+                .focusRing(interactionSource, checkShape, enabled = !pending)
+                .padding(horizontal = 10.dp),
             contentAlignment = Alignment.Center
         ) {
             AnimatedContent(
@@ -845,7 +898,10 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
                 contentAlignment = Alignment.Center,
                 label = "Medication label"
             ) { taken ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     if (taken) Icon(
                         Icons.Outlined.Check,
                         null,
@@ -858,7 +914,7 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
                         tint = colors.onSecondaryContainer
                     )
                     Text(
-                        if (taken) "吃了" else "打卡",
+                        if (taken) "已打卡" else "打卡",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (taken) colors.onSecondaryContainer else colors.onSurfaceVariant

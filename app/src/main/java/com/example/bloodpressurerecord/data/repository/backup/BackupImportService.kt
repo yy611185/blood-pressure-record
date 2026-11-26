@@ -77,12 +77,18 @@ data class BackupImportResult(
 
     fun toUserMessage(): String {
         val settingsWarning = if (errors.any { it.code == BackupImportErrorCode.SETTINGS_NOT_RESTORED }) {
-            "选定内容已导入，但设置恢复失败。"
+            " 选定内容已导入，但设置恢复失败。"
         } else {
             ""
         }
-        return "备份导入完成：新增 $insertedCount 条，覆盖 $replacedCount 条，" +
-            "自动修正 $correctedCount 条，跳过 $skippedCount 条，错误 $errorCount 条。" +
+        val summaryParts = buildList {
+            add("新增 $insertedCount 条")
+            add("覆盖 $replacedCount 条")
+            if (correctedCount > 0) add("自动修正 $correctedCount 条")
+            if (skippedCount > 0) add("跳过 $skippedCount 条")
+            if (errorCount > 0) add("校验异常 $errorCount 条")
+        }.joinToString("，")
+        return "备份导入完成：$summaryParts。" +
             settingsWarning + if (medicationCount > 0 || medicationLogCount > 0) {
                 " 已恢复药品 $medicationCount 种、时间点 $medicationTimeCount 个、打卡 $medicationLogCount 条。"
             } else ""

@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.ui.history
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -13,6 +14,7 @@ import androidx.compose.ui.unit.Density
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -76,7 +78,7 @@ class CalendarAccessibilityTest {
     }
 
     @Test
-    fun recorded_day_doubleClick_invokesDetailAction() {
+    fun noted_day_touchDoubleClick_andAccessibilityAction_invokesDetailAction() {
         val date = LocalDate.of(2026, 7, 25)
         var detailClicks = 0
         composeRule.setContent {
@@ -95,9 +97,16 @@ class CalendarAccessibilityTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription(
-            "7月25日，有1条记录，可选择，含自定义备注，双击查看"
-        ).performTouchInput { doubleClick() }
+        val day = composeRule.onNodeWithContentDescription(
+            "7月25日，有1条记录，可选择，含备注"
+        )
+        day.performTouchInput { doubleClick() }
         assertEquals(1, detailClicks)
+        val locateNote = day.fetchSemanticsNode().config[SemanticsActions.CustomActions]
+            .single { it.label == "定位到备注记录" }
+        composeRule.runOnIdle {
+            assertTrue(locateNote.action())
+        }
+        assertEquals(2, detailClicks)
     }
 }

@@ -75,13 +75,13 @@ object BackupCrypto {
         }
         val kdfId = container[MAGIC.size + 1].toInt() and 0xFF
         if (kdfId != KDF_PBKDF2_HMAC_SHA256) {
-            throw BackupContainerFormatException("不支持的密钥派生算法：$kdfId")
+            throw BackupContainerFormatException("该加密备份文件的加密参数不受当前版本支持")
         }
         var offset = MAGIC.size + 2
         val iterations = readIntBe(container, offset)
         offset += 4
         if (iterations != ITERATIONS) {
-            throw BackupContainerFormatException("加密备份的 KDF 参数不受支持")
+            throw BackupContainerFormatException("该加密备份文件的加密参数不受当前版本支持")
         }
         val salt = container.copyOfRange(offset, offset + SALT_BYTES)
         offset += SALT_BYTES
@@ -133,10 +133,17 @@ object BackupCrypto {
         iterations: Int
     ): SecretKeySpec {
         val spec = PBEKeySpec(passphrase, salt, iterations, KEY_BITS)
-        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-        val key = factory.generateSecret(spec).encoded
-        spec.clearPassword()
-        return SecretKeySpec(key, "AES")
+        return try {
+            val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val key = factory.generateSecret(spec).encoded
+            try {
+                SecretKeySpec(key, "AES")
+            } finally {
+                key.fill(0)
+            }
+        } finally {
+            spec.clearPassword()
+        }
     }
 
     private fun readIntBe(bytes: ByteArray, offset: Int): Int {

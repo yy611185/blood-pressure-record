@@ -34,7 +34,6 @@ data class ReportUiState(
     val today: LocalDate = period.endDate,
     val hasProfileIdentity: Boolean = true,
     val options: ReportOptions = ReportOptions(),
-    val showIdentityConfirmation: Boolean = false,
     val isGenerating: Boolean = false,
     val isSaving: Boolean = false,
     val artifact: ReportArtifact? = null,
@@ -111,7 +110,6 @@ class ReportViewModel(
                     today = today,
                     period = refreshPeriod(state, today, now, zone),
                     options = state.options.copy(includeIdentity = false),
-                    showIdentityConfirmation = false,
                     message = ""
                 )
             }
@@ -156,13 +154,6 @@ class ReportViewModel(
             state.period.startDate.coerceAtMost(end)
         }
         return ReportPeriod(start, end, zone)
-    }
-
-    fun requestPreview() {
-        if (_uiState.value.isGenerating || _uiState.value.isSaving) return
-        _uiState.update {
-            it.copy(showIdentityConfirmation = true, options = it.options.copy(includeIdentity = false), message = "")
-        }
     }
 
     fun setIncludeIdentity(include: Boolean) {
@@ -210,7 +201,6 @@ class ReportViewModel(
                 periodPresetDays = if (template == ReportTemplate.HOME_SEVEN_DAY && it.periodPresetDays != null) 7 else it.periodPresetDays,
                 artifact = null,
                 previewOptions = null,
-                showIdentityConfirmation = false,
                 message = ""
             )
         }
@@ -247,10 +237,6 @@ class ReportViewModel(
         }
     }
 
-    fun dismissIdentityConfirmation() {
-        _uiState.update { it.copy(showIdentityConfirmation = false) }
-    }
-
     fun confirmAndGenerate() {
         if (_uiState.value.isGenerating || _uiState.value.isSaving) return
         beginGeneration()
@@ -268,7 +254,6 @@ class ReportViewModel(
         generationJob?.cancel()
         _uiState.update {
             it.copy(
-                showIdentityConfirmation = false,
                 isGenerating = true,
                 previewOptions = null,
                 message = ""
@@ -391,7 +376,6 @@ class ReportViewModel(
                 options = ReportOptions(template = it.options.template),
                 artifact = null,
                 previewOptions = null,
-                showIdentityConfirmation = false,
                 isGenerating = false,
                 message = ""
             )

@@ -60,7 +60,7 @@ class SettingsViewModelTest {
         assertEquals(1, vm.uiState.value.exportVolumeCount)
         assertEquals("private-test", passphrase.concatToString())
 
-        vm.requestBackupExport()
+        vm.requestEncryptedBackupExport()
         val oldRequest = requireNotNull(vm.uiState.value.exportVolumeRequestId)
         vm.pauseBackupExport()
         vm.confirmClearAll()
@@ -79,6 +79,110 @@ class SettingsViewModelTest {
         val newState = vm.uiState.value
         vm.onExportLocationResult(oldRequest, null)
         assertEquals(newState, vm.uiState.value)
+    }
+
+    @Test
+    fun `paused plain export prompts before switching to encrypted and preserves progress if cancelled`() = runTest {
+        val repository = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun prepareBackupExport() = Result.success(
+                BackupExportPlan.fromPayload(
+                    BackupExportPayload(
+                        instructions = emptyList(),
+                        measurements = emptyList(),
+                        userProfile = emptyList(),
+                        meta = emptyList()
+                    )
+                )
+            )
+        }
+        val vm = SettingsViewModel(repository)
+        vm.prepareBackupExport("plain_backup")
+        assertFalse(vm.uiState.value.exportEncrypted)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".xlsx"))
+        vm.pauseBackupExport()
+        assertEquals(null, vm.uiState.value.exportVolumeRequestId)
+        assertEquals(1, vm.uiState.value.exportVolumeCount)
+
+        // 点击加密导出不得直接恢复明文计划，应先弹出格式切换确认
+        vm.requestEncryptedBackupExport()
+        assertEquals(true, vm.uiState.value.pendingExportFormatSwitchToEncrypted)
+        assertEquals(null, vm.uiState.value.exportVolumeRequestId)
+        assertFalse(vm.uiState.value.showExportPassphraseDialog)
+        assertFalse(vm.uiState.value.exportEncrypted)
+
+        // 保留原导出：原明文进度保持不变，点明文入口可正常继续
+        vm.dismissSwitchExportFormat()
+        assertEquals(null, vm.uiState.value.pendingExportFormatSwitchToEncrypted)
+        vm.requestBackupExport()
+        assertTrue(vm.uiState.value.exportVolumeRequestId != null)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".xlsx"))
+        assertFalse(vm.uiState.value.exportEncrypted)
+
+        // 再次暂停后确认切换为加密导出：放弃明文计划并进入设置口令弹窗
+        vm.pauseBackupExport()
+        vm.requestEncryptedBackupExport()
+        assertEquals(true, vm.uiState.value.pendingExportFormatSwitchToEncrypted)
+        vm.confirmSwitchExportFormat()
+        assertEquals(null, vm.uiState.value.pendingExportFormatSwitchToEncrypted)
+        assertEquals(0, vm.uiState.value.exportVolumeCount)
+        assertTrue(vm.uiState.value.showExportPassphraseDialog)
+
+        val passphrase = "strong-passphrase".toCharArray()
+        vm.prepareBackupExport("encrypted_backup", passphrase)
+        assertTrue(vm.uiState.value.exportEncrypted)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".bpx"))
+        assertTrue(vm.uiState.value.exportVolumeRequestId != null)
+    }
+
+    @Test
+    fun `paused encrypted export prompts before switching to plain and wipes passphrase on switch`() = runTest {
+        val payload = BackupExportPayload(
+            instructions = emptyList(),
+            measurements = emptyList(),
+            userProfile = emptyList(),
+            meta = emptyList()
+        )
+        val multiVolumePlan = BackupExportPlan(listOf(payload, payload))
+        val repository = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun prepareBackupExport() = Result.success(multiVolumePlan)
+        }
+        val vm = SettingsViewModel(repository)
+        val passphrase = "secret-password".toCharArray()
+        vm.prepareBackupExport("enc_multi", passphrase)
+        assertTrue(vm.uiState.value.exportEncrypted)
+        assertEquals(2, vm.uiState.value.exportVolumeCount)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".bpx"))
+
+        vm.pauseBackupExport()
+        assertEquals(null, vm.uiState.value.exportVolumeRequestId)
+
+        // 点击明文导出不得直接恢复加密分卷，也不得提前清零口令
+        vm.requestBackupExport()
+        assertEquals(false, vm.uiState.value.pendingExportFormatSwitchToEncrypted)
+        assertEquals(null, vm.uiState.value.exportVolumeRequestId)
+        assertFalse(vm.uiState.value.showBackupExportConfirm)
+        assertEquals("secret-password", passphrase.concatToString())
+
+        // 保留原导出：加密分卷可继续恢复
+        vm.dismissSwitchExportFormat()
+        vm.requestEncryptedBackupExport()
+        assertTrue(vm.uiState.value.exportVolumeRequestId != null)
+        assertTrue(vm.uiState.value.exportEncrypted)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".bpx"))
+
+        // 确认切换为明文：清零旧口令、清空旧分卷并弹出明文导出确认框
+        vm.pauseBackupExport()
+        vm.requestBackupExport()
+        vm.confirmSwitchExportFormat()
+        assertTrue(passphrase.all { it == '\u0000' })
+        assertEquals(0, vm.uiState.value.exportVolumeCount)
+        assertFalse(vm.uiState.value.exportEncrypted)
+        assertTrue(vm.uiState.value.showBackupExportConfirm)
+
+        vm.prepareBackupExport("plain_after_switch")
+        assertFalse(vm.uiState.value.exportEncrypted)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".xlsx"))
+        assertTrue(vm.uiState.value.exportVolumeRequestId != null)
     }
 
     @Test

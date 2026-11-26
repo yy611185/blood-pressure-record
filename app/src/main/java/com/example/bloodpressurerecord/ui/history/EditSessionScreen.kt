@@ -36,6 +36,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppTopBar
@@ -141,18 +143,21 @@ fun EditSessionScreen(
     if (state.showHighRiskDialog) {
         AlertDialog(
             onDismissRequest = viewModel::dismissHighRiskDialog,
-            title = { Text("包含高风险读数") },
+            title = { Text("检测到高风险读数") },
             text = {
-                Text("本次编辑包含高风险读数。本应用不能替代医疗诊断，如伴有不适请及时寻求医疗帮助。")
+                Text(
+                    text = stringResource(R.string.high_risk_reading_guidance) + "本应用不能替代医疗诊断。",
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                )
             },
             confirmButton = {
                 TextButton(enabled = !state.isSaving, onClick = viewModel::confirmHighRiskAndSave) {
-                    Text("仍要保存")
+                    Text("保存记录（供医生参考）")
                 }
             },
             dismissButton = {
                 TextButton(enabled = !state.isSaving, onClick = viewModel::dismissHighRiskDialog) {
-                    Text("返回修改")
+                    Text("返回检查数值")
                 }
             }
         )
@@ -322,7 +327,7 @@ fun EditSessionScreen(
                                 color = MaterialTheme.colorScheme.errorContainer
                             ) {
                                 Text(
-                                    "有读数达到高风险范围。请休息后复测，身体不适请及时就医。",
+                                    stringResource(R.string.high_risk_reading_guidance),
                                     modifier = Modifier.padding(14.dp),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onErrorContainer

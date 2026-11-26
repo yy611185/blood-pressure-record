@@ -1,13 +1,17 @@
 package com.example.bloodpressurerecord.data.repository.backup
 
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.file.Files
 import java.io.InputStream
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import org.apache.commons.compress.archivers.zip.ZipFile
 import org.apache.commons.compress.utils.SeekableInMemoryByteChannel
-import org.apache.poi.openxml4j.util.ZipSecureFile
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
+import org.apache.poi.openxml4j.opc.OPCPackage
+import org.apache.poi.openxml4j.util.ZipEntrySource
 import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
@@ -58,152 +62,145 @@ data class BackupImportDocument(
 class BackupFormatException(message: String, cause: Throwable? = null) :
     IllegalArgumentException(message, cause)
 
+internal fun clearLegacyBackupImportFiles(cacheDirectory: File) {
+    val legacyName = Regex("blood-pressure-backup-(?:decrypted-)?[0-9]+\\.xlsx")
+    cacheDirectory.listFiles().orEmpty().filter {
+        legacyName.matches(it.name) && !Files.isSymbolicLink(it.toPath()) && it.isFile
+    }.forEach { file ->
+        check(file.delete() || !file.exists()) { "无法清理旧备份导入临时文件" }
+    }
+}
+
 class BackupFileReader {
     private val formatter = DataFormatter()
 
     fun readXlsx(inputStream: InputStream, passphrase: CharArray? = null): BackupImportDocument {
-        val tempFile = try {
-            File.createTempFile("blood-pressure-backup-", ".xlsx")
-        } catch (throwable: Exception) {
-            throw BackupFormatException("无法准备备份文件校验空间", throwable)
-        }
-        try {
-            tempFile.outputStream().use { output ->
-                val buffer = ByteArray(64 * 1024)
-                var total = 0L
+        val inputBytes = ByteArrayOutputStream().use { output ->
+            val buffer = ByteArray(64 * 1024)
+            try {
                 while (true) {
                     val count = inputStream.read(buffer)
                     if (count < 0) break
-                    total += count
-                    if (total > BackupImportLimits.MAX_FILE_BYTES) {
+                    if (output.size() + count > BackupImportLimits.MAX_FILE_BYTES) {
                         throw BackupFormatException("备份文件超过 10 MB 上限")
                     }
                     output.write(buffer, 0, count)
                 }
+                output.toByteArray()
+            } finally {
+                buffer.fill(0)
             }
-            // 加密容器先解密出明文 xlsx，再走与明文完全相同的校验和解析路径。
-            val sourceFile = if (isEncryptedContainerFile(tempFile)) {
+        }
+        val xlsxBytes = try {
+            if (BackupCrypto.isEncryptedContainer(inputBytes)) {
                 val pass = passphrase
                     ?: throw BackupPassphraseRequiredException("该备份已加密，请输入备份口令。")
-                val decrypted = try {
-                    BackupCrypto.decrypt(tempFile.readBytes(), pass)
-                } catch (throwable: Exception) {
-                    if (throwable is BackupContainerFormatException ||
-                        throwable is BackupPassphraseException
-                    ) {
-                        throw throwable
-                    }
-                    throw BackupContainerFormatException("解密备份失败", throwable)
-                }
-                try {
-                    File.createTempFile("blood-pressure-backup-decrypted-", ".xlsx").apply {
-                        writeBytes(decrypted)
-                    }
-                } catch (throwable: Exception) {
-                    throw BackupFormatException("无法准备备份文件校验空间", throwable)
-                }
+                BackupCrypto.decrypt(inputBytes, pass)
             } else {
-                tempFile
+                inputBytes
             }
-            try {
-                preflightZip { ZipFile.builder().setFile(sourceFile).get() }
-                // 10 MB 的文件上限只限制压缩后字节；下面的中央目录和实际解压读取
-                // 共同限制条目数、单条目大小、总解压大小和压缩炸弹比例。
-                ZipSecureFile.setMinInflateRatio(BackupImportLimits.MIN_INFLATE_RATIO)
-                ZipSecureFile.setMaxEntrySize(BackupImportLimits.MAX_UNCOMPRESSED_ENTRY_BYTES)
-                val workbook = try {
-                    XSSFWorkbook(sourceFile)
-                } catch (throwable: Exception) {
-                    throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", throwable)
+        } catch (error: Exception) {
+            inputBytes.fill(0)
+            throw error
+        }
+        try {
+            val workbook = openValidatedWorkbook(xlsxBytes)
+            return workbook.use {
+                val metaSheet = workbook.getSheet(SHEET_META)
+                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
+                val meta = metaSheet.readKeyValues()
+                val version = meta["export_format_version"]?.toIntOrNull()
+                    ?: throw BackupFormatException("缺少或无法识别备份格式版本")
+                if (version !in SUPPORTED_FORMAT_VERSIONS) {
+                    throw BackupFormatException("不支持的备份格式版本：$version")
                 }
 
-                return workbook.use {
-                    val metaSheet = workbook.getSheet(SHEET_META)
-                        ?: throw BackupFormatException("缺少必要工作表：$SHEET_META")
-                    val meta = metaSheet.readKeyValues()
-                    val version = meta["export_format_version"]?.toIntOrNull()
-                        ?: throw BackupFormatException("缺少或无法识别备份格式版本")
-                    if (version !in SUPPORTED_FORMAT_VERSIONS) {
-                        throw BackupFormatException("不支持的备份格式版本：$version")
-                    }
+                val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
+                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
+                val readingsSheet = workbook.getSheet(SHEET_READINGS)
+                    ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
 
-                    val measurementSheet = workbook.getSheet(SHEET_MEASUREMENTS)
-                        ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEASUREMENTS")
-                    val readingsSheet = workbook.getSheet(SHEET_READINGS)
-                        ?: throw BackupFormatException("缺少必要工作表：$SHEET_READINGS")
-
-                    val readingRows = readReadingRows(readingsSheet)
-                    if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
-                        throw BackupFormatException("原始读数总数超过允许上限")
-                    }
-                    val measurements = readMeasurements(
-                        measurementSheet,
-                        readingRows.groupBy { it.recordId },
-                        formatVersion = version
-                    )
-                    if (measurements.size > BackupImportLimits.MAX_RECORDS) {
-                        throw BackupFormatException("测量记录总数超过允许上限")
-                    }
-                    val duplicateIds = measurements.groupingBy { it.recordId }
-                        .eachCount()
-                        .filterValues { it > 1 }
-                    if (duplicateIds.isNotEmpty()) {
-                        throw BackupFormatException("备份中存在重复 record_id，未执行导入")
-                    }
-                    val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
-                    if (readingRows.any { it.recordId !in knownIds }) {
-                        throw BackupFormatException("原始读数引用了不存在的测量记录")
-                    }
-
-                    BackupImportDocument(
-                        measurements = measurements,
-                        userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
-                        meta = meta,
-                        medications = if (version >= 4) {
-                            readMedications(workbook.getSheet(SHEET_MEDICATIONS)
-                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATIONS"))
-                        } else emptyList(),
-                        medicationTimes = if (version >= 4) {
-                            readMedicationTimes(workbook.getSheet(SHEET_MEDICATION_TIMES)
-                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_TIMES"), version)
-                        } else emptyList(),
-                        medicationLogs = if (version >= 4) {
-                            readMedicationLogs(workbook.getSheet(SHEET_MEDICATION_LOGS)
-                                ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_LOGS"))
-                        } else emptyList()
-                    )
+                val readingRows = readReadingRows(readingsSheet)
+                if (readingRows.size > BackupImportLimits.MAX_TOTAL_READING_ROWS) {
+                    throw BackupFormatException("原始读数总数超过允许上限")
                 }
-            } finally {
-                if (sourceFile !== tempFile) sourceFile.delete()
+                val measurements = readMeasurements(
+                    measurementSheet,
+                    readingRows.groupBy { it.recordId },
+                    formatVersion = version
+                )
+                if (measurements.size > BackupImportLimits.MAX_RECORDS) {
+                    throw BackupFormatException("测量记录总数超过允许上限")
+                }
+                val duplicateIds = measurements.groupingBy { it.recordId }
+                    .eachCount()
+                    .filterValues { it > 1 }
+                if (duplicateIds.isNotEmpty()) {
+                    throw BackupFormatException("备份中存在重复 record_id，未执行导入")
+                }
+                val knownIds = measurements.mapTo(hashSetOf()) { it.recordId }
+                if (readingRows.any { it.recordId !in knownIds }) {
+                    throw BackupFormatException("原始读数引用了不存在的测量记录")
+                }
+
+                BackupImportDocument(
+                    measurements = measurements,
+                    userProfile = workbook.getSheet(SHEET_PROFILE)?.readKeyValues().orEmpty(),
+                    meta = meta,
+                    medications = if (version >= 4) {
+                        readMedications(workbook.getSheet(SHEET_MEDICATIONS)
+                            ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATIONS"))
+                    } else emptyList(),
+                    medicationTimes = if (version >= 4) {
+                        readMedicationTimes(workbook.getSheet(SHEET_MEDICATION_TIMES)
+                            ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_TIMES"), version)
+                    } else emptyList(),
+                    medicationLogs = if (version >= 4) {
+                        readMedicationLogs(workbook.getSheet(SHEET_MEDICATION_LOGS)
+                            ?: throw BackupFormatException("缺少必要工作表：$SHEET_MEDICATION_LOGS"))
+                    } else emptyList()
+                )
             }
         } finally {
-            tempFile.delete()
+            xlsxBytes.fill(0)
+            if (xlsxBytes !== inputBytes) inputBytes.fill(0)
         }
     }
 
-    /** 只读文件头部魔数判断是否为加密备份容器。 */
-    private fun isEncryptedContainerFile(file: File): Boolean {
-        val header = file.inputStream().use { input ->
-            val buffer = ByteArray(BackupCrypto.HEADER_SIZE)
-            var read = 0
-            while (read < buffer.size) {
-                val count = input.read(buffer, read, buffer.size - read)
-                if (count < 0) break
-                read += count
+    private fun openValidatedWorkbook(bytes: ByteArray): XSSFWorkbook {
+        // POI reads the same central-directory entries checked by preflight.
+        preflightZip { openArchive(bytes) }
+        val archive = openArchive(bytes)
+        val source = object : ZipEntrySource {
+            private var closed = false
+            override fun getEntries() = archive.entries
+            override fun getEntry(name: String) = archive.getEntry(name)
+            override fun getInputStream(entry: ZipArchiveEntry) = archive.getInputStream(entry)
+            override fun isClosed() = closed
+            override fun close() {
+                if (!closed) {
+                    closed = true
+                    archive.close()
+                }
             }
-            buffer.copyOf(read)
         }
-        return BackupCrypto.isEncryptedContainer(header)
+        return try {
+            XSSFWorkbook(OPCPackage.open(source))
+        } catch (error: Exception) {
+            runCatching { source.close() }
+            throw BackupFormatException("文件损坏或不是有效的 Excel .xlsx 备份", error)
+        }
     }
+
+    private fun openArchive(bytes: ByteArray): ZipFile =
+        ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(bytes)).get()
 
     /** 明文和加密导出在保存前均使用导入端的压缩包限制，明文只在内存中校验。 */
     internal fun validateExportArchive(xlsxBytes: ByteArray) {
         if (xlsxBytes.size > BackupImportLimits.MAX_FILE_BYTES) {
             throw BackupFormatException("生成的备份超过 10 MB，无法保存为可恢复的备份。")
         }
-        preflightZip {
-            ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(xlsxBytes)).get()
-        }
+        preflightZip { openArchive(xlsxBytes) }
     }
 
     /** 在交给 POI 解析前先按 ZIP 中央目录和实际解压字节做有界预检。 */

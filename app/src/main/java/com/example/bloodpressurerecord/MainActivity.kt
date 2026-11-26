@@ -20,12 +20,15 @@ import androidx.compose.ui.unit.Density
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bloodpressurerecord.navigation.BloodPressureAppRoot
+import com.example.bloodpressurerecord.reminder.MedicationReminderConfirmationRequest
+import com.example.bloodpressurerecord.reminder.MedicationReminders
 import com.example.bloodpressurerecord.ui.LocalAppFontScale
 import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 
 class MainActivity : ComponentActivity() {
     private var pendingDestination by mutableStateOf<String?>(null)
+    private var medicationConfirmations by mutableStateOf(emptyList<MedicationReminderConfirmationRequest>())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,7 +37,15 @@ class MainActivity : ComponentActivity() {
         } else {
             savedInstanceState.getString(STATE_PENDING_DESTINATION)?.takeIf { it.isNotBlank() }
         }
+        medicationConfirmations = if (savedInstanceState == null) {
+            listOfNotNull(MedicationReminders.parseConfirmationRequest(this, intent))
+        } else {
+            (savedInstanceState.getLongArray(STATE_PENDING_MEDICATIONS) ?: longArrayOf()).asList().chunked(3)
+                .filter { it.size == 3 }
+                .map { (id, timeId, day) -> MedicationReminderConfirmationRequest(id, timeId, day) }
+        }
         intent?.removeExtra(EXTRA_OPEN_DESTINATION)
+        MedicationReminders.clearConfirmationExtras(intent)
         requestHighestRefreshRate()
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(
@@ -63,7 +74,13 @@ class MainActivity : ComponentActivity() {
                     BloodPressureAppRoot(
                         showTrendChart = settingsUiState.showTrendChart,
                         pendingDestination = pendingDestination,
-                        onConsumePendingDestination = { pendingDestination = null }
+                        onConsumePendingDestination = { pendingDestination = null },
+                        pendingMedicationConfirmation = medicationConfirmations.firstOrNull(),
+                        onConsumePendingMedicationConfirmation = { request ->
+                            if (medicationConfirmations.firstOrNull() == request) {
+                                medicationConfirmations = medicationConfirmations.drop(1)
+                            }
+                        }
                     )
                 }
             }
@@ -75,15 +92,22 @@ class MainActivity : ComponentActivity() {
         pendingDestination?.takeIf { it.isNotBlank() }?.let { route ->
             outState.putString(STATE_PENDING_DESTINATION, route)
         }
+        outState.putLongArray(STATE_PENDING_MEDICATIONS, medicationConfirmations.flatMap {
+            listOf(it.medicationId, it.timeId, it.dateEpochDay)
+        }.toLongArray())
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val route = intent.getStringExtra(EXTRA_OPEN_DESTINATION)?.takeIf { it.isNotBlank() }
+        val medConfirm = MedicationReminders.parseConfirmationRequest(this, intent)
         intent.removeExtra(EXTRA_OPEN_DESTINATION)
-        setIntent(intent)
+        MedicationReminders.clearConfirmationExtras(intent)
         if (route != null) {
             pendingDestination = route
+        }
+        if (medConfirm != null && medConfirm !in medicationConfirmations) {
+            medicationConfirmations = medicationConfirmations + medConfirm
         }
     }
 
@@ -135,6 +159,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_DESTINATION = "open_destination"
         private const val STATE_PENDING_DESTINATION = "state_pending_destination"
+        private const val STATE_PENDING_MEDICATIONS = "state_pending_medications"
         private const val MAX_EFFECTIVE_FONT_SCALE = 2.0f
     }
 }

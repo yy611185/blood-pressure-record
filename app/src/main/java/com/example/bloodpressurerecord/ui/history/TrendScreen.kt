@@ -1,12 +1,13 @@
 package com.example.bloodpressurerecord.ui.history
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -52,8 +55,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,7 +77,11 @@ import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
 import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.StatusChip
+import com.example.bloodpressurerecord.ui.common.appMotionColor
+import com.example.bloodpressurerecord.ui.common.appMotionFloat
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.focusRing
+import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
@@ -198,7 +203,7 @@ fun TrendScreen(
 
         if (uiState.showPulse) ExpandableSection(
             title = "脉搏趋势",
-            summary = series.averagePulse?.let { "最近平均 $it 次/分" } ?: "暂无数据"
+            summary = series.averagePulse?.let { "期间平均 $it 次/分" } ?: "暂无数据"
         ) {
             PulseTrendCard(
                 series = series,
@@ -370,9 +375,10 @@ private fun TrendPeriodOverview(
                 val reducedMotion = LocalReducedMotion.current
                 val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                 val progressColor = MaterialTheme.colorScheme.secondary
-                val animatedSweep by animateFloatAsState(
+                val animatedSweep = appMotionFloat(
                     targetValue = (insights.targetRate ?: 0) * 3.6f,
-                    animationSpec = AppMotion.springGentle(reducedMotion),
+                    reducedMotion = reducedMotion,
+                    spec = AppMotion.springGentle(reducedMotion = false),
                     label = "target_rate_sweep"
                 )
                 Row(
@@ -409,15 +415,15 @@ private fun TrendPeriodOverview(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("达标率", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         val targetText = if (targetSystolic != null && targetDiastolic != null) {
-                            "低于目标 $targetSystolic/$targetDiastolic 且不偏低的占比。"
-                        } else "在“我的”设置目标后可查看达标率。"
+                            "按单次记录计算：低于个人目标 $targetSystolic/$targetDiastolic 且不偏低的占比。"
+                        } else "在「我的」设置个人达标值后可查看达标率。"
                         val previous = insights.previousTargetRate
                         val current = insights.targetRate
                         val comparison = if (previous != null && current != null) {
                             when {
-                                current - previous >= 5 -> "比上个周期（$previous%）更稳了。"
-                                previous - current >= 5 -> "比上个周期（$previous%）有所下降。"
-                                else -> "和上个周期（$previous%）接近。"
+                                current - previous >= 5 -> "较上个周期（$previous%）提升 ${current - previous} 个百分点。"
+                                previous - current >= 5 -> "较上个周期（$previous%）下降 ${previous - current} 个百分点。"
+                                else -> "与上个周期（$previous%）基本持平。"
                             }
                         } else ""
                         Text(
@@ -640,7 +646,7 @@ private fun TrendChartLegendRow(
             }
         }
         Text(
-            if (hasTarget) "-- 参考 140/90 · ·· 个人目标" else "-- 参考 140/90",
+            if (hasTarget) "-- 诊室参考线 140/90 · ·· 个人目标" else "-- 诊室参考线 140/90",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -783,7 +789,7 @@ internal fun TrendSelectionReadout(
             )
             ReadoutAction("明细", { onViewDayRecords(displayed) })
             if (onLatest != null) ReadoutAction("最新", onLatest)
-            ReadoutAction("恢复", onResetChart)
+            ReadoutAction("复位视野", onResetChart)
         }
     }
 }
@@ -808,8 +814,9 @@ private fun ReadoutAction(
 private fun buildReadoutDescription(point: TrendPoint, isSelected: Boolean, index: Int, total: Int): String {
     val daily = point.aggregation != TrendAggregation.RAW
     val context = if (isSelected) "已选中的数据点" else if (daily) "最近记录日" else "最近一次测量"
+    val categoryLabel = CategoryPresentation.label(point.category)
     return "$context，${formatTrendPointDate(point)}，${if (daily) "当日平均" else ""}" +
-        "收缩压 ${point.systolic}，舒张压 ${point.diastolic}，${trendPointPulseText(point)}，" +
+        "高压 ${point.systolic}，低压 ${point.diastolic}，$categoryLabel，${trendPointPulseText(point)}，" +
         (if (daily) "${point.recordCount} 次测量，" else "") +
         "第 ${index + 1} 个，共 $total 个数据点。"
 }
@@ -877,11 +884,15 @@ private fun <T> SegmentedControl(
     val reducedMotion = LocalReducedMotion.current
     val colors = MaterialTheme.colorScheme
     val selectedIndex = items.indexOf(selected).coerceAtLeast(0)
-    val animatedIndexState = animateFloatAsState(
-        targetValue = selectedIndex.toFloat(),
-        animationSpec = AppMotion.springSnappy(reducedMotion),
-        label = "trend_segment_slider"
-    )
+    val animatedIndexState = if (reducedMotion) {
+        null
+    } else {
+        animateFloatAsState(
+            targetValue = selectedIndex.toFloat(),
+            animationSpec = AppMotion.springSnappy(reducedMotion = false),
+            label = "trend_segment_slider"
+        )
+    }
     val sliderColor = if (accent) colors.primaryContainer else colors.surface
 
     Box(
@@ -897,7 +908,7 @@ private fun <T> SegmentedControl(
                     val count = items.size
                     val gapPx = 4.dp.toPx()
                     val itemWidth = ((size.width - gapPx * (count - 1)).coerceAtLeast(0f)) / count
-                    val currentIndex = if (reducedMotion) selectedIndex.toFloat() else animatedIndexState.value
+                    val currentIndex = animatedIndexState?.value ?: selectedIndex.toFloat()
                     val x = (itemWidth + gapPx) * currentIndex
                     val radiusPx = 16.dp.toPx()
                     drawRoundRect(
@@ -909,26 +920,34 @@ private fun <T> SegmentedControl(
                 },
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            val itemShape = RoundedCornerShape(16.dp)
             items.forEach { item ->
                 val isSelected = item == selected
-                val textColor by animateColorAsState(
-                    targetValue = when {
-                        isSelected && accent -> colors.onPrimaryContainer
-                        isSelected -> colors.onSurface
-                        else -> colors.onSurfaceVariant
-                    },
-                    animationSpec = AppMotion.colorSpec(reducedMotion),
+                val targetTextColor = when {
+                    isSelected && accent -> colors.onPrimaryContainer
+                    isSelected -> colors.onSurface
+                    else -> colors.onSurfaceVariant
+                }
+                val textColor = appMotionColor(
+                    targetValue = targetTextColor,
+                    reducedMotion = reducedMotion,
                     label = "trendSegmentText"
                 )
+                val itemInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp)
-                        .semantics {
-                            role = Role.RadioButton
-                            this.selected = isSelected
-                        }
-                        .clickable { onSelected(item) },
+                        .selectable(
+                            selected = isSelected,
+                            interactionSource = itemInteraction,
+                            indication = null,
+                            role = Role.RadioButton,
+                            onClick = { onSelected(item) }
+                        )
+                        .pressableScale(itemInteraction, pressedScale = 0.96f)
+                        .clip(itemShape)
+                        .focusRing(itemInteraction, itemShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -1003,17 +1022,34 @@ private fun buildDayDetailsSubtitle(details: TrendDayDetails): String {
 
 @Composable
 private fun TrendDayRecordRow(record: TrendRecord, selected: Boolean, onClick: () -> Unit) {
-    val background by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-        animationSpec = AppMotion.colorMicro,
-        label = "trendDayRecordBackground"
+    val reducedMotion = LocalReducedMotion.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val colors = MaterialTheme.colorScheme
+    val background = appMotionColor(
+        targetValue = when {
+            selected -> colors.primaryContainer
+            pressed -> colors.surfaceContainerHigh
+            else -> Color.Transparent
+        },
+        reducedMotion = reducedMotion,
+        label = "trendDayRecordBackground",
+        duration = AppMotion.Micro
     )
+    val rowShape = RoundedCornerShape(12.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .pressableScale(interactionSource, pressedScale = 0.985f)
+            .clip(rowShape)
             .background(background)
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .focusRing(interactionSource, rowShape)
+            .padding(horizontal = 6.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1023,9 +1059,13 @@ private fun TrendDayRecordRow(record: TrendRecord, selected: Boolean, onClick: (
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                if (record.containsHighRiskReading) "含高风险读数" else record.category.toChineseCategory(),
+                if (record.containsHighRiskReading) {
+                    "${record.category.toChineseCategory()} · 含高风险读数"
+                } else {
+                    record.category.toChineseCategory()
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (record.containsHighRiskReading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Column(horizontalAlignment = Alignment.End) {

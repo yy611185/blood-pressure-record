@@ -190,14 +190,14 @@ fun HistoryDetailScreen(
                         DataCard {
                             ExpandableSection(
                                 title = "原始读数",
-                                summary = "${session.readings.size} 次测量",
+                                summary = "共 ${session.readings.size} 组读数",
                                 initiallyExpanded = session.readings.size <= 3,
                                 stateKey = "history-readings-$sessionId"
                             ) {
-                                DetailReadingRow("组", "高压", "低压", "脉搏", header = true)
+                                DetailReadingRow("组别", "高压", "低压", "脉搏", header = true)
                                 session.readings.forEachIndexed { index, reading ->
                                     DetailReadingRow(
-                                        label = "第${index + 1}组" + if (session.averageStrategy == AverageStrategy.DISCARD_FIRST && index == 0 && session.readings.size >= 2) "（不计）" else "",
+                                        label = "第 ${index + 1} 组" + if (session.averageStrategy == AverageStrategy.DISCARD_FIRST && index == 0 && session.readings.size >= 2) "（不计）" else "",
                                         systolic = reading.systolic.toString(),
                                         diastolic = reading.diastolic.toString(),
                                         pulse = reading.pulse?.toString() ?: "—",

@@ -1,8 +1,5 @@
 package com.example.bloodpressurerecord.ui.home
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -37,6 +34,8 @@ import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.domain.model.BpZone
 import com.example.bloodpressurerecord.domain.model.BpZonePosition
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.common.appMotionColor
+import com.example.bloodpressurerecord.ui.common.appMotionFloat
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
@@ -59,15 +58,14 @@ fun BpRangeBar(
     val palette = LocalBpRangeColors.current
     val markerColor = MaterialTheme.colorScheme.onSurface
     val reducedMotion = LocalReducedMotion.current
-    val animationEnabled = !reducedMotion
     val targetPercent = ready?.position?.percent ?: 2f
-    val animatedPercent by animateFloatAsState(
+    // 系统在动画过程中关闭动画时，也必须在这一帧直接显示目标位置且不保留动画协程。
+    val percent = appMotionFloat(
         targetValue = targetPercent,
-        animationSpec = if (animationEnabled) AppMotion.springGentle(reducedMotion = false) else snap(),
+        reducedMotion = reducedMotion,
+        spec = AppMotion.springGentle(reducedMotion = false),
         label = "Bp range marker"
     )
-    // 系统在动画过程中关闭动画时，也必须在这一帧直接显示目标位置。
-    val percent = if (animationEnabled) animatedPercent else targetPercent
 
     Column(modifier.fillMaxWidth().semantics { contentDescription = description }) {
         // 父级一次朗读完整读数；色块、三角形、重复标签不单独朗读。
@@ -102,10 +100,10 @@ fun BpRangeBar(
             Row(Modifier.fillMaxWidth()) {
                 BpZone.entries.forEach { zone ->
                     val isActive = ready?.position?.zone == zone
-                    val labelColor by animateColorAsState(
+                    val labelColor = appMotionColor(
                         targetValue = if (isActive) MaterialTheme.colorScheme.onSurface
                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = AppMotion.colorSpec(reducedMotion),
+                        reducedMotion = reducedMotion,
                         label = "bp_zone_label_color"
                     )
                     Text(

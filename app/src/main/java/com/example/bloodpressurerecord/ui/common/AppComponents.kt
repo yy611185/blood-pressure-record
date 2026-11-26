@@ -1,10 +1,14 @@
 package com.example.bloodpressurerecord.ui.common
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.FocusInteraction
+import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +34,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,12 +48,25 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.SemanticsModifierNode
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.node.invalidateSemantics
+import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -68,10 +84,179 @@ import com.example.bloodpressurerecord.ui.theme.LocalBpGradePalette
 import com.example.bloodpressurerecord.ui.theme.bloodPressureChipColors
 import com.example.bloodpressurerecord.ui.theme.style
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+
+/** 供无障碍与焦点自动化测试断言自定义控件当前是否呈现可见焦点环。 */
+internal val FocusRingVisibleKey = SemanticsPropertyKey<Boolean>("FocusRingVisible")
 
 /**
- * 零重排按压缩放修饰符：仅驱动 GPU graphicsLayer，不改变触控热区。
- * 调用方将同一个 [interactionSource] 传给 Button / clickable 以保证热区外置稳定。
+ * 贴合控件圆角的键盘 / D-pad 焦点指示器：
+ * - 供移除了默认 Ripple（`indication = null`）或自定义裁剪层级的交互控件使用；
+ * - 焦点出现与离开均为 0ms 即刻绘制，不启动动画协程，在常规模式与 0x 减少动态效果下一致响应。
+ */
+@Composable
+fun Modifier.focusRing(
+    interactionSource: InteractionSource,
+    shape: Shape,
+    enabled: Boolean = true,
+    color: Color = MaterialTheme.colorScheme.primary,
+    strokeWidth: Dp = 2.dp,
+    inset: Dp = 1.dp,
+    fillAlpha: Float = 0.08f
+): Modifier = this.then(
+    FocusRingElement(
+        interactionSource = interactionSource,
+        shape = shape,
+        enabled = enabled,
+        color = color,
+        strokeWidth = strokeWidth,
+        inset = inset,
+        fillAlpha = fillAlpha
+    )
+)
+
+private data class FocusRingElement(
+    val interactionSource: InteractionSource,
+    val shape: Shape,
+    val enabled: Boolean,
+    val color: Color,
+    val strokeWidth: Dp,
+    val inset: Dp,
+    val fillAlpha: Float
+) : ModifierNodeElement<FocusRingNode>() {
+    override fun create(): FocusRingNode = FocusRingNode(
+        interactionSource = interactionSource,
+        shape = shape,
+        enabled = enabled,
+        color = color,
+        strokeWidth = strokeWidth,
+        inset = inset,
+        fillAlpha = fillAlpha
+    )
+
+    override fun update(node: FocusRingNode) {
+        node.update(
+            interactionSource = interactionSource,
+            shape = shape,
+            enabled = enabled,
+            color = color,
+            strokeWidth = strokeWidth,
+            inset = inset,
+            fillAlpha = fillAlpha
+        )
+    }
+
+    override fun InspectorInfo.inspectableProperties() {
+        name = "focusRing"
+        properties["enabled"] = enabled
+        properties["strokeWidth"] = strokeWidth
+        properties["inset"] = inset
+    }
+}
+
+private class FocusRingNode(
+    private var interactionSource: InteractionSource,
+    private var shape: Shape,
+    private var enabled: Boolean,
+    private var color: Color,
+    private var strokeWidth: Dp,
+    private var inset: Dp,
+    private var fillAlpha: Float
+) : Modifier.Node(), DrawModifierNode, SemanticsModifierNode {
+    private var isFocused = false
+    private var collectJob: Job? = null
+
+    override fun onAttach() {
+        startCollecting()
+    }
+
+    override fun onDetach() {
+        collectJob?.cancel()
+        collectJob = null
+        isFocused = false
+    }
+
+    fun update(
+        interactionSource: InteractionSource,
+        shape: Shape,
+        enabled: Boolean,
+        color: Color,
+        strokeWidth: Dp,
+        inset: Dp,
+        fillAlpha: Float
+    ) {
+        val sourceChanged = this.interactionSource != interactionSource
+        val enabledChanged = this.enabled != enabled
+        this.interactionSource = interactionSource
+        this.shape = shape
+        this.enabled = enabled
+        this.color = color
+        this.strokeWidth = strokeWidth
+        this.inset = inset
+        this.fillAlpha = fillAlpha
+        if (sourceChanged && isAttached) {
+            startCollecting()
+        } else if (enabledChanged) {
+            invalidateSemantics()
+        }
+        invalidateDraw()
+    }
+
+    private fun startCollecting() {
+        collectJob?.cancel()
+        setFocused(false)
+        val source = interactionSource
+        collectJob = coroutineScope.launch {
+            val focuses = ArrayList<FocusInteraction.Focus>(2)
+            source.interactions.collect { interaction ->
+                when (interaction) {
+                    is FocusInteraction.Focus -> focuses.add(interaction)
+                    is FocusInteraction.Unfocus -> focuses.remove(interaction.focus)
+                }
+                setFocused(focuses.isNotEmpty())
+            }
+        }
+    }
+
+    private fun setFocused(focused: Boolean) {
+        if (isFocused != focused) {
+            isFocused = focused
+            invalidateSemantics()
+            invalidateDraw()
+        }
+    }
+
+    override fun SemanticsPropertyReceiver.applySemantics() {
+        this[FocusRingVisibleKey] = enabled && isFocused
+    }
+
+    override fun ContentDrawScope.draw() {
+        drawContent()
+        if (!enabled || !isFocused) return
+        val strokePx = strokeWidth.toPx()
+        val insetPx = inset.toPx() + strokePx / 2f
+        val drawWidth = (size.width - insetPx * 2f).coerceAtLeast(0f)
+        val drawHeight = (size.height - insetPx * 2f).coerceAtLeast(0f)
+        if (drawWidth <= 0f || drawHeight <= 0f) return
+        val outline = shape.createOutline(Size(drawWidth, drawHeight), layoutDirection, this)
+        translate(left = insetPx, top = insetPx) {
+            if (fillAlpha > 0f) {
+                drawOutline(outline = outline, color = color.copy(alpha = fillAlpha))
+            }
+            drawOutline(
+                outline = outline,
+                color = color,
+                style = Stroke(width = strokePx)
+            )
+        }
+    }
+}
+
+/**
+ * 零重排按压缩放修饰符：仅驱动 GPU graphicsLayer，不改变外层触控热区。
+ * 调用方应将 clickable / selectable / toggleable 置于本修饰符外侧以保证按下时命中坐标恒定；
+ * 0x 减少动态效果或禁用时直接返回原修饰符，同帧复位 1.0f 且不启动协程。
  */
 @Composable
 fun Modifier.pressableScale(
@@ -80,28 +265,38 @@ fun Modifier.pressableScale(
     pressedScale: Float = 0.97f
 ): Modifier {
     val reducedMotion = LocalReducedMotion.current
+    if (reducedMotion || !enabled) return this
     val pressed by interactionSource.collectIsPressedAsState()
-    val targetScale = if (enabled && pressed && !reducedMotion) pressedScale else 1f
     val scaleState = animateFloatAsState(
-        targetValue = targetScale,
-        animationSpec = AppMotion.springPress(reducedMotion),
+        targetValue = if (pressed) pressedScale else 1f,
+        animationSpec = AppMotion.springPress(reducedMotion = false),
         label = "pressable_scale"
     )
     return this.graphicsLayer {
-        val s = if (reducedMotion || !enabled) 1f else scaleState.value
+        val s = scaleState.value
         scaleX = s
         scaleY = s
     }
 }
 
 @Composable
-private fun appMotionColor(
+internal fun appMotionColor(
     targetValue: Color,
     reducedMotion: Boolean,
     label: String,
     duration: Int = AppMotion.Fast
 ): Color = if (reducedMotion) targetValue else {
     animateColorAsState(targetValue, AppMotion.colorSpec(false, duration), label = label).value
+}
+
+@Composable
+internal fun appMotionFloat(
+    targetValue: Float,
+    reducedMotion: Boolean,
+    spec: FiniteAnimationSpec<Float>,
+    label: String
+): Float = if (reducedMotion) targetValue else {
+    animateFloatAsState(targetValue, spec, label = label).value
 }
 
 @Composable
@@ -228,20 +423,21 @@ fun DataCard(
     containerColor: Color = MaterialTheme.colorScheme.surface,
     content: @Composable () -> Unit
 ) {
-    val clickModifier = if (onClick != null) {
-        val interactionSource = remember { MutableInteractionSource() }
-        // Keep the pointer node outside the visual layer so the touch area stays unchanged.
+    val interactionSource = if (onClick != null) remember { MutableInteractionSource() } else null
+    val clickModifier = if (onClick != null && interactionSource != null) {
+        // 触控与焦点节点置于 pressableScale 之外，保证按住边缘时不因视觉内缩丢失命中坐标。
         Modifier
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick
             )
             .pressableScale(interactionSource, pressedScale = 0.985f)
+            .focusRing(interactionSource, MaterialTheme.shapes.medium)
     } else {
         Modifier
     }
-    // 原稿 26dp 圆角、奶白卡片与轻微投影。
+    // 原稿 26dp 圆角、奶白卡片与轻微投影；水波纹置于 Card 内部裁剪层，随视觉同步缩放且不溢出直角。
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -253,7 +449,18 @@ fun DataCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Box(modifier = Modifier.padding(AppDimensions.cardPadding)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (interactionSource != null) {
+                        Modifier.indication(interactionSource, LocalIndication.current)
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(AppDimensions.cardPadding)
+        ) {
             content()
         }
     }
@@ -319,13 +526,21 @@ fun AppBackIconButton(
         duration = AppMotion.Micro,
         label = "back_btn_bg"
     )
-    IconButton(
-        onClick = onClick,
-        interactionSource = interactionSource,
+    val shape = RoundedCornerShape(16.dp)
+    Box(
         modifier = modifier
             .size(48.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
             .pressableScale(interactionSource, pressedScale = 0.93f)
-            .background(background, RoundedCornerShape(16.dp))
+            .clip(shape)
+            .background(background)
+            .focusRing(interactionSource, shape),
+        contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = Icons.Default.ChevronLeft,
@@ -405,11 +620,15 @@ fun SegmentedPillGroup(
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val clampedIndex = selectedIndex.coerceIn(0, options.lastIndex)
-    val animatedIndexState = animateFloatAsState(
-        targetValue = clampedIndex.toFloat(),
-        animationSpec = AppMotion.springSnappy(reducedMotion),
-        label = "segment_slider_index"
-    )
+    val animatedIndexState = if (reducedMotion) {
+        null
+    } else {
+        animateFloatAsState(
+            targetValue = clampedIndex.toFloat(),
+            animationSpec = AppMotion.springSnappy(reducedMotion = false),
+            label = "segment_slider_index"
+        )
+    }
     val sliderColor = colors.primaryContainer
     val labelStyle = MaterialTheme.typography.labelLarge.copy(
         fontSize = 16.sp,
@@ -453,7 +672,7 @@ fun SegmentedPillGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .drawBehind {
-                        val currentIndex = if (reducedMotion) clampedIndex.toFloat() else animatedIndexState.value
+                        val currentIndex = animatedIndexState?.value ?: clampedIndex.toFloat()
                         val itemHeight = ((size.height - gapPx * (count - 1)).coerceAtLeast(0f)) / count
                         val y = (itemHeight + gapPx) * currentIndex
                         val radiusPx = 16.dp.toPx()
@@ -484,7 +703,7 @@ fun SegmentedPillGroup(
                 modifier = Modifier
                     .fillMaxWidth()
                     .drawBehind {
-                        val currentIndex = if (reducedMotion) clampedIndex.toFloat() else animatedIndexState.value
+                        val currentIndex = animatedIndexState?.value ?: clampedIndex.toFloat()
                         val itemWidth = ((size.width - gapPx * (count - 1)).coerceAtLeast(0f)) / count
                         val x = (itemWidth + gapPx) * currentIndex
                         val radiusPx = 16.dp.toPx()
@@ -532,22 +751,27 @@ private fun SegmentedPillOption(
         selected -> colors.onPrimaryContainer
         else -> colors.onSurfaceVariant
     }
-    val animatedTextColor by animateColorAsState(
+    val textColor = appMotionColor(
         targetValue = targetTextColor,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
+        reducedMotion = reducedMotion,
         label = "Segment text"
     )
-    val textColor = if (reducedMotion) targetTextColor else animatedTextColor
+    val interactionSource = remember { MutableInteractionSource() }
+    val optionShape = MaterialTheme.shapes.large
     Box(
         modifier = modifier
             .heightIn(min = AppDimensions.minimumTouchTarget)
-            .clip(MaterialTheme.shapes.large)
             .selectable(
                 selected = selected,
+                interactionSource = interactionSource,
+                indication = null,
                 enabled = enabled,
                 role = Role.RadioButton,
                 onClick = onClick
             )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.96f)
+            .clip(optionShape)
+            .focusRing(interactionSource, optionShape, enabled = enabled)
             .padding(horizontal = horizontalPadding),
         contentAlignment = Alignment.Center
     ) {

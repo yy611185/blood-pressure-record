@@ -10,9 +10,11 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -25,13 +27,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
@@ -39,11 +41,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -55,11 +54,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +70,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -95,16 +92,11 @@ import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
 import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-import kotlin.math.ceil
 
 @Composable
 fun rememberTouchExplorationEnabled(): Boolean {
@@ -274,20 +266,24 @@ fun DateTimePillButton(
     enabled: Boolean = true
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val shape = MaterialTheme.shapes.large
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = AppDimensions.minimumTouchTarget)
-            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.97f)
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.large)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 enabled = enabled,
+                role = Role.Button,
                 onClick = onClick
             )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.97f)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, shape, enabled = enabled)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -371,6 +367,8 @@ fun MeasurementReadingCard(
             val numberSize = (MaxNumberFieldFontSize / fontScale)
                 .coerceIn(MinNumberFieldFontSize, MaxNumberFieldFontSize).sp
             val pulseLabel = if (!stacked && maxWidth < 340.dp) "脉搏(选填)" else "脉搏（选填）"
+            val systolicLabel = if (stacked) "高压（收缩压）" else "高压"
+            val diastolicLabel = if (stacked) "低压（舒张压）" else "低压"
 
             val systolicField: @Composable (Modifier) -> Unit = { fieldModifier ->
                 CompactNumberField(
@@ -381,9 +379,9 @@ fun MeasurementReadingCard(
                         { runCatching { diaRequester.requestFocus() } }
                     } else null,
                     onFieldPlaced = onSystolicPlaced,
-                    label = "高压",
+                    label = systolicLabel,
                     unit = "mmHg",
-                    accessibleLabel = "第 ${index + 1} 组收缩压（高压）",
+                    accessibleLabel = "第 ${index + 1} 组高压（收缩压）",
                     imeAction = ImeAction.Next,
                     keyboardActions = KeyboardActions(onNext = { runCatching { diaRequester.requestFocus() } }),
                     numberSize = numberSize,
@@ -401,9 +399,9 @@ fun MeasurementReadingCard(
                     onAutoAdvance = if (!touchExploration) {
                         { runCatching { pulseRequester.requestFocus() } }
                     } else null,
-                    label = "低压",
+                    label = diastolicLabel,
                     unit = "mmHg",
-                    accessibleLabel = "第 ${index + 1} 组舒张压（低压）",
+                    accessibleLabel = "第 ${index + 1} 组低压（舒张压）",
                     imeAction = ImeAction.Next,
                     keyboardActions = KeyboardActions(onNext = { runCatching { pulseRequester.requestFocus() } }),
                     isError = relationError,
@@ -485,7 +483,7 @@ fun MeasurementReadingCard(
             exit = AppMotion.expandVisibilityExit(reducedMotion)
         ) {
             Text(
-                "低压要小于高压，检查一下再保存",
+                "高压应大于低压，请检查后重试",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error
             )
@@ -523,12 +521,11 @@ private fun CompactNumberField(
         focused -> colors.primary
         else -> colors.onSurfaceVariant
     }
-    val animatedLabelColor by animateColorAsState(
+    val labelColor = appMotionColor(
         targetValue = targetLabelColor,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
+        reducedMotion = reducedMotion,
         label = "number_field_label_color"
     )
-    val labelColor = if (reducedMotion) targetLabelColor else animatedLabelColor
     // 浅色下 #C2B8AC 与白底/纸底对比度显著增强，深色下直接使用 colors.outline (#7F7973)
     val unfocusedBorder = if (colors.background.red < 0.5f) {
         colors.outline
@@ -656,36 +653,56 @@ fun SessionChoiceChip(
     onClick: () -> Unit,
     enabled: Boolean = true
 ) {
+    val reducedMotion = LocalReducedMotion.current
+    val colors = MaterialTheme.colorScheme
     val interactionSource = remember { MutableInteractionSource() }
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        enabled = enabled,
-        interactionSource = interactionSource,
-        label = {
-            Text(
-                text,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
-            )
-        },
-        shape = RoundedCornerShape(50),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            labelColor = MaterialTheme.colorScheme.onSurface,
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = enabled,
-            selected = selected,
-            borderColor = MaterialTheme.colorScheme.outlineVariant,
-            selectedBorderColor = MaterialTheme.colorScheme.primary
-        ),
+    val shape = RoundedCornerShape(50)
+    val targetContainer = when {
+        !enabled && selected -> colors.onSurface.copy(alpha = 0.12f)
+        !enabled -> colors.surface.copy(alpha = 0.6f)
+        selected -> colors.primaryContainer
+        else -> colors.surface
+    }
+    val targetLabel = when {
+        !enabled -> colors.onSurface.copy(alpha = 0.38f)
+        selected -> colors.onPrimaryContainer
+        else -> colors.onSurface
+    }
+    val targetBorder = when {
+        !enabled -> colors.onSurface.copy(alpha = 0.12f)
+        selected -> colors.primary
+        else -> colors.outlineVariant
+    }
+    val containerColor = appMotionColor(targetContainer, reducedMotion, "choice_chip_bg", AppMotion.Micro)
+    val labelColor = appMotionColor(targetLabel, reducedMotion, "choice_chip_fg", AppMotion.Micro)
+    val borderColor = appMotionColor(targetBorder, reducedMotion, "choice_chip_border", AppMotion.Micro)
+
+    Box(
         modifier = Modifier
             .heightIn(min = 48.dp)
+            .selectable(
+                selected = selected,
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onClick = onClick
+            )
             .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.96f)
-    )
+            .clip(shape)
+            .background(containerColor)
+            .border(1.dp, borderColor, shape)
+            .focusRing(interactionSource, shape, enabled = enabled)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = labelColor,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+        )
+    }
 }
 
 /** 共享虚线「再加一组」按钮（新增页与编辑页 100% 同构复用），弹性最小高度防大字裁切。 */
@@ -698,17 +715,25 @@ fun DashedAddGroupButton(
     val reducedMotion = LocalReducedMotion.current
     val interactionSource = remember { MutableInteractionSource() }
     val targetAlpha = if (enabled) 1f else 0.42f
-    val animatedAlpha by animateFloatAsState(
+    val contentAlpha = appMotionFloat(
         targetValue = targetAlpha,
-        animationSpec = AppMotion.springPress(reducedMotion),
+        reducedMotion = reducedMotion,
+        spec = AppMotion.springPress(reducedMotion = false),
         label = "dashed_add_alpha"
     )
-    val contentAlpha = if (reducedMotion) targetAlpha else animatedAlpha
     val dashColor = MaterialTheme.colorScheme.primary.copy(alpha = contentAlpha)
+    val pillShape = RoundedCornerShape(50)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            )
             .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.98f)
             .drawBehind {
                 val stroke = Stroke(
@@ -721,13 +746,9 @@ fun DashedAddGroupButton(
                     cornerRadius = CornerRadius(size.height / 2f)
                 )
             }
-            .clip(RoundedCornerShape(50))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = LocalIndication.current,
-                enabled = enabled,
-                onClick = onClick
-            )
+            .clip(pillShape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, pillShape, enabled = enabled)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -740,7 +761,7 @@ fun DashedAddGroupButton(
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            "再加一组",
+            "添加一组读数",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
             color = dashColor
@@ -944,34 +965,6 @@ fun ExpandableSupplementCard(
     }
 }
 
-/** 保留供兼容或独立使用。 */
-@Composable
-fun SessionSupplementFields(
-    symptomNote: String,
-    factorNote: String,
-    onSymptomNoteChange: (String) -> Unit,
-    onFactorNoteChange: (String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.large)) {
-        OutlinedTextField(
-            value = symptomNote,
-            onValueChange = onSymptomNoteChange,
-            label = { Text("有没有不舒服？") },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            minLines = 3
-        )
-        OutlinedTextField(
-            value = factorNote,
-            onValueChange = onFactorNoteChange,
-            label = { Text("有没有可能影响血压的情况？") },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            minLines = 3
-        )
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SessionAverageCard(
@@ -994,7 +987,7 @@ fun SessionAverageCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "本次平均（$measurementCount 组）",
+                    "本次平均（共 $measurementCount 组）",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1026,112 +1019,4 @@ fun SessionAverageCard(
             }
         }
     }
-}
-
-/** 保留并完善完成弹窗契约（带分级芯片、完成徽章与柔和倒计时进度条），供测试与可选模式使用。 */
-@Composable
-fun SessionCompletedDialog(
-    avgSystolic: Int?,
-    avgDiastolic: Int?,
-    measuredAtText: String,
-    timePeriod: String,
-    deadlineMillis: Long?,
-    onEdit: () -> Unit,
-    onClose: () -> Unit
-) {
-    val reducedMotion = LocalReducedMotion.current
-    val currentOnClose by rememberUpdatedState(onClose)
-    var countdownJob by remember { mutableStateOf<Job?>(null) }
-    var handled by remember(deadlineMillis) { mutableStateOf(false) }
-    var remainingSeconds by remember(deadlineMillis) { mutableIntStateOf(5) }
-    var progress by remember(deadlineMillis) { mutableFloatStateOf(1f) }
-    val close = {
-        if (!handled) {
-            handled = true
-            countdownJob?.cancel()
-            onClose()
-        }
-    }
-    val edit = {
-        if (!handled) {
-            handled = true
-            countdownJob?.cancel()
-            onEdit()
-        }
-    }
-    LaunchedEffect(deadlineMillis) {
-        countdownJob = currentCoroutineContext()[Job]
-        deadlineMillis?.let { deadline ->
-            val totalMillis = (deadline - System.currentTimeMillis()).coerceAtLeast(1L)
-            while (!handled) {
-                val left = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
-                remainingSeconds = ceil(left / 1000.0).toInt().coerceAtLeast(1)
-                progress = (left.toFloat() / totalMillis.toFloat()).coerceIn(0f, 1f)
-                if (left <= 0L) {
-                    handled = true
-                    currentOnClose()
-                    break
-                }
-                delay(if (reducedMotion) minOf(left, 1000L) else minOf(left, 60L))
-            }
-        }
-    }
-    val timestamp = DateTimeInputFormatter.parse(measuredAtText)
-        ?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()) }
-    val timestampLabel = if (timestamp?.toLocalDate() == LocalDate.now()) {
-        "今天 ${timestamp.format(DateTimeFormatter.ofPattern("HH:mm"))}"
-    } else measuredAtText
-    val categoryLabel = if (avgSystolic != null && avgDiastolic != null) {
-        CategoryPresentation.label(CategoryCalculator.calculate(avgSystolic, avgDiastolic).name)
-    } else null
-
-    AlertDialog(
-        onDismissRequest = close,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small)
-            ) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Text("记录完成")
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
-                Text(
-                    "${avgSystolic ?: "—"} / ${avgDiastolic ?: "—"} mmHg",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = TabularFeatureSettings),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                if (categoryLabel != null) {
-                    StatusChip(text = categoryLabel, isAbnormal = categoryLabel != "正常")
-                }
-                Text("$timestampLabel · $timePeriod")
-                if (deadlineMillis != null) {
-                    if (!reducedMotion) {
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(50))
-                        )
-                    }
-                    Text(
-                        "已记入血压本 · $remainingSeconds 秒后自动返回",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = close) { Text("关闭") } },
-        dismissButton = { TextButton(onClick = edit) { Text("修改") } }
-    )
 }

@@ -1,6 +1,9 @@
 package com.example.bloodpressurerecord.data
 
+import android.app.Notification
+import android.content.Intent
 import androidx.compose.ui.graphics.toArgb
+import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,6 +17,8 @@ import com.example.bloodpressurerecord.data.repository.SessionReadingInput
 import com.example.bloodpressurerecord.data.repository.SessionRecord
 import com.example.bloodpressurerecord.domain.model.AverageStrategy
 import com.example.bloodpressurerecord.domain.model.TrendRecord
+import com.example.bloodpressurerecord.reminder.MedicationReminders
+import com.example.bloodpressurerecord.reminder.ReminderReceiver
 import com.example.bloodpressurerecord.widget.WidgetDiastolicDarkColor
 import com.example.bloodpressurerecord.widget.WidgetDiastolicLightColor
 import com.example.bloodpressurerecord.widget.renderTrendBitmap
@@ -23,6 +28,9 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -91,7 +99,7 @@ class AuditPersistenceAndNotificationTest {
             repo.markTakenFromReminder(medId, slot.timeId, day).getOrThrow()
         )
         assertEquals(
-            MarkMedicationTakenResult.RECORDED,
+            MarkMedicationTakenResult.ALREADY_TAKEN,
             repo.markTakenFromReminder(medId, slot.timeId, day).getOrThrow()
         )
         assertEquals(1, database.medicationDao().getLogsForDay(day.toEpochDay()).size)
@@ -194,5 +202,73 @@ class AuditPersistenceAndNotificationTest {
         }
         assertTrue("Light mode bitmap must draw light diastolic color", foundLightDia)
         assertTrue("Dark mode bitmap must draw high-contrast dark diastolic color", foundDarkDia)
+    }
+
+    @Test
+    fun medicationNotificationProtectsLockscreenPrivacyAndRoutesToSpecificConfirmation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val day1 = LocalDate.of(2026, 11, 26).toEpochDay()
+        val day2 = LocalDate.of(2026, 11, 27).toEpochDay()
+
+        val notificationA = ReminderReceiver.buildMedicationNotification(
+            context = context,
+            medicationId = 10L,
+            timeId = 101L,
+            dateEpochDay = day1
+        )
+        val notificationB = ReminderReceiver.buildMedicationNotification(
+            context = context,
+            medicationId = 11L,
+            timeId = 102L,
+            dateEpochDay = day1
+        )
+
+        // 锁屏隐私：必须 VISIBILITY_PRIVATE + 独立 publicVersion，且均不泄露药名/剂量
+        assertEquals(NotificationCompat.VISIBILITY_PRIVATE, notificationA.visibility)
+        val publicVersion = notificationA.publicVersion
+        assertNotNull("Medication notification must define publicVersion for lock screen", publicVersion)
+        val publicText = publicVersion!!.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val privateText = notificationA.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        assertEquals(ReminderReceiver.MEDICATION_PUBLIC_TEXT, publicText)
+        assertEquals(ReminderReceiver.MEDICATION_PRIVATE_TEXT, privateText)
+        assertTrue("Public version must not carry action buttons", publicVersion.actions.isNullOrEmpty())
+
+        // 不提供后台盲打「已打卡」动作，动作按钮与正文点击均打开应用内核对确认
+        val actions = notificationA.actions.orEmpty()
+        assertEquals(1, actions.size)
+        assertEquals(ReminderReceiver.MEDICATION_ACTION_REVIEW, actions.single().title.toString())
+        assertEquals(notificationA.contentIntent, actions.single().actionIntent)
+
+        // 同时间不同药品、同药品不同时间及跨日均具备独立标识，避免 PendingIntent/通知互相覆盖
+        assertNotEquals(notificationA.contentIntent, notificationB.contentIntent)
+        assertNotEquals(
+            MedicationReminders.notificationIdFor(101L),
+            MedicationReminders.notificationIdFor(102L)
+        )
+        assertNotEquals(
+            MedicationReminders.openConfirmationUri(101L, day1),
+            MedicationReminders.openConfirmationUri(102L, day1)
+        )
+        assertNotEquals(
+            MedicationReminders.openConfirmationUri(101L, day1),
+            MedicationReminders.openConfirmationUri(101L, day2)
+        )
+
+        // Intent 解析与清理
+        val confirmIntent = MedicationReminders.createOpenConfirmationIntent(context, 10L, 101L, day1)
+        val parsed = MedicationReminders.parseConfirmationRequest(context, confirmIntent)
+        assertNotNull(parsed)
+        assertEquals(10L, parsed!!.medicationId)
+        assertEquals(101L, parsed.timeId)
+        assertEquals(day1, parsed.dateEpochDay)
+
+        val changedDate = Intent(confirmIntent).apply {
+            data = MedicationReminders.openConfirmationUri(101L, day1 - 1)
+            putExtra(MedicationReminders.EXTRA_DATE_EPOCH_DAY, day1 - 1)
+        }
+        assertNull(MedicationReminders.parseConfirmationRequest(context, changedDate))
+        MedicationReminders.clearConfirmationExtras(confirmIntent)
+        assertNull(MedicationReminders.parseConfirmationRequest(context, confirmIntent))
+        assertNull(MedicationReminders.parseConfirmationRequest(context, Intent(context, context.javaClass)))
     }
 }

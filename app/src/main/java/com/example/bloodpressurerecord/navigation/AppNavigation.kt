@@ -4,11 +4,13 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,9 +31,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -42,6 +46,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -50,7 +55,9 @@ import androidx.navigation.compose.rememberNavController
 import com.example.bloodpressurerecord.AppViewModelFactory
 import com.example.bloodpressurerecord.BloodPressureApplication
 import com.example.bloodpressurerecord.BuildConfig
+import com.example.bloodpressurerecord.reminder.MedicationReminderConfirmationRequest
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.home.MedicationReminderConfirmationDialog
 import com.example.bloodpressurerecord.ui.common.AppBottomDock
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
@@ -72,7 +79,6 @@ import com.example.bloodpressurerecord.ui.report.ReportScreen
 import com.example.bloodpressurerecord.ui.report.ReportViewModel
 import com.example.bloodpressurerecord.ui.settings.SettingsAppGuideScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsDataManagementScreen
-import com.example.bloodpressurerecord.ui.settings.SettingsDisplayScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoReleaseNotesScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsInfoScreen
 import com.example.bloodpressurerecord.ui.settings.SettingsProfileScreen
@@ -86,6 +92,7 @@ import com.example.bloodpressurerecord.update.rememberUpdatePlatformActions
 import java.time.LocalDate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 private val TopLevelRoutes = setOf(
@@ -101,11 +108,160 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.isTabSwitch(): Boo
         targetState.destination.route in TopLevelRoutes
 }
 
+/**
+ * 轻量追踪顶级 Tab 选中态与平级切换信号：
+ * - 进入子页期间稳定保留所属顶级 Tab 供 Dock 退场渲染，关闭趋势入口时自动回退首页；
+ * - 仅在「顶级页 -> 另一顶级页」时发出平级入场信号，子页返回与冷启动不误触淡入。
+ */
+internal class TopLevelRouteTracker(initialRoute: String = AppDestination.Measure.route) {
+    var activeTopLevelRoute: String = initialRoute
+        private set
+    private var lastObservedRoute: String? = null
+    var tabSwitchToken: Int = 0
+        private set
+    var lastSwitchTargetRoute: String? = null
+        private set
+
+    fun onRouteChanged(currentRoute: String?, showTrendChart: Boolean): String {
+        if (currentRoute != null) {
+            val previous = lastObservedRoute
+            if (currentRoute != previous) {
+                if (previous != null && previous in TopLevelRoutes && currentRoute in TopLevelRoutes) {
+                    tabSwitchToken += 1
+                    lastSwitchTargetRoute = currentRoute
+                } else if (currentRoute !in TopLevelRoutes) {
+                    lastSwitchTargetRoute = null
+                }
+                lastObservedRoute = currentRoute
+            }
+            if (currentRoute in TopLevelRoutes) {
+                activeTopLevelRoute = currentRoute
+            }
+        }
+        if (!showTrendChart && activeTopLevelRoute == AppDestination.Trend.route) {
+            activeTopLevelRoute = AppDestination.Measure.route
+        }
+        return activeTopLevelRoute
+    }
+}
+
+/**
+ * 新增测量保存后的 Snackbar「再改改」安全门控（兼容顶级页与 HistoryLocation 等子页返回契约）：
+ * - 保存返回落位后绑定当前 NavBackStackEntry ID 与路由；
+ * - 展示期间一旦用户导航离开该条目立即永久失效，杜绝跨页误跳与重复触发。
+ */
+internal class SaveEditActionTicket(
+    rawSessionId: String?,
+    private val routeBuilder: (String) -> String = AppDestination.HistoryEdit::route
+) {
+    val validSessionId: String? = rawSessionId?.takeIf { it.isNotBlank() }
+    var landingEntryId: String? = null
+        private set
+    var landingRoute: String? = null
+        private set
+    private var armed = false
+    private var invalidated = false
+    private var consumed = false
+
+    fun arm(entryId: String?, route: String?) {
+        if (validSessionId == null || entryId.isNullOrBlank() || route.isNullOrBlank() ||
+            route == AppDestination.AddMeasurement.route
+        ) {
+            invalidated = true
+            return
+        }
+        landingEntryId = entryId
+        landingRoute = route
+        armed = true
+    }
+
+    fun onDestinationChanged(currentEntryId: String?, currentRoute: String?): Boolean {
+        if (!armed || invalidated || consumed) return false
+        if (currentEntryId != landingEntryId || currentRoute != landingRoute) {
+            invalidated = true
+            return true
+        }
+        return false
+    }
+
+    fun invalidate() {
+        invalidated = true
+    }
+
+    fun consumeTargetRoute(
+        currentEntryId: String?,
+        currentRoute: String?,
+        isTrendFullscreen: Boolean = false
+    ): String? {
+        val id = validSessionId ?: return null
+        if (!armed || invalidated || consumed || isTrendFullscreen) return null
+        if (currentEntryId == null || currentEntryId != landingEntryId) return null
+        if (currentRoute == null || currentRoute != landingRoute) return null
+        val targetRoute = routeBuilder(id)
+        if (currentRoute == targetRoute || currentRoute == AppDestination.AddMeasurement.route) return null
+        consumed = true
+        return targetRoute
+    }
+}
+
+/**
+ * 顶级页面稳定实心底板容器：
+ * 外层始终保持 100% 不透明背景色（彻底杜绝露底闪空与前后页文字叠影），
+ * 平级切换时仅内层内容做 0.88 -> 1.0 的轻量光学落位；0x 模式与子页返回保持 1.0f 直出。
+ */
+@Composable
+internal fun TopLevelTabSurface(
+    route: String,
+    tabSwitchToken: Int,
+    shouldAnimateArrival: Boolean,
+    reducedMotion: Boolean,
+    content: @Composable () -> Unit
+) {
+    val alphaAnim = remember(route) { Animatable(1f) }
+    var handledToken by remember(route) { mutableStateOf(0) }
+    val pendingSettle = !reducedMotion && shouldAnimateArrival &&
+        tabSwitchToken > 0 && handledToken != tabSwitchToken
+    LaunchedEffect(route, tabSwitchToken, shouldAnimateArrival, reducedMotion) {
+        if (reducedMotion || !shouldAnimateArrival) {
+            if (shouldAnimateArrival) handledToken = tabSwitchToken
+            alphaAnim.snapTo(1f)
+        } else if (pendingSettle) {
+            handledToken = tabSwitchToken
+            alphaAnim.snapTo(0.88f)
+            alphaAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 110, easing = AppMotion.SmoothOutEasing)
+            )
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = when {
+                        reducedMotion || !shouldAnimateArrival -> 1f
+                        pendingSettle -> 0.88f
+                        else -> alphaAnim.value
+                    }
+                }
+        ) {
+            content()
+        }
+    }
+}
+
 @Composable
 fun BloodPressureAppRoot(
     showTrendChart: Boolean = true,
     pendingDestination: String? = null,
-    onConsumePendingDestination: () -> Unit = {}
+    onConsumePendingDestination: () -> Unit = {},
+    pendingMedicationConfirmation: MedicationReminderConfirmationRequest? = null,
+    onConsumePendingMedicationConfirmation: (MedicationReminderConfirmationRequest) -> Unit = {}
 ) {
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
@@ -135,7 +291,8 @@ fun BloodPressureAppRoot(
         AppDestination.SettingsInfo.route,
         AppDestination.SettingsInfoReleaseNotes.route
     ) && !trendFullscreen
-    val updatePromptAllowed = updateForeground && safeUpdateRoute && !dataActionBusy && pendingDestination == null
+    val updatePromptAllowed = updateForeground && safeUpdateRoute && !dataActionBusy &&
+        pendingDestination == null && pendingMedicationConfirmation == null
     val snackbar = remember { SnackbarHostState() }
     val undoSnackbar = remember { SnackbarHostState() }
     val updateActions = rememberUpdatePlatformActions(updateVm, snackbar)
@@ -206,6 +363,26 @@ fun BloodPressureAppRoot(
         onConsumePendingDestination()
     }
 
+    // 从服药通知进入时，若当前位于其他顶层页面则切回测量首页以便查看今日服药；
+    // 若正在子页（如录入/编辑/历史详情），保留原返回栈（不破坏 D-01），直接在当前页弹出核对确认框。
+    var navigatedMedConfirmRequest by remember { mutableStateOf<MedicationReminderConfirmationRequest?>(null) }
+    LaunchedEffect(pendingMedicationConfirmation, current, trendFullscreen, dataActionBusy) {
+        val request = pendingMedicationConfirmation ?: run {
+            navigatedMedConfirmRequest = null
+            return@LaunchedEffect
+        }
+        if (navigatedMedConfirmRequest == request || dataActionBusy || trendFullscreen) return@LaunchedEffect
+        val liveRoute = navController.currentDestination?.route ?: return@LaunchedEffect
+        if (liveRoute in TopLevelRoutes && liveRoute != AppDestination.Measure.route) {
+            navController.navigate(AppDestination.Measure.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+        navigatedMedConfirmRequest = request
+    }
+
     // 全局删除撤销提示与恢复结果反馈（独立于单页 ViewModel 生命周期）。
     LaunchedEffect(currentUndoPrompt?.tokenId) {
         val prompt = currentUndoPrompt ?: return@LaunchedEffect
@@ -239,7 +416,16 @@ fun BloodPressureAppRoot(
     }
     val showBottomBar = current in TopLevelRoutes &&
         !(current == AppDestination.Trend.route && trendFullscreen)
-    val dockScrollState = rememberDockScrollState(current)
+    var savedTopLevelRoute by rememberSaveable { mutableStateOf(AppDestination.Measure.route) }
+    val tabTracker = remember { TopLevelRouteTracker(savedTopLevelRoute) }
+    val activeTopLevelRoute = tabTracker.onRouteChanged(current, showTrendChart)
+    if (savedTopLevelRoute != activeTopLevelRoute) {
+        savedTopLevelRoute = activeTopLevelRoute
+    }
+    val dockScrollState = rememberDockScrollState(activeTopLevelRoute)
+    LaunchedEffect(trendFullscreen) {
+        if (!trendFullscreen) dockScrollState.expand()
+    }
     val snackbarBottomPadding = if (showBottomBar) {
         dockContentBottomPadding()
     } else {
@@ -278,94 +464,99 @@ fun BloodPressureAppRoot(
                     if (showBottomBar) Modifier.nestedScroll(dockScrollState.nestedScrollConnection) else Modifier
                 ),
                 enterTransition = {
-                    if (reducedMotion) {
+                    if (reducedMotion || isTabSwitch()) {
+                        // 顶级 Tab 容器层 0ms 交接，由 TopLevelTabSurface 实心底板承接，不受 push/pop Z 轴或连点中断影响。
                         EnterTransition.None
-                    } else if (isTabSwitch()) {
-                        fadeIn(tween(durationMillis = 190, delayMillis = 40, easing = AppMotion.SmoothOutEasing))
+                    } else if (initialState.destination.route == AppDestination.AddMeasurement.route) {
+                        fadeIn(tween(durationMillis = 180, easing = AppMotion.SmoothOutEasing))
                     } else {
+                        // 子页作为 100% 不透明实心层滑入，防止透出底层页面文字形成重影。
                         slideIntoContainer(
                             AnimatedContentTransitionScope.SlideDirection.Start,
-                            animationSpec = tween(durationMillis = 320, easing = AppMotion.SmoothOutEasing)
-                        ) + fadeIn(tween(durationMillis = 190, easing = AppMotion.SmoothOutEasing))
+                            animationSpec = tween(durationMillis = 280, easing = AppMotion.SmoothOutEasing)
+                        )
                     }
                 },
                 exitTransition = {
-                    if (reducedMotion) {
+                    if (reducedMotion || isTabSwitch()) {
                         ExitTransition.None
-                    } else if (isTabSwitch()) {
-                        fadeOut(tween(durationMillis = 90, easing = AppMotion.SmoothInEasing))
+                    } else if (targetState.destination.route == AppDestination.AddMeasurement.route) {
+                        ExitTransition.KeepUntilTransitionsFinished
                     } else {
                         slideOutOfContainer(
                             AnimatedContentTransitionScope.SlideDirection.Start,
-                            animationSpec = tween(durationMillis = 320, easing = AppMotion.SmoothOutEasing),
-                            targetOffset = { it / 5 }
-                        ) + fadeOut(tween(durationMillis = 180, easing = AppMotion.SmoothInEasing))
+                            animationSpec = tween(durationMillis = 280, easing = AppMotion.SmoothOutEasing),
+                            targetOffset = { it / 4 }
+                        )
                     }
                 },
                 popEnterTransition = {
-                    if (reducedMotion) {
+                    if (reducedMotion || isTabSwitch() || initialState.destination.route == AppDestination.AddMeasurement.route) {
                         EnterTransition.None
-                    } else if (isTabSwitch()) {
-                        fadeIn(tween(durationMillis = 190, delayMillis = 40, easing = AppMotion.SmoothOutEasing))
                     } else {
                         slideIntoContainer(
                             AnimatedContentTransitionScope.SlideDirection.End,
-                            animationSpec = tween(durationMillis = 280, easing = AppMotion.SmoothOutEasing),
-                            initialOffset = { it / 5 }
-                        ) + fadeIn(tween(durationMillis = 170, easing = AppMotion.SmoothOutEasing))
+                            animationSpec = tween(durationMillis = 260, easing = AppMotion.SmoothOutEasing),
+                            initialOffset = { it / 4 }
+                        )
                     }
                 },
                 popExitTransition = {
-                    if (reducedMotion) {
+                    if (reducedMotion || isTabSwitch()) {
                         ExitTransition.None
-                    } else if (isTabSwitch()) {
-                        fadeOut(tween(durationMillis = 90, easing = AppMotion.SmoothInEasing))
                     } else {
                         slideOutOfContainer(
                             AnimatedContentTransitionScope.SlideDirection.End,
-                            animationSpec = tween(durationMillis = 280, easing = AppMotion.SmoothOutEasing)
-                        ) + fadeOut(tween(durationMillis = 200, easing = AppMotion.SmoothInEasing))
+                            animationSpec = tween(durationMillis = 260, easing = AppMotion.SmoothOutEasing)
+                        )
                     }
                 }
             ) {
                 composable(AppDestination.Measure.route) { backStack ->
-                    val dashboardVm: DashboardViewModel = viewModel(factory = factory)
-                    val openHistoryDate: (LocalDate) -> Unit = { targetDate ->
-                        if (navController.currentBackStackEntry == backStack) {
-                            navController.navigate(AppDestination.History.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                            navController.currentBackStackEntry?.savedStateHandle?.set(
-                                "history_open_date",
-                                targetDate.toString()
-                            )
-                        }
-                    }
-                    DashboardScreen(
-                        viewModel = dashboardVm,
-                        onAddMeasurement = openAddMeasurement,
-                        onOpenMedicationSettings = {
-                            navigateFromEntry(backStack, AppDestination.SettingsReminder.route)
-                        },
-                        onOpenTrend = {
-                            if (showTrendChart && navController.currentBackStackEntry == backStack) {
-                                navController.navigate(AppDestination.Trend.route) {
+                    TopLevelTabSurface(
+                        route = AppDestination.Measure.route,
+                        tabSwitchToken = tabTracker.tabSwitchToken,
+                        shouldAnimateArrival = tabTracker.lastSwitchTargetRoute == AppDestination.Measure.route,
+                        reducedMotion = reducedMotion
+                    ) {
+                        val dashboardVm: DashboardViewModel = viewModel(factory = factory)
+                        val openHistoryDate: (LocalDate) -> Unit = { targetDate ->
+                            if (navController.currentBackStackEntry == backStack) {
+                                navController.navigate(AppDestination.History.route) {
                                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }
-                            }
-                        },
-                        onViewTodayRecords = { openHistoryDate(LocalDate.now()) },
-                        onViewDateRecords = openHistoryDate,
-                        onOpenSessionDetail = { sessionId ->
-                            if (sessionId.isNotBlank()) {
-                                navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))
+                                navController.currentBackStackEntry?.savedStateHandle?.set(
+                                    "history_open_date",
+                                    targetDate.toString()
+                                )
                             }
                         }
-                    )
+                        DashboardScreen(
+                            viewModel = dashboardVm,
+                            onAddMeasurement = openAddMeasurement,
+                            onOpenMedicationSettings = {
+                                navigateFromEntry(backStack, AppDestination.SettingsReminder.route)
+                            },
+                            onOpenTrend = {
+                                if (showTrendChart && navController.currentBackStackEntry == backStack) {
+                                    navController.navigate(AppDestination.Trend.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            },
+                            onViewTodayRecords = { openHistoryDate(LocalDate.now()) },
+                            onViewDateRecords = openHistoryDate,
+                            onOpenSessionDetail = { sessionId ->
+                                if (sessionId.isNotBlank()) {
+                                    navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))
+                                }
+                            }
+                        )
+                    }
                 }
                 composable(
                     route = AppDestination.AddMeasurement.route,
@@ -375,8 +566,8 @@ fun BloodPressureAppRoot(
                         } else {
                             slideIntoContainer(
                                 AnimatedContentTransitionScope.SlideDirection.Up,
-                                animationSpec = tween(durationMillis = 320, easing = AppMotion.SmoothOutEasing)
-                            ) + fadeIn(tween(durationMillis = 200, easing = AppMotion.SmoothOutEasing))
+                                animationSpec = tween(durationMillis = 300, easing = AppMotion.SmoothOutEasing)
+                            )
                         }
                     },
                     exitTransition = {
@@ -385,15 +576,18 @@ fun BloodPressureAppRoot(
                         } else {
                             slideOutOfContainer(
                                 AnimatedContentTransitionScope.SlideDirection.Down,
-                                animationSpec = tween(durationMillis = 260, easing = AppMotion.SmoothInEasing)
-                            ) + fadeOut(tween(durationMillis = 180, easing = AppMotion.SmoothInEasing))
+                                animationSpec = tween(durationMillis = 250, easing = AppMotion.SmoothInEasing)
+                            )
                         }
                     },
                     popEnterTransition = {
                         if (reducedMotion) {
                             EnterTransition.None
                         } else {
-                            fadeIn(tween(durationMillis = 180, easing = AppMotion.SmoothOutEasing))
+                            fadeIn(
+                                animationSpec = tween(durationMillis = 180, easing = AppMotion.SmoothOutEasing),
+                                initialAlpha = 0.92f
+                            )
                         }
                     },
                     popExitTransition = {
@@ -402,12 +596,13 @@ fun BloodPressureAppRoot(
                         } else {
                             slideOutOfContainer(
                                 AnimatedContentTransitionScope.SlideDirection.Down,
-                                animationSpec = tween(durationMillis = 260, easing = AppMotion.SmoothInEasing)
-                            ) + fadeOut(tween(durationMillis = 180, easing = AppMotion.SmoothInEasing))
+                                animationSpec = tween(durationMillis = 250, easing = AppMotion.SmoothInEasing)
+                            )
                         }
                     }
                 ) { backStack ->
                     val homeVm: HomeViewModel = viewModel(factory = factory)
+                    var pendingSaveTicket by remember { mutableStateOf<SaveEditActionTicket?>(null) }
                     AddMeasurementScreen(
                         viewModel = homeVm,
                         canConsumeSave = currentEntry == backStack,
@@ -416,7 +611,9 @@ fun BloodPressureAppRoot(
                         onSaved = {
                             if (navController.currentBackStackEntry == backStack) {
                                 val previousRoute = navController.previousBackStackEntry?.destination?.route
-                                if (previousRoute == null || previousRoute in TopLevelRoutes) {
+                                if (previousRoute == AppDestination.Measure.route) {
+                                    navController.popBackStack()
+                                } else if (previousRoute == null || previousRoute in TopLevelRoutes) {
                                     navController.navigate(AppDestination.Measure.route) {
                                         popUpTo(navController.graph.findStartDestination().id)
                                         launchSingleTop = true
@@ -424,10 +621,18 @@ fun BloodPressureAppRoot(
                                 } else {
                                     navController.popBackStack()
                                 }
+                                pendingSaveTicket?.arm(
+                                    entryId = navController.currentBackStackEntry?.id,
+                                    route = navController.currentDestination?.route
+                                )
+                            } else {
+                                pendingSaveTicket?.invalidate()
                             }
                         },
                         onSavedFeedback = { sessionId, avgSys, avgDia, categoryLabel ->
-                            val validId = sessionId.takeIf { it.isNotBlank() }
+                            pendingSaveTicket?.invalidate()
+                            val ticket = SaveEditActionTicket(sessionId)
+                            pendingSaveTicket = ticket
                             val bpText = if (avgSys != null && avgDia != null) {
                                 "$avgSys/$avgDia mmHg（$categoryLabel）"
                             } else {
@@ -435,45 +640,71 @@ fun BloodPressureAppRoot(
                             }
                             scope.launch {
                                 snackbar.currentSnackbarData?.dismiss()
-                                val result = snackbar.showSnackbar(
-                                    message = "已保存 $bpText",
-                                    actionLabel = if (validId != null) "再改改" else null,
-                                    duration = SnackbarDuration.Short
-                                )
-                                if (result == SnackbarResult.ActionPerformed && validId != null) {
-                                    val targetRoute = AppDestination.HistoryEdit.route(validId)
-                                     if (navController.currentDestination?.route in TopLevelRoutes) {
-                                        navController.navigate(targetRoute) {
-                                            launchSingleTop = true
+                                val snackbarJob = coroutineContext.job
+                                val listener = NavController.OnDestinationChangedListener { controller, destination, _ ->
+                                    if (ticket.onDestinationChanged(
+                                            currentEntryId = controller.currentBackStackEntry?.id,
+                                            currentRoute = destination.route
+                                        )
+                                    ) {
+                                        snackbarJob.cancel()
+                                    }
+                                }
+                                navController.addOnDestinationChangedListener(listener)
+                                try {
+                                    val result = snackbar.showSnackbar(
+                                        message = "已保存 $bpText",
+                                        actionLabel = if (ticket.validSessionId != null) "再改改" else null,
+                                        duration = SnackbarDuration.Short
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        val targetRoute = ticket.consumeTargetRoute(
+                                            currentEntryId = navController.currentBackStackEntry?.id,
+                                            currentRoute = navController.currentDestination?.route,
+                                            isTrendFullscreen = trendVm?.fullscreen?.value == true
+                                        )
+                                        if (targetRoute != null) {
+                                            navController.navigate(targetRoute) {
+                                                launchSingleTop = true
+                                            }
                                         }
                                     }
+                                } finally {
+                                    navController.removeOnDestinationChangedListener(listener)
                                 }
                             }
                         }
                     )
                 }
                 composable(AppDestination.History.route) { backStack ->
-                    val historyVm: HistoryViewModel = viewModel(factory = factory)
-                    val requestedDate = backStack.savedStateHandle.get<String>("history_open_date")
-                    LaunchedEffect(requestedDate) {
-                        requestedDate?.let {
-                            runCatching { LocalDate.parse(it) }.getOrNull()
-                                ?.let(historyVm::openDateWhenAvailable)
-                            backStack.savedStateHandle.remove<String>("history_open_date")
-                        }
-                    }
-                    HistoryScreen(
-                        viewModel = historyVm,
-                        onAddMeasurement = openAddMeasurement,
-                        onOpenSearch = {
-                            navigateFromEntry(backStack, AppDestination.NoteSearch.route)
-                        },
-                        onOpenDetail = { sessionId ->
-                            if (sessionId.isNotBlank()) {
-                                navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))
+                    TopLevelTabSurface(
+                        route = AppDestination.History.route,
+                        tabSwitchToken = tabTracker.tabSwitchToken,
+                        shouldAnimateArrival = tabTracker.lastSwitchTargetRoute == AppDestination.History.route,
+                        reducedMotion = reducedMotion
+                    ) {
+                        val historyVm: HistoryViewModel = viewModel(factory = factory)
+                        val requestedDate = backStack.savedStateHandle.get<String>("history_open_date")
+                        LaunchedEffect(requestedDate) {
+                            requestedDate?.let {
+                                runCatching { LocalDate.parse(it) }.getOrNull()
+                                    ?.let(historyVm::openDateWhenAvailable)
+                                backStack.savedStateHandle.remove<String>("history_open_date")
                             }
                         }
-                    )
+                        HistoryScreen(
+                            viewModel = historyVm,
+                            onAddMeasurement = openAddMeasurement,
+                            onOpenSearch = {
+                                navigateFromEntry(backStack, AppDestination.NoteSearch.route)
+                            },
+                            onOpenDetail = { sessionId ->
+                                if (sessionId.isNotBlank()) {
+                                    navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))
+                                }
+                            }
+                        )
+                    }
                 }
                 composable(AppDestination.NoteSearch.route) { backStack ->
                     val searchVm: NoteSearchViewModel = viewModel(factory = factory)
@@ -501,17 +732,24 @@ fun BloodPressureAppRoot(
                     )
                 }
                 composable(AppDestination.Trend.route) { backStack ->
-                    val vm: TrendViewModel = viewModel(factory = factory)
-                    com.example.bloodpressurerecord.ui.history.TrendScreen(
-                        viewModel = vm,
-                        onBack = null,
-                        onAddMeasurement = openAddMeasurement,
-                        onOpenRecord = { id ->
-                            if (id.isNotBlank()) {
-                                navigateFromEntry(backStack, AppDestination.HistoryDetail.route(id))
+                    TopLevelTabSurface(
+                        route = AppDestination.Trend.route,
+                        tabSwitchToken = tabTracker.tabSwitchToken,
+                        shouldAnimateArrival = tabTracker.lastSwitchTargetRoute == AppDestination.Trend.route,
+                        reducedMotion = reducedMotion
+                    ) {
+                        val vm: TrendViewModel = viewModel(factory = factory)
+                        com.example.bloodpressurerecord.ui.history.TrendScreen(
+                            viewModel = vm,
+                            onBack = null,
+                            onAddMeasurement = openAddMeasurement,
+                            onOpenRecord = { id ->
+                                if (id.isNotBlank()) {
+                                    navigateFromEntry(backStack, AppDestination.HistoryDetail.route(id))
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
                 composable(AppDestination.HistoryDetail.route) { backStack ->
                     val sessionId = backStack.arguments?.getString("sessionId").orEmpty()
@@ -569,15 +807,21 @@ fun BloodPressureAppRoot(
                     )
                 }
                 composable(AppDestination.Settings.route) { backStack ->
-                    val vm: SettingsViewModel = viewModel(factory = factory)
-                    SettingsScreen(
-                        viewModel = vm,
-                        onOpenProfile = { navigateFromEntry(backStack, AppDestination.SettingsProfile.route) },
-                        onOpenReminder = { navigateFromEntry(backStack, AppDestination.SettingsReminder.route) },
-                        onOpenDisplay = { navigateFromEntry(backStack, AppDestination.SettingsDisplay.route) },
-                        onOpenDataManagement = { navigateFromEntry(backStack, AppDestination.SettingsDataManagement.route) },
-                        onOpenInfo = { navigateFromEntry(backStack, AppDestination.SettingsInfo.route) }
-                    )
+                    TopLevelTabSurface(
+                        route = AppDestination.Settings.route,
+                        tabSwitchToken = tabTracker.tabSwitchToken,
+                        shouldAnimateArrival = tabTracker.lastSwitchTargetRoute == AppDestination.Settings.route,
+                        reducedMotion = reducedMotion
+                    ) {
+                        val vm: SettingsViewModel = viewModel(factory = factory)
+                        SettingsScreen(
+                            viewModel = vm,
+                            onOpenProfile = { navigateFromEntry(backStack, AppDestination.SettingsProfile.route) },
+                            onOpenReminder = { navigateFromEntry(backStack, AppDestination.SettingsReminder.route) },
+                            onOpenDataManagement = { navigateFromEntry(backStack, AppDestination.SettingsDataManagement.route) },
+                            onOpenInfo = { navigateFromEntry(backStack, AppDestination.SettingsInfo.route) }
+                        )
+                    }
                 }
                 composable(AppDestination.SettingsProfile.route) { backStack ->
                     val vm: SettingsViewModel = viewModel(factory = factory)
@@ -598,10 +842,6 @@ fun BloodPressureAppRoot(
                         viewModel = vm,
                         onBack = { popIfCurrent(backStack) }
                     )
-                }
-                composable(AppDestination.SettingsDisplay.route) { backStack ->
-                    val vm: SettingsViewModel = viewModel(factory = factory)
-                    SettingsDisplayScreen(viewModel = vm, onBack = { popIfCurrent(backStack) })
                 }
                 composable(AppDestination.SettingsDataManagement.route) { backStack ->
                     val vm: SettingsViewModel = viewModel(factory = factory)
@@ -657,19 +897,42 @@ fun BloodPressureAppRoot(
             ) {
                 AppBottomDock(
                     tabs = tabs,
-                    currentRoute = current,
+                    currentRoute = activeTopLevelRoute,
                     compact = dockScrollState.isCompact,
-                    onAddMeasurement = openAddMeasurement,
+                    active = showBottomBar,
+                    onAddMeasurement = { if (showBottomBar) openAddMeasurement() },
                     onSelect = { destination ->
-                        navController.navigate(destination.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
+                        if (showBottomBar) {
+                            navController.navigate(destination.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
                     }
                 )
             }
         }
+    }
+
+    if (pendingMedicationConfirmation != null && !dataActionBusy) {
+        MedicationReminderConfirmationDialog(
+            request = pendingMedicationConfirmation,
+            medicationRepository = application.appContainer.medicationRepository,
+            onDismissNotification = { timeId, epochDay ->
+                scope.launch {
+                    runCatching {
+                        application.appContainer.medicationReminderCoordinator.dismissTakenNotification(timeId, epochDay)
+                    }
+                }
+            },
+            onDismiss = { onConsumePendingMedicationConfirmation(pendingMedicationConfirmation) },
+            onFeedback = { message ->
+                scope.launch {
+                    snackbar.showSnackbar(message = message, duration = SnackbarDuration.Short)
+                }
+            }
+        )
     }
 
     if (updateState.dialogVisible && updatePromptAllowed) {

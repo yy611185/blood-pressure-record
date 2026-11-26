@@ -1,5 +1,6 @@
 package com.example.bloodpressurerecord.reminder
 
+import com.example.bloodpressurerecord.ui.home.formatReminderScheduleLabel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -96,5 +97,19 @@ class ReminderTimeCalculatorTest {
         val tokyo = ReminderTimeCalculator.nextTriggerMillis("07:30", current, ZoneId.of("Asia/Tokyo"))
 
         assertEquals(60L * 60 * 1_000, taipei!! - tokyo!!)
+    }
+
+    @Test
+    fun formatReminderScheduleLabelDistinguishesTodayYesterdayAndOlderDates() {
+        val today = LocalDate.of(2026, 11, 26)
+        assertEquals("今天 08:00", formatReminderScheduleLabel(today, "08:00", today))
+        assertEquals(
+            "昨天（11月25日）20:30",
+            formatReminderScheduleLabel(today.minusDays(1), "20:30", today)
+        )
+        assertEquals(
+            "2026年11月20日 07:15",
+            formatReminderScheduleLabel(LocalDate.of(2026, 11, 20), "07:15", today)
+        )
     }
 }

@@ -1,13 +1,12 @@
 package com.example.bloodpressurerecord.ui.home
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +61,9 @@ import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.common.appMotionColor
+import com.example.bloodpressurerecord.ui.common.appMotionFloat
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
@@ -116,7 +118,7 @@ internal fun WeekCard(
             }
         } else {
             Text(
-                "每天记一记，连续记录会显示在上方。",
+                "已隐藏趋势图，连续记录仍会显示在上方。",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp)
@@ -305,120 +307,126 @@ private fun WeekSelectedDayBar(
     today: LocalDate,
     onOpenDateRecords: (LocalDate) -> Unit
 ) {
+    if (day.averageSystolic == null || day.averageDiastolic == null) return
     val colors = MaterialTheme.colorScheme
     val reducedMotion = LocalReducedMotion.current
-    val interactionSource = remember { MutableInteractionSource() }
 
-    AnimatedContent(
-        targetState = day,
-        contentKey = { it.date },
-        transitionSpec = { AppMotion.fadeThrough(reducedMotion) },
-        label = "week_selected_day_bar"
-    ) { current ->
-        val sys = current.averageSystolic ?: return@AnimatedContent
-        val dia = current.averageDiastolic ?: return@AnimatedContent
-        val category = CategoryCalculator.calculate(sys, dia)
-        val look = gradeLook(category.name)
-        val dateSuffix = if (current.date == today) {
-            "今天"
-        } else {
-            "${current.date.monthValue}/${current.date.dayOfMonth}"
-        }
-        val countLabel = if (current.sessionCount <= 1) "1次记录" else "${current.sessionCount}次平均"
-        val dayMetaText = "周${weekdayLabel(current.date)} · $dateSuffix · $countLabel"
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .testTag("week-selected-day-bar")
+            .clip(RoundedCornerShape(16.dp))
+            .background(colors.surfaceContainerLow)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        AnimatedContent(
+            targetState = day,
+            contentKey = { it.date },
+            transitionSpec = { AppMotion.fadeThrough(reducedMotion) },
+            label = "week_selected_day_bar"
+        ) { current ->
+            val sys = current.averageSystolic ?: return@AnimatedContent
+            val dia = current.averageDiastolic ?: return@AnimatedContent
+            val interactionSource = remember { MutableInteractionSource() }
+            val category = CategoryCalculator.calculate(sys, dia)
+            val look = gradeLook(category.name)
+            val dateSuffix = if (current.date == today) {
+                "今天"
+            } else {
+                "${current.date.monthValue}/${current.date.dayOfMonth}"
+            }
+            val countLabel = if (current.sessionCount <= 1) "1次记录" else "${current.sessionCount}次平均"
+            val dayMetaText = "周${weekdayLabel(current.date)} · $dateSuffix · $countLabel"
 
-        BoxWithConstraints(
-            Modifier
-                .fillMaxWidth()
-                .testTag("week-selected-day-bar")
-                .clip(RoundedCornerShape(16.dp))
-                .background(colors.surfaceContainerLow)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            val compact = maxWidth < 250.dp * LocalDensity.current.fontScale
-            val infoContent: @Composable (Modifier) -> Unit = { infoModifier ->
-                Column(infoModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        dayMetaText,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontSize = 11.sp,
-                            fontFeatureSettings = TabularFeatureSettings
-                        ),
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onSurfaceVariant
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val compact = maxWidth < 250.dp * LocalDensity.current.fontScale
+                val infoContent: @Composable (Modifier) -> Unit = { infoModifier ->
+                    Column(infoModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            "$sys/$dia",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontFamily = NumberFontFamily,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
+                            dayMetaText,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 11.sp,
                                 fontFeatureSettings = TabularFeatureSettings
                             ),
-                            color = colors.onSurface,
-                            modifier = Modifier.align(Alignment.CenterVertically)
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onSurfaceVariant
                         )
-                        GradeChip(
-                            label = CategoryPresentation.label(category),
-                            look = look,
-                            compact = true
-                        )
-                        if (current.containsHighRiskReading) {
-                            RiskChip()
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "$sys/$dia",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontFamily = NumberFontFamily,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFeatureSettings = TabularFeatureSettings
+                                ),
+                                color = colors.onSurface,
+                                modifier = Modifier.align(Alignment.CenterVertically)
+                            )
+                            GradeChip(
+                                label = CategoryPresentation.label(category),
+                                look = look,
+                                compact = true
+                            )
+                            if (current.containsHighRiskReading) {
+                                RiskChip()
+                            }
                         }
                     }
                 }
-            }
-            val actionButton: @Composable () -> Unit = {
-                Row(
-                    modifier = Modifier
-                        .testTag("week-view-day-action")
-                        .pressableScale(interactionSource, pressedScale = 0.96f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(
-                            interactionSource = interactionSource,
-                            indication = LocalIndication.current,
-                            role = Role.Button,
-                            onClickLabel = "查看周${weekdayLabel(current.date)}历史记录",
-                            onClick = { onOpenDateRecords(current.date) }
+                val actionButton: @Composable () -> Unit = {
+                    val actionShape = RoundedCornerShape(12.dp)
+                    Row(
+                        modifier = Modifier
+                            .testTag("week-view-day-action")
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = null,
+                                role = Role.Button,
+                                onClickLabel = "查看周${weekdayLabel(current.date)}历史记录",
+                                onClick = { onOpenDateRecords(current.date) }
+                            )
+                            .pressableScale(interactionSource, pressedScale = 0.96f)
+                            .clip(actionShape)
+                            .indication(interactionSource, LocalIndication.current)
+                            .focusRing(interactionSource, actionShape)
+                            .heightIn(min = 44.dp)
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            "查看当天",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primary
                         )
-                        .heightIn(min = 44.dp)
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        "查看当天",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primary
-                    )
-                    Icon(
-                        Icons.Outlined.ChevronRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = colors.primary
-                    )
+                        Icon(
+                            Icons.Outlined.ChevronRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = colors.primary
+                        )
+                    }
                 }
-            }
 
-            if (compact) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    infoContent(Modifier.fillMaxWidth())
-                    actionButton()
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    infoContent(Modifier.weight(1f))
-                    actionButton()
+                if (compact) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        infoContent(Modifier.fillMaxWidth())
+                        actionButton()
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        infoContent(Modifier.weight(1f))
+                        actionButton()
+                    }
                 }
             }
         }
@@ -627,10 +635,11 @@ private fun WeekRangeDayColumn(
         isSelected && look != null -> look.soft.copy(alpha = 0.65f)
         else -> Color.Transparent
     }
-    val highlightColor by animateColorAsState(
+    val highlightColor = appMotionColor(
         targetValue = targetHighlight,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
-        label = "week_col_highlight"
+        reducedMotion = reducedMotion,
+        label = "week_col_highlight",
+        duration = AppMotion.Micro
     )
 
     val plotTopPx = with(density) { labelBand.toPx() }
@@ -650,16 +659,26 @@ private fun WeekRangeDayColumn(
         null
     }
 
-    val animatedTopPx by animateFloatAsState(
-        targetValue = targetGeometry?.topPx ?: (plotTopPx + plotHeightPx / 2f),
-        animationSpec = AppMotion.springGentle(reducedMotion),
-        label = "week_capsule_top"
-    )
-    val animatedBottomPx by animateFloatAsState(
-        targetValue = targetGeometry?.bottomPx ?: (plotTopPx + plotHeightPx / 2f),
-        animationSpec = AppMotion.springGentle(reducedMotion),
-        label = "week_capsule_bottom"
-    )
+    val topPx = if (targetGeometry != null) {
+        appMotionFloat(
+            targetValue = targetGeometry.topPx,
+            reducedMotion = reducedMotion,
+            spec = AppMotion.springGentle(reducedMotion = false),
+            label = "week_capsule_top"
+        )
+    } else {
+        plotTopPx + plotHeightPx / 2f
+    }
+    val bottomPx = if (targetGeometry != null) {
+        appMotionFloat(
+            targetValue = targetGeometry.bottomPx,
+            reducedMotion = reducedMotion,
+            spec = AppMotion.springGentle(reducedMotion = false),
+            label = "week_capsule_bottom"
+        )
+    } else {
+        plotTopPx + plotHeightPx / 2f
+    }
 
     val semanticsLabel = buildString {
         append("周")
@@ -683,13 +702,15 @@ private fun WeekRangeDayColumn(
 
     val columnShape = RoundedCornerShape(14.dp)
     val clickableModifier = if (day.hasReadings) {
-        Modifier.clickable(
-            interactionSource = interactionSource,
-            indication = LocalIndication.current,
-            role = Role.Button,
-            onClickLabel = "查看周${weekdayLabel(day.date)}详情",
-            onClick = onSelect
-        )
+        Modifier
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "查看周${weekdayLabel(day.date)}详情",
+                onClick = onSelect
+            )
+            .pressableScale(interactionSource, pressedScale = 0.96f)
     } else {
         Modifier
     }
@@ -697,9 +718,10 @@ private fun WeekRangeDayColumn(
     Column(
         modifier = modifier
             .testTag("week-day-column-$index")
+            .then(clickableModifier)
             .clip(columnShape)
             .background(highlightColor)
-            .then(clickableModifier)
+            .then(if (day.hasReadings) Modifier.focusRing(interactionSource, columnShape) else Modifier)
             .semantics(mergeDescendants = true) {
                 contentDescription = semanticsLabel
                 selected = isSelected
@@ -714,8 +736,8 @@ private fun WeekRangeDayColumn(
         ) {
             val centerX = size.width / 2f
             if (day.hasReadings && look != null) {
-                val topY = if (reducedMotion && targetGeometry != null) targetGeometry.topPx else animatedTopPx
-                val bottomY = if (reducedMotion && targetGeometry != null) targetGeometry.bottomPx else animatedBottomPx
+                val topY = topPx
+                val bottomY = bottomPx
                 val capsuleWidth = (if (isSelected) 14.dp else 12.dp).toPx().coerceAtMost(size.width * 0.52f)
                 val capRadius = capsuleWidth / 2f
                 val endpointRadius = (if (isSelected) 4.4.dp else 3.8.dp).toPx().coerceAtMost(capRadius - 1.dp.toPx())
@@ -824,15 +846,17 @@ private fun WeekRangeDayColumn(
 
         Spacer(Modifier.height(4.dp))
 
-        // 底部唯一星期轴 + 打卡点指示
+        // 底部唯一星期轴 + 打卡点指示：当前选中项拥有主高亮，未选中的「今天」仅保留轻量描边提示。
         val pillBg = when {
-            isToday -> colors.primary.copy(alpha = 0.18f)
-            isSelected && look != null -> look.ink.copy(alpha = 0.14f)
+            isSelected && isToday -> colors.primary.copy(alpha = 0.18f)
+            isSelected && look != null -> look.ink.copy(alpha = 0.16f)
+            isSelected -> colors.primary.copy(alpha = 0.16f)
             else -> Color.Transparent
         }
         val labelColor = when {
-            isToday -> colors.onPrimaryContainer
+            isSelected && isToday -> colors.onPrimaryContainer
             isSelected && look != null -> look.ink
+            isToday -> colors.primary
             day.recorded -> colors.onSurface
             isFuture -> colors.onSurfaceVariant.copy(alpha = 0.55f)
             else -> colors.onSurfaceVariant
@@ -845,8 +869,12 @@ private fun WeekRangeDayColumn(
                 .clip(RoundedCornerShape(8.dp))
                 .background(pillBg)
                 .then(
-                    if (isToday) Modifier.border(1.dp, colors.primary, RoundedCornerShape(8.dp))
-                    else Modifier
+                    when {
+                        isSelected && isToday -> Modifier.border(1.5.dp, colors.primary, RoundedCornerShape(8.dp))
+                        isSelected && look != null -> Modifier.border(1.5.dp, look.ink.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                        isToday -> Modifier.border(1.dp, colors.outline, RoundedCornerShape(8.dp))
+                        else -> Modifier
+                    }
                 )
                 .padding(horizontal = 2.dp, vertical = 2.dp),
             contentAlignment = Alignment.Center
@@ -898,7 +926,7 @@ private fun WeekRangeLegend(
                 drawCircle(color = colors.onSurfaceVariant, radius = size.minDimension / 2f)
             }
             Text(
-                "实心高压",
+                "实心圆：日均高压",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant
             )
@@ -915,7 +943,7 @@ private fun WeekRangeLegend(
                 )
             }
             Text(
-                "空心低压 · 日均值（虚线 $normalSystolicCut/$normalDiastolicCut）",
+                "空心圆：日均低压 · 虚线：四色条正常上界 $normalSystolicCut/$normalDiastolicCut",
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TabularFeatureSettings),
                 color = colors.onSurfaceVariant
             )

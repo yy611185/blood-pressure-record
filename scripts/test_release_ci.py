@@ -151,9 +151,9 @@ class ReleaseTests(unittest.TestCase):
             self.assertTrue(ci.detect(self.api, SHA, OLD_SHA)["should_release"])
         mock.assert_called_once_with("show", f"{OLD_SHA}:{ci.GRADLE}")
 
-    def test_unchanged_version_without_tag_skips(self):
+    def test_unchanged_pending_version_without_tag_recovers(self):
         with patch.object(ci, "git", side_effect=lambda *args: gradle() if args[0] == "show" else f"{SHA} {OLD_SHA}"):
-            self.assertFalse(ci.detect(self.api, SHA)["should_release"])
+            self.assertTrue(ci.detect(self.api, SHA)["should_release"])
 
     def test_complete_release_skips_and_conflict_takes_priority(self):
         self.api.add_release()
@@ -165,6 +165,36 @@ class ReleaseTests(unittest.TestCase):
         self.api.tags["v2.3.2"] = OLD_SHA
         with self.assertRaisesRegex(ci.ReleaseError, "never moved"):
             ci.detect(self.api, SHA)
+
+    def test_release_distribution_uses_verified_github_bytes_and_skips_matching_manifest(self):
+        local_files = self.write_outputs()
+        self.api.add_release()
+        for name, data in local_files.items():
+            self.api.add_asset(name, data)
+        apk_name = "blood-pressure-record-v2.3.2-release.apk"
+        apk_path = ci.asset_paths("2.3.2")[apk_name]
+        apk_path.unlink()
+
+        class Response(io.BytesIO):
+            def geturl(self):
+                return ci.UPDATE_MANIFEST_URL
+
+        def manifest(version, code, digest):
+            return Response(ci.json.dumps({
+                "version": version, "versionCode": code, "apk": apk_name, "sha256": digest
+            }).encode())
+
+        with patch.object(ci.urllib.request, "urlopen", return_value=manifest("2.3.1", 42, "a" * 64)):
+            self.assertTrue(ci.prepare_distribution(self.api, SHA)["should_deploy"])
+        self.assertEqual(local_files[apk_name], apk_path.read_bytes())
+        self.assertEqual("Existing notes", apk_path.parents[2].joinpath("distribution-notes.txt").read_text())
+        digest = ci.sha256(local_files[apk_name])
+        with patch.object(ci.urllib.request, "urlopen", return_value=manifest("2.3.2", 43, digest)):
+            self.assertFalse(ci.prepare_distribution(self.api, SHA)["should_deploy"])
+        with patch.object(ci.urllib.request, "urlopen", return_value=manifest("2.3.2", 43, "b" * 64)):
+            with self.assertRaisesRegex(ci.ReleaseError, "different APK"):
+                ci.prepare_distribution(self.api, SHA)
+        self.assertTrue(all(method == "GET" for method, _, _ in self.api.calls))
 
     def test_same_sha_tag_without_release_allows_rerun(self):
         self.api.tags["v2.3.2"] = SHA

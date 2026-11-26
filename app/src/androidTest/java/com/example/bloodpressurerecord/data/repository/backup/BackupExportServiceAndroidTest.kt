@@ -1,6 +1,13 @@
 package com.example.bloodpressurerecord.data.repository.backup
 
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
@@ -28,9 +35,16 @@ import org.junit.Test
 
 class BackupExportServiceAndroidTest {
     private lateinit var database: AppDatabase
+    private lateinit var storeScope: CoroutineScope
+    private lateinit var isolatedSettings: AppSettingsStore
+    @get:Rule val temporary = TemporaryFolder()
 
     @Before
     fun setUp() {
+        storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        isolatedSettings = AppSettingsStore.using(PreferenceDataStoreFactory.create(scope = storeScope) {
+            temporary.root.resolve("backup-test.preferences_pb")
+        })
         database = Room.inMemoryDatabaseBuilder(
             ApplicationProvider.getApplicationContext(),
             AppDatabase::class.java
@@ -39,6 +53,7 @@ class BackupExportServiceAndroidTest {
 
     @After
     fun tearDown() {
+        storeScope.cancel()
         database.close()
     }
 
@@ -77,7 +92,7 @@ class BackupExportServiceAndroidTest {
             sessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),
             userProfileDao = database.userProfileDao(),
-            appSettingsStore = AppSettingsStore(ApplicationProvider.getApplicationContext())
+            appSettingsStore = isolatedSettings
         ).buildPayload(appName = "家庭血压记录", appVersion = "test")
 
         assertEquals(1, payload.measurements.size)
@@ -133,7 +148,7 @@ class BackupExportServiceAndroidTest {
                 )
             }
         )
-        val settingsStore = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val settingsStore = isolatedSettings
         val payload = BackupExportService(
             sessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),
@@ -183,7 +198,7 @@ class BackupExportServiceAndroidTest {
 
         val result = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         ).importXlsx(ByteArrayInputStream(bytes))
         val restored = database.measurementSessionDao().getSessionWithReadings(sessionId)?.session
 
@@ -205,7 +220,7 @@ class BackupExportServiceAndroidTest {
         database.measurementSessionDao().deleteAllSessions()
         val service = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         )
 
         val preview = service.previewXlsx(ByteArrayInputStream(bytes))
@@ -244,7 +259,7 @@ class BackupExportServiceAndroidTest {
 
         val preview = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         ).previewXlsx(ByteArrayInputStream(future))
 
         assertEquals(0, preview.validRecordCount)
@@ -276,7 +291,7 @@ class BackupExportServiceAndroidTest {
 
         val result = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         ).importXlsx(ByteArrayInputStream(tampered))
         val restored = database.measurementSessionDao().getSessionWithReadings(sessionId)
 
@@ -302,7 +317,7 @@ class BackupExportServiceAndroidTest {
         val dao = database.measurementSessionDao()
         dao.deleteAllReadings()
         dao.deleteAllSessions()
-        val result = BackupImportService(database, AppSettingsStore(ApplicationProvider.getApplicationContext()))
+        val result = BackupImportService(database, isolatedSettings)
             .importXlsx(ByteArrayInputStream(bytes))
 
         assertEquals(1, result.correctedCount)
@@ -328,7 +343,7 @@ class BackupExportServiceAndroidTest {
 
         val result = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         ).importXlsx(ByteArrayInputStream(tampered))
 
         assertEquals(1, result.skippedCount)
@@ -351,7 +366,7 @@ class BackupExportServiceAndroidTest {
 
         val result = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         ).importXlsx(ByteArrayInputStream(tampered))
 
         assertEquals(0, result.skippedCount)
@@ -369,7 +384,7 @@ class BackupExportServiceAndroidTest {
         database.measurementSessionDao().deleteAllSessions()
         val service = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         )
 
         val first = service.importXlsx(ByteArrayInputStream(bytes))
@@ -409,7 +424,7 @@ class BackupExportServiceAndroidTest {
 
         val service = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         )
         service.importXlsx(ByteArrayInputStream(bytes))
         service.importXlsx(ByteArrayInputStream(bytes))
@@ -423,7 +438,7 @@ class BackupExportServiceAndroidTest {
 
     @Test
     fun version4_roundTripsOptionalAppearanceSettingsWhenSelected() = runTest {
-        val store = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val store = isolatedSettings
         store.clearAll()
         try {
             store.setAppearanceMode("dark")
@@ -452,7 +467,7 @@ class BackupExportServiceAndroidTest {
 
     @Test
     fun oldVersion4WithoutAppearanceKeysKeepsCurrentPreferences() = runTest {
-        val store = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val store = isolatedSettings
         store.clearAll()
         try {
             val bytes = exportSingleSession(
@@ -508,7 +523,7 @@ class BackupExportServiceAndroidTest {
         try {
             BackupImportService(
                 database,
-                AppSettingsStore(ApplicationProvider.getApplicationContext())
+                isolatedSettings
             ).importXlsx(ByteArrayInputStream(duplicated))
             fail("duplicate record_id should fail")
         } catch (expected: BackupFormatException) {
@@ -521,7 +536,7 @@ class BackupExportServiceAndroidTest {
     fun emptyAndCorruptFilesFailWithoutWriting() = runTest {
         val service = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext())
+            isolatedSettings
         )
         listOf(byteArrayOf(), "not-xlsx".toByteArray()).forEach { bytes ->
             try {
@@ -541,7 +556,7 @@ class BackupExportServiceAndroidTest {
         database.measurementSessionDao().deleteAllSessions()
         val service = BackupImportService(
             database,
-            AppSettingsStore(ApplicationProvider.getApplicationContext()),
+            isolatedSettings,
             beforeRecordWrite = { index -> if (index == 1) error("injected failure") }
         )
 
@@ -565,7 +580,7 @@ class BackupExportServiceAndroidTest {
 
             val result = BackupImportService(
                 database,
-                AppSettingsStore(ApplicationProvider.getApplicationContext())
+                isolatedSettings
             ).importXlsx(ByteArrayInputStream(bytes))
 
             assertEquals(count, result.insertedCount)
@@ -581,7 +596,7 @@ class BackupExportServiceAndroidTest {
         seedBulkSessions(5_001)
         val dao = database.measurementSessionDao()
         val source = dao.getAllSessionsWithReadings().associateBy { it.session.id }
-        val store = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val store = isolatedSettings
         val plan = BackupExportService(dao, database.measurementDao(), database.userProfileDao(), store)
             .buildExportPlan("test", "test")
         assertEquals(listOf(5_000, 1), plan.volumes.map { it.measurements.size })
@@ -720,7 +735,7 @@ class BackupExportServiceAndroidTest {
     }
 
     private suspend fun exportCurrentDatabase(): ByteArray {
-        val settingsStore = AppSettingsStore(ApplicationProvider.getApplicationContext())
+        val settingsStore = isolatedSettings
         val payload = BackupExportService(
             sessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),

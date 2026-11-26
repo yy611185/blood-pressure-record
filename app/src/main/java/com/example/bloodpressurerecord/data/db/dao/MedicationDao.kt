@@ -62,7 +62,7 @@ interface MedicationDao {
     suspend fun getLogsForMedication(medicationId: Long): List<MedicationIntakeLogEntity>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertLog(log: MedicationIntakeLogEntity)
+    suspend fun insertLog(log: MedicationIntakeLogEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertLogs(logs: List<MedicationIntakeLogEntity>)
@@ -129,13 +129,21 @@ interface MedicationDao {
      * 防止删药或清空并发时触发外键约束异常。重复打卡因 IGNORE 保持幂等。
      */
     @Transaction
-    suspend fun insertLogIfSlotActive(log: MedicationIntakeLogEntity): Boolean {
-        val time = getTime(log.timeId) ?: return false
-        if (!time.active || time.medicationId != log.medicationId) return false
-        val medication = getMedication(log.medicationId) ?: return false
-        if (!medication.enabled) return false
-        insertLog(log)
-        return true
+    suspend fun insertLogIfSlotActive(
+        log: MedicationIntakeLogEntity,
+        expectedTime: String? = null,
+        expectedName: String? = null,
+        expectedDosage: String? = null
+    ): Long? {
+        val time = getTime(log.timeId) ?: return null
+        if (!time.active || time.medicationId != log.medicationId) return null
+        val medication = getMedication(log.medicationId) ?: return null
+        if (!medication.enabled ||
+            (expectedTime != null && time.timeText != expectedTime) ||
+            (expectedName != null && medication.name != expectedName) ||
+            (expectedDosage != null && medication.dosage != expectedDosage)
+        ) return null
+        return insertLog(log)
     }
 
     /**

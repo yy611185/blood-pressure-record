@@ -21,6 +21,9 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val appContext = context.applicationContext
                 val container = (appContext as BloodPressureApplication).appContainer
+                if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                    container.medicationReminderCoordinator.migrateLegacyNotifications()
+                }
                 container.settingsRepository.refreshMeasurementReminders()
                 container.medicationReminderCoordinator.resyncAlarms()
             } finally {

@@ -6,7 +6,7 @@ object ReportPolicy {
     const val TITLE = "家庭血压报告"
     const val SEVEN_DAY_TITLE = "家庭血压 7 日监测"
     const val SEVEN_DAY_LENGTH = 7
-    const val SEVEN_DAY_RULES = "首日计入平均；全部时段参与统计；各次测量等权；当天有记录即为有效日。"
+    const val SEVEN_DAY_RULES = "统计口径：首日计入（未剔除首日）；全部时段参与统计；各次测量等权；当天有记录即为有效日。"
     const val SEVEN_DAY_DETAIL_LEGEND = "早晚单元格为该时段各次测量代表值的平均值；多次测量逐次明细见补充页。"
     const val MULTIPLE_MEASUREMENTS = "多次"
     const val MULTIPLE_MEASUREMENTS_DETAIL = "同一时段多次测量明细"

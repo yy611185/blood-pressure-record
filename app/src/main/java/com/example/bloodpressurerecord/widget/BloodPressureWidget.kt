@@ -378,7 +378,7 @@ private fun TrendBlock(
             }
             Image(
                 provider = ImageProvider(bitmap),
-                contentDescription = "近7天血压趋势",
+                contentDescription = "近 7 天血压趋势图，点击进入应用查看详情",
                 modifier = GlanceModifier.fillMaxWidth().defaultWeight()
             )
         }

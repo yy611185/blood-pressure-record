@@ -101,7 +101,8 @@ class AppViewModelFactory(
                     medicationRepository = container.medicationRepository,
                     zoneConfigRepository = container.bpZoneConfigRepository,
                     updatePromptGate = container.updatePromptGate,
-                    deletionUndoManager = container.deletionUndoManager
+                    deletionUndoManager = container.deletionUndoManager,
+                    savedStateHandle = savedStateHandle
                 ) as T
             }
 

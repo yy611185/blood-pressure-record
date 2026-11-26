@@ -1,8 +1,6 @@
 package com.example.bloodpressurerecord.ui.common
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -29,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,9 +48,15 @@ import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import kotlin.math.roundToInt
 
+private class DockExitSnapshot {
+    var fraction: Float = Float.NaN
+    var tabAlpha: Float = Float.NaN
+}
+
 /**
  * 悬浮在页面底部的胶囊 Dock。
- * 收起/展开使用保速弹簧（可随时打断），导航标签在极端大字下做上限兜底防挤出胶囊。
+ * 收起/展开使用保速弹簧（可随时打断）；当 [active] 为 false（退场中）时立即冻结内部形变与语义，
+ * 避免刚开始收缩时打开新增页造成斜向乱飞或暴露无效操作节点。
  */
 @Composable
 fun AppBottomDock(
@@ -62,27 +65,46 @@ fun AppBottomDock(
     onAddMeasurement: () -> Unit,
     onSelect: (AppDestination) -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    active: Boolean = true
 ) {
     val reducedMotion = LocalReducedMotion.current
     val targetProgress = if (compact) 1f else 0f
     val targetTabAlpha = if (compact) 0f else 1f
-    val progress = animateFloatAsState(
-        targetValue = targetProgress,
-        animationSpec = AppMotion.springGentle(reducedMotion),
-        label = "dockCompact"
-    )
-    val tabAlpha = animateFloatAsState(
-        targetValue = targetTabAlpha,
-        animationSpec = if (reducedMotion) {
-            AppMotion.springPress(reducedMotion = true)
-        } else if (compact) {
-            AppMotion.floatPress
-        } else {
-            AppMotion.floatDockTabsEnter
-        },
-        label = "dockTabs"
-    )
+    val progress = if (reducedMotion) {
+        null
+    } else {
+        animateFloatAsState(
+            targetValue = targetProgress,
+            animationSpec = AppMotion.springGentle(reducedMotion = false),
+            label = "dockCompact"
+        )
+    }
+    val tabAlpha = if (reducedMotion) {
+        null
+    } else {
+        animateFloatAsState(
+            targetValue = targetTabAlpha,
+            animationSpec = if (compact) AppMotion.floatPress else AppMotion.floatDockTabsEnter,
+            label = "dockTabs"
+        )
+    }
+    val exitSnapshot = remember { DockExitSnapshot() }
+    fun resolveFraction(): Float {
+        val live = (progress?.value ?: targetProgress).coerceIn(0f, 1f)
+        if (active || exitSnapshot.fraction.isNaN()) {
+            exitSnapshot.fraction = live
+        }
+        return if (active) live else exitSnapshot.fraction
+    }
+    fun resolveTabAlpha(): Float {
+        val live = (tabAlpha?.value ?: targetTabAlpha).coerceIn(0f, 1f)
+        if (active || exitSnapshot.tabAlpha.isNaN()) {
+            exitSnapshot.tabAlpha = live
+        }
+        return if (active) live else exitSnapshot.tabAlpha
+    }
+
     val capsuleShape = RoundedCornerShape50Percent
     val leftTabs = tabs.take(2)
     val rightTabs: List<AppDestination?> = if (tabs.size == 3) {
@@ -93,6 +115,7 @@ fun AppBottomDock(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (active) Modifier else Modifier.clearAndSetSemantics { })
             .navigationBarsPadding()
             .padding(
                 start = AppDimensions.dockHorizontalMargin,
@@ -113,7 +136,7 @@ fun AppBottomDock(
             Box(
                 Modifier
                     .layout { measurable, constraints ->
-                        val fraction = if (reducedMotion) targetProgress else progress.value.coerceIn(0f, 1f)
+                        val fraction = resolveFraction()
                         val fullWidth = minOf(constraints.maxWidth.toFloat(), maxCapsuleWidthPx)
                         val width = (fullWidth + (compactPx - fullWidth) * fraction).roundToInt()
                         val height = (fullHeightPx + (compactPx - fullHeightPx) * fraction).roundToInt()
@@ -130,25 +153,27 @@ fun AppBottomDock(
                     .shadow(6.dp, capsuleShape, clip = false)
                     .background(MaterialTheme.colorScheme.surface, capsuleShape)
             )
+            val tabsInteractive = active && !compact
             Row(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .widthIn(max = 430.dp)
                     .fillMaxWidth()
                     .height(AppDimensions.dockCapsuleHeight)
-                    .graphicsLayer { alpha = if (reducedMotion) targetTabAlpha else tabAlpha.value }
-                    .then(if (compact) Modifier.clearAndSetSemantics { } else Modifier)
+                    .graphicsLayer { alpha = resolveTabAlpha() }
+                    .then(if (tabsInteractive) Modifier else Modifier.clearAndSetSemantics { })
                     .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                DockTabGroup(leftTabs, currentRoute, onSelect, enabled = !compact)
+                DockTabGroup(leftTabs, currentRoute, onSelect, enabled = tabsInteractive)
                 Spacer(Modifier.width(AppDimensions.dockCenterSlot))
-                DockTabGroup(rightTabs, currentRoute, onSelect, enabled = !compact)
+                DockTabGroup(rightTabs, currentRoute, onSelect, enabled = tabsInteractive)
             }
             AddMeasurementButton(
                 onClick = onAddMeasurement,
+                enabled = active,
                 modifier = Modifier.align(Alignment.Center).graphicsLayer {
-                    val fraction = if (reducedMotion) targetProgress else progress.value.coerceIn(0f, 1f)
+                    val fraction = resolveFraction()
                     translationX = buttonTravelPx * fraction
                     translationY = (fullHeightPx - compactPx) / 2 * fraction
                 }
@@ -181,22 +206,36 @@ private fun RowScope.DockTabGroup(
     }
 }
 
-/** 中央「记一次血压」按钮：与胶囊同心居中，带跟手按压回弹。 */
+/** 中央「记一次血压」按钮：与胶囊同心居中，触控层外置稳定，带跟手按压回弹与清晰焦点环。 */
 @Composable
-private fun AddMeasurementButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AddMeasurementButton(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
     val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .size(AppDimensions.dockCenterButtonSize)
-            .pressableScale(interactionSource, pressedScale = 0.92f)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .semantics { contentDescription = "记一次血压" }
+            .then(if (enabled) Modifier.semantics { contentDescription = "记一次血压" } else Modifier)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
+                enabled = enabled,
                 role = Role.Button,
                 onClick = onClick
+            )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.92f)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .focusRing(
+                interactionSource = interactionSource,
+                shape = CircleShape,
+                enabled = enabled,
+                color = MaterialTheme.colorScheme.onSurface,
+                strokeWidth = 2.5.dp,
+                inset = 1.dp,
+                fillAlpha = 0f
             ),
         contentAlignment = Alignment.Center
     ) {
@@ -209,7 +248,7 @@ private fun AddMeasurementButton(onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
-/** 单个入口：图标、文字、选中圆点严格垂直居中，带平滑色变与圆点弹簧生长。 */
+/** 单个入口：图标、文字、选中圆点严格垂直居中，带平滑色变、圆点弹簧生长与胶囊焦点环。 */
 @Composable
 private fun DockTab(
     destination: AppDestination,
@@ -227,30 +266,40 @@ private fun DockTab(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val animatedColor by animateColorAsState(
+    val color = appMotionColor(
         targetValue = targetColor,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
+        reducedMotion = reducedMotion,
         label = "dock_tab_color"
     )
-    val color = if (reducedMotion) targetColor else animatedColor
     val targetIconScale = if (selected && !reducedMotion) 1.06f else 1f
-    val iconScaleState = animateFloatAsState(
+    val iconScale = appMotionFloat(
         targetValue = targetIconScale,
-        animationSpec = AppMotion.springSnappy(reducedMotion),
+        reducedMotion = reducedMotion,
+        spec = AppMotion.springSnappy(reducedMotion = false),
         label = "dock_icon_scale"
     )
     val targetDotScale = if (selected) 1f else 0f
-    val dotScaleState = animateFloatAsState(
+    val dotScale = appMotionFloat(
         targetValue = targetDotScale,
-        animationSpec = AppMotion.springCheck(reducedMotion),
+        reducedMotion = reducedMotion,
+        spec = AppMotion.springCheck(reducedMotion = false),
         label = "dock_dot_scale"
     )
-
+    val interactionSource = remember { MutableInteractionSource() }
     Column(
         modifier = modifier
             .heightIn(min = AppDimensions.minimumTouchTarget)
+            .selectable(
+                selected = selected,
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Tab,
+                onClick = onClick
+            )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.94f)
             .clip(CircleShape)
-            .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick),
+            .focusRing(interactionSource, CircleShape, enabled = enabled),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -260,9 +309,8 @@ private fun DockTab(
             modifier = Modifier
                 .size(22.dp)
                 .graphicsLayer {
-                    val s = if (reducedMotion) targetIconScale else iconScaleState.value
-                    scaleX = s
-                    scaleY = s
+                    scaleX = iconScale
+                    scaleY = iconScale
                 },
             tint = color
         )
@@ -279,10 +327,9 @@ private fun DockTab(
             Modifier
                 .size(4.dp)
                 .graphicsLayer {
-                    val d = if (reducedMotion) targetDotScale else dotScaleState.value
-                    scaleX = d
-                    scaleY = d
-                    alpha = d.coerceIn(0f, 1f)
+                    scaleX = dotScale
+                    scaleY = dotScale
+                    alpha = dotScale.coerceIn(0f, 1f)
                 }
                 .background(MaterialTheme.colorScheme.primary, CircleShape)
         )

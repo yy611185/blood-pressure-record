@@ -218,12 +218,11 @@ def detect(api, sha, before=None):
     else:
         parents = git("rev-list", "--parents", "-n", "1", sha).split()[1:]
         prior = parse_version(git("show", f"{parents[0]}:{GRADLE}")) if parents else None
-    recovery = tag in tags
+    recovery = tag in tags or prior == (name, code)
     if prior and prior != (name, code):
         baselines.append((*prior, "push baseline / first parent"))
-    elif prior and not recovery:
-        return {"name": name, "code": code, "tag": tag, "release": release, "assets": assets,
-                "should_release": False, "reason": f"versionName/versionCode are unchanged ({name}/{code}); this is not a new version commit."}
+    if recovery and not baselines and tag not in tags:
+        raise ReleaseError("No published baseline for an unchanged, untagged version.")
     for prior_name, prior_code, source in baselines:
         if version_tuple(name) <= version_tuple(prior_name) or code <= prior_code:
             raise ReleaseError(f"{name}/{code} must increase both versionName and versionCode beyond {source} ({prior_name}/{prior_code}).")
@@ -318,7 +317,9 @@ def publish(api, sha, before=None):
         api.request("POST", "/git/refs", {"ref": f"refs/tags/{tag}", "sha": sha})
     release = state["release"]
     if not release:
-        notes_path = Path("docs") / f"release-{tag}.md"
+        notes_path = Path("app/src/main/assets/release-notes") / f"{tag}.md"
+        if not notes_path.is_file():
+            notes_path = Path("docs") / f"release-{tag}.md"
         body = {"tag_name": tag, "target_commitish": sha, "name": f"Release {tag}", "draft": True, "prerelease": False}
         if notes_path.is_file():
             body["body"] = notes_path.read_text(encoding="utf-8")
@@ -391,12 +392,69 @@ def publish(api, sha, before=None):
     return state
 
 
+UPDATE_MANIFEST_URL = "https://updates.0u0w0u0.com/android/stable/latest.json"
+
+
+def prepare_distribution(api, sha, before=None):
+    state = detect(api, sha, before)
+    release = state["release"]
+    if not release or not complete(release, state["assets"], state["name"]):
+        raise ReleaseError("Distribution requires a complete stable GitHub Release at the selected commit.")
+
+    apk_name = f"blood-pressure-record-{state['tag']}-release.apk"
+    paths = asset_paths(state["name"])
+
+    def read_asset(name):
+        asset = state["assets"][name]
+        data = api.request("GET", f"/releases/assets/{asset['id']}", binary=True)
+        digest = asset.get("digest")
+        if len(data) != asset["size"] or (digest and digest != f"sha256:{sha256(data)}"):
+            raise ReleaseError(f"Distribution asset {name} does not match GitHub's metadata.")
+        return data
+
+    checksums = read_asset("release-sha256.txt").decode("utf-8")
+    match = re.search(rf"(?m)^([a-f0-9]{{64}})  {re.escape(paths[apk_name].as_posix())}$", checksums)
+    if not match:
+        raise ReleaseError("Released checksums lack the expected APK entry.")
+    apk_sha = match.group(1)
+    with urllib.request.urlopen(UPDATE_MANIFEST_URL, timeout=20) as response:
+        if response.geturl() != UPDATE_MANIFEST_URL:
+            raise ReleaseError("Unexpected redirect for production update manifest.")
+        manifest = json.loads(response.read(128 * 1024))
+    remote_code = manifest.get("versionCode")
+    remote_name = version_tuple(manifest.get("version", ""))
+    if type(remote_code) is not int or remote_code <= 0:
+        raise ReleaseError("Invalid versionCode in production update manifest.")
+    desired_name = version_tuple(state["name"])
+    if remote_code == state["code"] and remote_name == desired_name:
+        if manifest.get("sha256") != apk_sha or manifest.get("apk") != apk_name:
+            raise ReleaseError("Production manifest has the same version with different APK metadata.")
+        return dict(state, should_deploy=False, reason="Update server already lists the verified APK.")
+    if remote_code > state["code"] and remote_name > desired_name:
+        return dict(state, should_deploy=False, reason="Update server already lists a newer version.")
+    if remote_code >= state["code"] or remote_name >= desired_name:
+        raise ReleaseError("Production manifest version fields disagree with release ordering.")
+
+    validate_report(read_asset("release-verification.txt"), state)
+    apk = read_asset(apk_name)
+    if sha256(apk) != apk_sha:
+        raise ReleaseError("Released APK failed the published SHA-256 check.")
+    paths[apk_name].parent.mkdir(parents=True, exist_ok=True)
+    paths[apk_name].write_bytes(apk)
+    paths["release-sha256.txt"].write_text(checksums, encoding="utf-8")
+    notes = paths["release-sha256.txt"].with_name("distribution-notes.txt")
+    notes.write_text(release.get("body") or f"Release {state['tag']}", encoding="utf-8")
+    return dict(state, should_deploy=True, reason="Verified GitHub APK is ready for update-server distribution.")
+
+
 def emit(state):
     print(state["reason"])
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
             handle.write(f"should_release={str(state['should_release']).lower()}\n")
+            if "should_deploy" in state:
+                handle.write(f"should_deploy={str(state['should_deploy']).lower()}\n")
     env = os.environ.get("GITHUB_ENV")
     if env:
         with open(env, "a", encoding="utf-8") as handle:
@@ -409,7 +467,7 @@ def emit(state):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("detect", "restore-packages", "publish"))
+    parser.add_argument("command", choices=("detect", "restore-packages", "publish", "prepare-distribution"))
     args = parser.parse_args()
     try:
         sha = os.environ.get("RELEASE_COMMIT_SHA") or os.environ.get("GITHUB_SHA", "")
@@ -418,7 +476,10 @@ def main():
         if git("rev-parse", "HEAD") != sha:
             raise ReleaseError("Checkout HEAD differs from release target SHA.")
         api = GitHub(os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_TOKEN", ""))
-        commands = {"detect": detect, "restore-packages": restore_packages, "publish": publish}
+        commands = {
+            "detect": detect, "restore-packages": restore_packages, "publish": publish,
+            "prepare-distribution": prepare_distribution,
+        }
         emit(commands[args.command](api, sha, os.environ.get("GITHUB_EVENT_BEFORE")))
     except (ReleaseError, ValueError, KeyError, UnicodeError, OSError) as exc:
         print(f"::error::{exc}", file=sys.stderr)

@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.reminder
 
 import android.Manifest
+import android.app.Notification
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -75,9 +76,7 @@ class ReminderReceiver : BroadcastReceiver() {
                             context = appContext,
                             medicationId = slot.medicationId,
                             timeId = timeId,
-                            dateEpochDay = date.toEpochDay(),
-                            name = slot.name,
-                            dosage = slot.dosage
+                            dateEpochDay = date.toEpochDay()
                         )
                     }
                 }
@@ -90,6 +89,8 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 
     private fun handleMedicationMarkTaken(context: Context, intent: Intent) {
+        // 兼容升级前遗留的旧通知「已打卡」广播：由于通知正文隐藏药名，不再在后台直接写入打卡，
+        // 而是核对计划状态；已打卡或失效则收起旧通知，仍待确认则替换为可打开应用核对的新通知。
         val medicationId = intent.getLongExtra(MedicationReminders.EXTRA_MEDICATION_ID, -1L)
         val timeId = intent.getLongExtra(MedicationReminders.EXTRA_TIME_ID, -1L)
         if (medicationId < 0 || timeId < 0) return
@@ -102,20 +103,14 @@ class ReminderReceiver : BroadcastReceiver() {
             try {
                 val appContext = context.applicationContext
                 val application = appContext as? BloodPressureApplication ?: return@launch
-                val markResult = application.appContainer.medicationRepository.markTakenFromReminder(
-                    medicationId = medicationId,
-                    timeId = timeId,
-                    date = LocalDate.ofEpochDay(epochDay)
-                )
-                // 仅当写入成功（含重复打卡幂等）或原药品/时段已删除失效时收起通知；
-                // 数据库临时写入失败时保留通知，使通知状态与未落盘状态严格一致。
-                if (markResult.isSuccess) {
-                    application.appContainer.medicationReminderCoordinator.dismissTakenNotification(
-                        timeId, epochDay, legacyAction = intent.data == null
-                    )
+                application.appContainer.medicationReminderCoordinator.reviewLegacyAction(
+                    medicationId, timeId, epochDay, legacyUntagged = intent.data == null
+                ) {
+                    ReminderNotifications.ensureChannel(appContext)
+                    showMedicationNotification(appContext, medicationId, timeId, epochDay)
                 }
             } catch (_: Throwable) {
-                // 数据库异常不得导致进程崩溃，且保留通知供后续重试。
+                // 数据库或通知异常不得导致进程崩溃。
             } finally {
                 pendingResult.finish()
             }
@@ -126,9 +121,7 @@ class ReminderReceiver : BroadcastReceiver() {
         context: Context,
         medicationId: Long,
         timeId: Long,
-        dateEpochDay: Long,
-        name: String,
-        dosage: String
+        dateEpochDay: Long
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -138,46 +131,66 @@ class ReminderReceiver : BroadcastReceiver() {
         ) {
             return
         }
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            (MedicationReminders.REQUEST_CODE_BASE + timeId).toInt(),
-            Intent(context, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val notification = buildMedicationNotification(
+            context = context,
+            medicationId = medicationId,
+            timeId = timeId,
+            dateEpochDay = dateEpochDay
         )
-        val markTakenIntent = PendingIntent.getBroadcast(
-            context,
-            (MedicationReminders.MARK_TAKEN_REQUEST_CODE_BASE + timeId).toInt(),
-            Intent(context, ReminderReceiver::class.java).apply {
-                action = MedicationReminders.ACTION_MARK_TAKEN
-                data = MedicationReminders.markTakenUri(timeId, dateEpochDay)
-                putExtra(MedicationReminders.EXTRA_MEDICATION_ID, medicationId)
-                putExtra(MedicationReminders.EXTRA_TIME_ID, timeId)
-                putExtra(MedicationReminders.EXTRA_DATE_EPOCH_DAY, dateEpochDay)
-            },
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val dosageText = if (dosage.isBlank()) "" else "（$dosage）"
         val manager = NotificationManagerCompat.from(context)
         val notificationId = MedicationReminders.notificationIdFor(timeId)
         manager.cancel(notificationId)
         manager.notify(
             MedicationReminders.notificationTagFor(timeId),
             notificationId,
-            NotificationCompat.Builder(context, ReminderNotifications.CHANNEL_ID)
+            notification
+        )
+    }
+
+    internal companion object {
+        const val MEDICATION_PUBLIC_TEXT = "你有一条定时用药提醒，请在应用内查看。"
+        const val MEDICATION_PRIVATE_TEXT = "你有一条定时用药提醒，点按打开应用核对药品并确认打卡。"
+        const val MEDICATION_ACTION_REVIEW = "核对并打卡"
+
+        fun buildMedicationNotification(
+            context: Context,
+            medicationId: Long,
+            timeId: Long,
+            dateEpochDay: Long
+        ): Notification {
+            val openConfirmationIntent = PendingIntent.getActivity(
+                context,
+                (MedicationReminders.REQUEST_CODE_BASE + timeId).toInt(),
+                MedicationReminders.createOpenConfirmationIntent(
+                    context = context,
+                    medicationId = medicationId,
+                    timeId = timeId,
+                    dateEpochDay = dateEpochDay
+                ),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val publicNotification = NotificationCompat.Builder(context, ReminderNotifications.CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_reminder)
                 .setContentTitle("服药提醒")
-                .setContentText("该吃「$name」$dosageText 了，吃完可直接点“已服用”。")
-                .setContentIntent(contentIntent)
+                .setContentText(MEDICATION_PUBLIC_TEXT)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .build()
+            return NotificationCompat.Builder(context, ReminderNotifications.CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_reminder)
+                .setContentTitle("服药提醒")
+                .setContentText(MEDICATION_PRIVATE_TEXT)
+                .setContentIntent(openConfirmationIntent)
                 .addExtras(Bundle().apply {
                     putLong(MedicationReminders.EXTRA_DATE_EPOCH_DAY, dateEpochDay)
                 })
-                .addAction(0, "已服用", markTakenIntent)
+                .addAction(0, MEDICATION_ACTION_REVIEW, openConfirmationIntent)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicNotification)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .build()
-        )
+        }
     }
 
     private fun showNotification(context: Context, type: ReminderType) {
@@ -203,7 +216,7 @@ class ReminderReceiver : BroadcastReceiver() {
             NotificationCompat.Builder(context, ReminderNotifications.CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_reminder)
                 .setContentTitle(type.title)
-                .setContentText("请在安静休息后测量并记录血压。")
+                .setContentText("请先静坐休息 5 分钟，再测量并记录血压。")
                 .setContentIntent(contentIntent)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)

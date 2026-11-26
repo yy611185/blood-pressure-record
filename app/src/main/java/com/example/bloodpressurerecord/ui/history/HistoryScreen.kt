@@ -2,13 +2,11 @@ package com.example.bloodpressurerecord.ui.history
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -65,8 +63,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -84,7 +85,9 @@ import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
+import com.example.bloodpressurerecord.ui.common.appMotionColor
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
@@ -283,7 +286,7 @@ fun HistoryScreen(
         }
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag("history-records-list"),
             contentPadding = PaddingValues(
                 start = AppDimensions.pageHorizontalPadding,
                 end = AppDimensions.pageHorizontalPadding,
@@ -510,12 +513,12 @@ private fun RecentSummaryCard(
                     horizontalArrangement = Arrangement.spacedBy(AppSpacing.large)
                 ) {
                     SummaryValue(
-                        label = "平均收缩压",
+                        label = "平均高压（收缩压）",
                         value = summary.averageSystolic?.let { "$it mmHg" } ?: "--",
                         modifier = Modifier.weight(1f)
                     )
                     SummaryValue(
-                        label = "平均舒张压",
+                        label = "平均低压（舒张压）",
                         value = summary.averageDiastolic?.let { "$it mmHg" } ?: "--",
                         modifier = Modifier.weight(1f)
                     )
@@ -626,7 +629,7 @@ private fun CalendarMonth(
                         )
                     }
                     Text(
-                        if (targetDays == null) "${monthRecordCount} 次测量" else "${monthRecordCount} 次测量 · ${targetDays} 天达标",
+                        if (targetDays == null) "${monthRecordCount} 次测量" else "${monthRecordCount} 次测量 · 日均达标 ${targetDays} 天",
                         style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -729,6 +732,22 @@ private fun CalendarMonth(
     }
 }
 
+private class SelectionPulseTracker(initialSelected: Boolean) {
+    private var wasSelected = initialSelected
+    private var pulseGeneration = 0
+
+    fun onSelectionObserved(selected: Boolean, reducedMotion: Boolean): Int {
+        val justSelected = selected && !wasSelected
+        wasSelected = selected
+        if (reducedMotion) {
+            pulseGeneration = 0
+        } else if (justSelected) {
+            pulseGeneration += 1
+        }
+        return pulseGeneration
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CalendarDay(
@@ -753,32 +772,37 @@ internal fun CalendarDay(
                     summary.category?.let { append("，${com.example.bloodpressurerecord.ui.common.CategoryPresentation.label(it)}") }
                 }
                 if (summary?.containsHighRisk == true) append("，包含高风险读数")
-                if (summary?.hasNote == true) append("，含自定义备注，双击查看")
+                if (summary?.hasNote == true) append("，含备注")
             } else {
                 append(if (enabled) "，无记录，可选择" else "，未来日期，不可选择")
             }
             if (selected) append("，已选择")
         }
     }
+    val reducedMotion = LocalReducedMotion.current
     val grade = historyGradeColors(summary?.category, summary?.containsHighRisk == true)
     val gradeBackground = if (summary != null) grade.first else Color.Transparent
-    val background by animateColorAsState(
-        targetValue = when {
-            selected && summary != null -> lerp(gradeBackground, MaterialTheme.colorScheme.primaryContainer, .06f)
-            selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .12f)
-            else -> gradeBackground
-        },
-        animationSpec = AppMotion.colorFast,
+    val targetBackground = when {
+        selected && summary != null -> lerp(gradeBackground, MaterialTheme.colorScheme.primaryContainer, .06f)
+        selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .12f)
+        else -> gradeBackground
+    }
+    val background = appMotionColor(
+        targetValue = targetBackground,
+        reducedMotion = reducedMotion,
         label = "calendarDayBackground"
     )
     val selectionScale = remember(date) { Animatable(1f) }
-    var previouslySelected by remember(date) { mutableStateOf(selected) }
-    LaunchedEffect(date, selected) {
-        val justSelected = selected && !previouslySelected
-        previouslySelected = selected
-        // Only a new selection pulses. Restored state and month composition stay still.
-        selectionScale.snapTo(1f)
-        if (justSelected) {
+    val pulseTracker = remember(date) { SelectionPulseTracker(selected) }
+    val triggerPulse = pulseTracker.onSelectionObserved(selected, reducedMotion)
+    // Only a new selection in normal motion pulses; toggling to 0x mid-pulse resets immediately.
+    if (reducedMotion) {
+        if (selectionScale.value != 1f) {
+            LaunchedEffect(date, reducedMotion) { selectionScale.snapTo(1f) }
+        }
+    } else if (triggerPulse > 0) {
+        LaunchedEffect(date, triggerPulse) {
+            selectionScale.snapTo(1f)
             selectionScale.animateTo(1.035f, calendarSelectionHalf)
             selectionScale.animateTo(1f, calendarSelectionHalf)
         }
@@ -792,24 +816,32 @@ internal fun CalendarDay(
             role = Role.Button
             this.selected = selected
             if (!enabled) disabled()
+            if (enabled && summary?.hasNote == true) {
+                customActions = listOf(CustomAccessibilityAction("定位到备注记录") {
+                    onDoubleClick()
+                    true
+                })
+            }
         }
     if (enabled) {
         cellModifier = cellModifier
-            .pressableScale(interactionSource, enabled = true, pressedScale = 0.92f)
             .combinedClickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick,
-                onDoubleClick = onDoubleClick
+                onDoubleClick = if (summary?.hasNote == true) onDoubleClick else null
             )
+            .pressableScale(interactionSource, enabled = true, pressedScale = 0.92f)
+            .focusRing(interactionSource, RoundedCornerShape(15.dp), inset = 2.dp)
     }
 
     Box(cellModifier, contentAlignment = Alignment.Center) {
         var circleModifier = Modifier
             .size(AppDimensions.calendarDaySize)
             .graphicsLayer {
-                scaleX = selectionScale.value
-                scaleY = selectionScale.value
+                val s = if (reducedMotion) 1f else selectionScale.value
+                scaleX = s
+                scaleY = s
             }
             .clip(RoundedCornerShape(13.dp))
             .background(background)
@@ -962,14 +994,14 @@ fun HistorySessionCard(
     val visualStatus = bloodPressureVisualStatus(category = session.category, containsHighRiskReading = false)
     val riskStatus = bloodPressureVisualStatus(category = session.category, containsHighRiskReading = true)
     val colors = MaterialTheme.colorScheme
-    val background by animateColorAsState(
+    val background = appMotionColor(
         targetValue = if (highlighted) lerp(colors.surface, colors.primaryContainer, 0.65f) else colors.surface,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
+        reducedMotion = reducedMotion,
         label = "historySessionHighlight"
     )
-    val borderColor by animateColorAsState(
+    val borderColor = appMotionColor(
         targetValue = if (highlighted) colors.primary else Color.Transparent,
-        animationSpec = AppMotion.colorSpec(reducedMotion),
+        reducedMotion = reducedMotion,
         label = "historySessionBorder"
     )
     DataCard(

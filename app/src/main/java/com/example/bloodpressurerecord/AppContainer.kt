@@ -92,7 +92,10 @@ class DefaultAppContainer(context: Context) : AppContainer {
         DefaultMedicationRepository(
             dao = database.medicationDao(),
             onDataChanged = { AppWidgetUpdater.requestUpdate(appContext) },
-            onTimeIdsRemoved = { ids -> medicationReminderCoordinator.cancelRemovedNotifications(ids) }
+            onTimeIdsRemoved = { ids -> medicationReminderCoordinator.cancelRemovedNotifications(ids) },
+            onSlotTaken = { timeId, epochDay ->
+                medicationReminderCoordinator.dismissTakenNotification(timeId, epochDay)
+            }
         )
     }
 
@@ -117,6 +120,7 @@ class DefaultAppContainer(context: Context) : AppContainer {
             measurementSessionDao = database.measurementSessionDao(),
             measurementDao = database.measurementDao(),
             medicationResync = { medicationReminderCoordinator.resyncAll() },
+            cleanMedicationCalendar = { medicationReminderCoordinator.clearCalendarEvents() },
             medicationAlarmResync = { medicationReminderCoordinator.resyncAlarms() },
             onDataChanged = { AppWidgetUpdater.updateNow(appContext) },
             reportCache = reportCache,

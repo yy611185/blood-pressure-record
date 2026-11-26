@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -19,6 +20,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -74,7 +76,7 @@ fun UpdateDialog(
                     SecondaryText("当前版本 $currentVersion")
                     SecondaryText("发布时间：${formatUpdatePublishedTime(manifest.publishedAt)}")
                     if (state.required) {
-                        SecondaryText("当前版本低于建议的最低支持版本。您仍可继续记录血压、查看历史、使用提醒和备份。")
+                        SecondaryText("当前版本较旧，建议尽快升级。不升级也可继续离线记录血压、查看历史、使用提醒和备份。")
                     }
                 }
                 UpdateNotes(manifest.notes)
@@ -83,7 +85,7 @@ fun UpdateDialog(
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                 }
                 AppPrimaryButton("前往浏览器下载更新", onDownload, Modifier.fillMaxWidth())
-                AppSecondaryButton("72 小时后提醒", onSnooze, Modifier.fillMaxWidth())
+                AppSecondaryButton("3 天后再提醒", onSnooze, Modifier.fillMaxWidth())
                 if (state.required) {
                     TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                         Text("继续使用")
@@ -142,11 +144,11 @@ fun UpdateSettingsContent(
                             }
                             UpdateCheckState.CURRENT -> Text("已是最新版本", style = MaterialTheme.typography.bodyMedium)
                             UpdateCheckState.AVAILABLE -> Text(
-                                if (state.required) "当前版本低于最低支持版本，建议尽快更新" else "有新版本可用",
+                                if (state.required) "当前版本较旧，建议尽快更新" else "有新版本可用",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             UpdateCheckState.FAILED -> Text(
-                                state.checkMessage ?: "检查失败，请稍后重试。您可以继续正常使用应用，也可访问备用下载。",
+                                state.checkMessage ?: "检查更新失败，请确认网络后重试。你可以继续离线使用，也可通过下方备用入口下载。",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.error
                             )
@@ -161,14 +163,14 @@ fun UpdateSettingsContent(
             }
         }
         UpdatePreferenceSwitch(
-            "自动检查更新", "打开应用或返回前台时检查，成功后 24 小时内不再检查。",
+            "自动检查更新", "打开应用时自动检查，成功后 24 小时内不再重复检查。",
             state.settings.autoCheckEnabled, onAutoCheckChanged
         )
         state.manifest?.let { manifest ->
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "${if (state.checkState == UpdateCheckState.FAILED) "上次获取的发布" else "最新发布"} ${manifest.version}",
+                        "${if (state.checkState == UpdateCheckState.FAILED) "上次获取的版本" else "最新版本"} ${manifest.version}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.semantics { heading() }
@@ -196,11 +198,11 @@ private fun ExternalDownloadLinks(
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         onOpenDirectDownload?.let { openDirectDownload ->
             TextButton(onClick = openDirectDownload, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                Text("外部下载备用渠道（直连）")
+                Text("备用直连下载（浏览器打开）")
             }
         }
         TextButton(onClick = onOpenReleases, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text("GitHub Releases 备用下载")
+            Text("备用下载页（GitHub Releases）")
         }
     }
 }
@@ -215,8 +217,9 @@ private fun UpdatePreferenceSwitch(
     Row(
         modifier = Modifier.fillMaxWidth()
             .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(12.dp))
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
-            .padding(vertical = 12.dp),
+            .padding(horizontal = 4.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -242,7 +245,8 @@ private fun SecondaryText(text: String) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-private const val EXTERNAL_INSTALL_HINT = "下载后打开 APK，按照系统提示覆盖安装，无需卸载旧版。"
+private const val EXTERNAL_INSTALL_HINT =
+    "点击下载后将跳转浏览器下载安装包（APK），下载完成请直接打开并按提示覆盖安装。切勿先卸载旧版，以免丢失本地记录。"
 
 private fun formatUpdatePublishedTime(timestamp: String): String = try {
     formatUpdateInstant(Instant.parse(timestamp))

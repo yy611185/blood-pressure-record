@@ -1,6 +1,7 @@
 package com.example.bloodpressurerecord.ui.settings
 
 import android.net.Uri
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bloodpressurerecord.R
@@ -61,6 +62,7 @@ data class SettingsUiState(
     val medicationCalendarSyncEnabled: Boolean = false,
     val medicationCalendarId: Long? = null,
     val medicationCalendarIncludeDetails: Boolean = false,
+    val medicationCalendarCleanupPending: Boolean = false,
     val medications: List<MedicationWithTimes> = emptyList(),
     val name: String = "",
     val ageText: String = "",
@@ -75,6 +77,7 @@ data class SettingsUiState(
     val showClearConfirm: Boolean = false,
     val showBackupExportConfirm: Boolean = false,
     val showExportPassphraseDialog: Boolean = false,
+    val pendingExportFormatSwitchToEncrypted: Boolean? = null,
     val showBackupImportConfirm: Boolean = false,
     val showImportPassphraseDialog: Boolean = false,
     val importPassphraseError: String? = null,
@@ -108,9 +111,19 @@ class SettingsViewModel(
     private val medicationRepository: MedicationRepository? = null,
     private val zoneConfigRepository: BpZoneConfigRepository? = null,
     private val updatePromptGate: UpdatePromptGate? = null,
-    private val deletionUndoManager: DeletionUndoManager? = null
+    private val deletionUndoManager: DeletionUndoManager? = null,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle()
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(SettingsUiState())
+    private val exportInProgressKey = "backup_export_in_progress"
+    private val pickerRequestKey = "backup_export_picker_request"
+    val interruptedExportRequestId = savedStateHandle.get<String>(pickerRequestKey)
+    private val exportWasInterrupted = savedStateHandle.get<Boolean>(exportInProgressKey) == true
+    private val _uiState = MutableStateFlow(
+        if (exportWasInterrupted) SettingsUiState(
+            message = "上次备份导出中断。请重新导出全部卷。上次选择的位置可能留有空文件或不完整文件。",
+            messageIsError = true
+        ) else SettingsUiState()
+    )
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
     private val mutableZoneTargetEditorState = MutableStateFlow<BpZoneTargetEditorUiState?>(null)
     val zoneTargetEditorState: StateFlow<BpZoneTargetEditorUiState?> =
@@ -132,15 +145,23 @@ class SettingsViewModel(
     private var pendingExportBaseName: String = ""
     private var releaseBackupLocation: (() -> Unit)? = null
 
-    fun beginBackupLocation(): Boolean {
+    fun beginBackupLocation(exportRequestId: String? = null): Boolean {
         val state = _uiState.value
         if (state.isDataActionRunning || state.isChoosingBackupLocation) return false
+        if (exportRequestId != null && state.exportVolumeRequestId != exportRequestId) return false
+        savedStateHandle[pickerRequestKey] = exportRequestId
         releaseBackupLocation = updatePromptGate?.hold()
         _uiState.update { it.copy(isChoosingBackupLocation = true) }
         return true
     }
 
+    fun finishExportBackupLocation(requestId: String, uri: Uri?) {
+        if (savedStateHandle.get<String>(pickerRequestKey) != requestId) return
+        finishBackupLocation { onExportLocationResult(requestId, uri) }
+    }
+
     fun finishBackupLocation(onResult: () -> Unit) {
+        savedStateHandle.remove<String>(pickerRequestKey)
         val release = releaseBackupLocation
         releaseBackupLocation = null
         _uiState.update { it.copy(isChoosingBackupLocation = false) }
@@ -176,11 +197,15 @@ class SettingsViewModel(
     override fun onCleared() {
         releaseBackupLocation?.invoke()
         releaseBackupLocation = null
-        discardExportPlan()
+        discardExportPlan(clearRecoveryState = false)
         super.onCleared()
     }
 
-    private fun discardExportPlan() {
+    private fun discardExportPlan(clearRecoveryState: Boolean = true) {
+        if (clearRecoveryState) {
+            savedStateHandle.remove<Boolean>(exportInProgressKey)
+            savedStateHandle.remove<String>(pickerRequestKey)
+        }
         pendingExportPassphrase?.fill('\u0000')
         pendingExportPassphrase = null
         pendingExportPlan = null
@@ -189,6 +214,7 @@ class SettingsViewModel(
             it.copy(
                 showBackupExportConfirm = false,
                 showExportPassphraseDialog = false,
+                pendingExportFormatSwitchToEncrypted = null,
                 exportVolumeRequestId = null,
                 exportVolumeIndex = 0,
                 exportVolumeCount = 0,
@@ -233,6 +259,7 @@ class SettingsViewModel(
                         medicationCalendarSyncEnabled = bundle.appSettings.medicationCalendarSyncEnabled,
                         medicationCalendarId = bundle.appSettings.medicationCalendarId,
                         medicationCalendarIncludeDetails = bundle.appSettings.medicationCalendarIncludeDetails,
+                        medicationCalendarCleanupPending = bundle.appSettings.medicationCalendarCleanupPending,
                         name = profileName,
                         ageText = profileAge,
                         gender = profileGender,
@@ -821,9 +848,28 @@ class SettingsViewModel(
     }
 
     fun requestBackupExport() {
-        if (_uiState.value.isDataActionRunning) return
-        if (pendingExportPlan != null) { showCurrentExportVolume(); return }
-        _uiState.update { it.copy(showBackupExportConfirm = true) }
+        val state = _uiState.value
+        if (state.isDataActionRunning || state.isChoosingBackupLocation) return
+        if (pendingExportPlan != null) {
+            if (pendingExportPassphrase == null) {
+                showCurrentExportVolume()
+            } else {
+                _uiState.update {
+                    it.copy(
+                        showBackupExportConfirm = false,
+                        showExportPassphraseDialog = false,
+                        pendingExportFormatSwitchToEncrypted = false
+                    )
+                }
+            }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                showBackupExportConfirm = true,
+                pendingExportFormatSwitchToEncrypted = null
+            )
+        }
     }
 
     fun dismissBackupExport() {
@@ -832,12 +878,27 @@ class SettingsViewModel(
     }
 
     fun requestEncryptedBackupExport() {
-        if (_uiState.value.isDataActionRunning) return
-        if (pendingExportPlan != null) { showCurrentExportVolume(); return }
+        val state = _uiState.value
+        if (state.isDataActionRunning || state.isChoosingBackupLocation) return
+        if (pendingExportPlan != null) {
+            if (pendingExportPassphrase != null) {
+                showCurrentExportVolume()
+            } else {
+                _uiState.update {
+                    it.copy(
+                        showBackupExportConfirm = false,
+                        showExportPassphraseDialog = false,
+                        pendingExportFormatSwitchToEncrypted = true
+                    )
+                }
+            }
+            return
+        }
         _uiState.update {
             it.copy(
                 showBackupExportConfirm = false,
-                showExportPassphraseDialog = true
+                showExportPassphraseDialog = true,
+                pendingExportFormatSwitchToEncrypted = null
             )
         }
     }
@@ -847,56 +908,52 @@ class SettingsViewModel(
         _uiState.update { it.copy(showExportPassphraseDialog = false) }
     }
 
-    fun exportBackupXlsxToUri(uri: Uri, fileNameHint: String) {
-        runExport(uri, fileNameHint, passphrase = null)
+    fun dismissSwitchExportFormat() {
+        if (_uiState.value.isDataActionRunning) return
+        _uiState.update { it.copy(pendingExportFormatSwitchToEncrypted = null) }
     }
 
-    fun exportEncryptedBackupToUri(uri: Uri, fileNameHint: String, passphrase: CharArray) {
-        runExport(uri, fileNameHint, passphrase)
-    }
-
-    private fun runExport(uri: Uri, fileNameHint: String, passphrase: CharArray?) {
-        val action = if (passphrase != null) SettingsDataAction.EXPORT_BPX else SettingsDataAction.EXPORT_XLSX
-        launchDataAction(action) {
-            _uiState.update {
+    fun confirmSwitchExportFormat() {
+        val state = _uiState.value
+        if (state.isDataActionRunning || state.isChoosingBackupLocation) return
+        val switchToEncrypted = state.pendingExportFormatSwitchToEncrypted ?: return
+        discardExportPlan()
+        _uiState.update {
+            if (switchToEncrypted) {
                 it.copy(
                     showBackupExportConfirm = false,
+                    showExportPassphraseDialog = true,
+                    message = "已取消原明文导出，请为加密备份设置口令。",
+                    messageIsError = false
+                )
+            } else {
+                it.copy(
+                    showBackupExportConfirm = true,
                     showExportPassphraseDialog = false,
-                    message = if (passphrase != null) {
-                        "正在导出加密备份，请稍候…"
-                    } else {
-                        "正在导出 Excel 备份，请稍候…"
-                    },
+                    message = "已取消原加密备份，可继续选择明文导出。",
                     messageIsError = false
                 )
             }
-            repository.exportBackupXlsxToUri(uri, fileNameHint, passphrase)
-                .onSuccess { msg ->
-                    _uiState.update { it.copy(message = msg, messageIsError = false) }
-                }
-                .onFailure { throwable ->
-                    _uiState.update {
-                        it.copy(
-                            message = throwable.message ?: "导出失败，请重新选择保存位置后再试",
-                            messageIsError = true
-                        )
-                    }
-                }
         }
     }
 
     fun prepareBackupExport(baseName: String, passphrase: CharArray? = null) {
-        if (_uiState.value.isDataActionRunning) {
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation) {
             passphrase?.fill('\u0000')
             return
         }
         if (pendingExportPlan != null) {
-            passphrase?.fill('\u0000')
-            showCurrentExportVolume()
-            return
+            val sameFormat = (passphrase != null) == (pendingExportPassphrase != null)
+            if (sameFormat) {
+                passphrase?.fill('\u0000')
+                showCurrentExportVolume()
+                return
+            }
+            discardExportPlan()
         }
         pendingExportPassphrase?.fill('\u0000')
         pendingExportPassphrase = passphrase
+        savedStateHandle[exportInProgressKey] = true
         pendingExportBaseName = baseName
         val action = if (passphrase != null) SettingsDataAction.EXPORT_BPX else SettingsDataAction.EXPORT_XLSX
         launchDataAction(action) {
@@ -909,7 +966,11 @@ class SettingsViewModel(
                         exportVolumeCount = plan.volumes.size,
                         exportTotalRecords = plan.totalRecords,
                         exportEncrypted = passphrase != null,
-                        message = "已准备 ${plan.volumes.size} 个备份文件，请依次保存全部文件。",
+                        message = if (plan.volumes.size > 1) {
+                            "已准备 ${plan.volumes.size} 个备份分卷，请依次保存全部文件。"
+                        } else {
+                            "备份已准备就绪，请选择保存位置。"
+                        },
                         messageIsError = false
                     )
                 }
@@ -944,7 +1005,11 @@ class SettingsViewModel(
         if (uri == null) {
             _uiState.update {
                 it.copy(
-                    message = "保存已取消；已保存 $index/${plan.volumes.size} 卷。可继续保存当前卷。",
+                    message = if (plan.volumes.size > 1) {
+                        "保存已取消；已保存 $index/${plan.volumes.size} 卷，可继续保存当前卷。"
+                    } else {
+                        "保存已取消，可点击导出重新选择保存位置。"
+                    },
                     messageIsError = false
                 )
             }
@@ -954,13 +1019,22 @@ class SettingsViewModel(
         val action = if (pendingExportPassphrase != null) SettingsDataAction.EXPORT_BPX else SettingsDataAction.EXPORT_XLSX
         launchDataAction(action) {
             _uiState.update { it.copy(exportVolumeRequestId = null) }
-            repository.exportBackupVolumeToUri(plan, index, uri, pendingExportPassphrase)
-                .onSuccess {
+            val writePassphrase = pendingExportPassphrase?.copyOf()
+            val result = try {
+                repository.exportBackupVolumeToUri(plan, index, uri, writePassphrase)
+            } finally {
+                writePassphrase?.fill('\u0000')
+            }
+            result.onSuccess {
                     if (index == plan.volumes.lastIndex) {
                         discardExportPlan()
                         _uiState.update {
                             it.copy(
-                                message = "全部 ${plan.volumes.size} 卷已导出，共 ${plan.totalRecords} 条测量记录。请从第一卷起逐卷恢复。",
+                                message = if (plan.volumes.size > 1) {
+                                    "全部 ${plan.volumes.size} 卷已导出，共 ${plan.totalRecords} 条测量记录。恢复时请从第 1 卷起逐卷导入。"
+                                } else {
+                                    "备份已导出，共 ${plan.totalRecords} 条测量记录，请妥善保管该文件。"
+                                },
                                 messageIsError = false
                             )
                         }
@@ -977,7 +1051,7 @@ class SettingsViewModel(
                 }.onFailure { error ->
                     _uiState.update {
                         it.copy(
-                            message = error.message ?: "当前卷保存失败，请重试",
+                            message = error.message ?: "备份保存失败，请重试",
                             messageIsError = true
                         )
                     }
@@ -991,19 +1065,23 @@ class SettingsViewModel(
         _uiState.update {
             it.copy(
                 exportVolumeRequestId = null,
-                message = "备份未完成：已保存 ${it.exportVolumeIndex}/${it.exportVolumeCount} 卷。点击导出可继续；离开页面或重启后请重新导出全部卷。",
+                message = if (it.exportVolumeCount > 1) {
+                    "备份未完成：已保存 ${it.exportVolumeIndex}/${it.exportVolumeCount} 卷。点击对应导出按钮可继续；离开页面或重启后请重新导出全部卷。"
+                } else {
+                    "备份保存已暂停，点击对应导出按钮可继续选择保存位置。"
+                },
                 messageIsError = false
             )
         }
     }
 
     fun requestClearAll() {
-        if (_uiState.value.isDataActionRunning) return
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation) return
         _uiState.update { it.copy(showClearConfirm = true) }
     }
 
     fun requestBackupImport() {
-        if (_uiState.value.isDataActionRunning) return
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation) return
         _uiState.update { it.copy(showBackupImportConfirm = true) }
     }
 
@@ -1031,6 +1109,10 @@ class SettingsViewModel(
     }
 
     fun previewBackupXlsxFromUri(uri: Uri, passphrase: CharArray? = null) {
+        if (_uiState.value.isDataActionRunning || _uiState.value.isChoosingBackupLocation) {
+            passphrase?.fill('\u0000')
+            return
+        }
         launchDataAction(SettingsDataAction.IMPORT) {
             _uiState.update {
                 it.copy(
@@ -1039,8 +1121,12 @@ class SettingsViewModel(
                     messageIsError = false
                 )
             }
-            repository.previewBackupXlsxFromUri(uri, passphrase)
-                .onSuccess { preview ->
+            val result = try {
+                repository.previewBackupXlsxFromUri(uri, passphrase)
+            } finally {
+                passphrase?.fill('\u0000')
+            }
+            result.onSuccess { preview ->
                     pendingImportUri = null
                     _uiState.update {
                         it.copy(
@@ -1095,7 +1181,10 @@ class SettingsViewModel(
     }
 
     fun submitImportPassphrase(passphrase: CharArray) {
-        val uri = pendingImportUri ?: return
+        val uri = pendingImportUri ?: run {
+            passphrase.fill('\u0000')
+            return
+        }
         previewBackupXlsxFromUri(uri, passphrase)
     }
 

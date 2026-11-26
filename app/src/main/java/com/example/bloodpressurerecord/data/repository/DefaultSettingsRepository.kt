@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.app.NotificationManagerCompat
 import androidx.room.withTransaction
 import com.example.bloodpressurerecord.data.calendar.MedicationCalendarSync
+import com.example.bloodpressurerecord.data.datastore.AppSettings
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.dao.BloodPressureMeasurementDao
@@ -22,6 +23,7 @@ import com.example.bloodpressurerecord.data.repository.backup.BackupImportLimits
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportOptions
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportPreview
 import com.example.bloodpressurerecord.data.repository.backup.BackupImportService
+import com.example.bloodpressurerecord.data.repository.backup.clearLegacyBackupImportFiles
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.export.report.ReportCache
 import com.example.bloodpressurerecord.export.report.ReportShare
@@ -55,7 +57,14 @@ class DefaultSettingsRepository(
     private val medicationAlarmResync: (suspend () -> Unit)? = null,
     private val reportCache: ReportCache = ReportCache(File(context.cacheDir, "reports")),
     private val deletionUndoManager: DeletionUndoManager? = null,
-    private val cancelRemovedMedicationNotifications: (suspend (Collection<Long>) -> Unit)? = null
+    private val cancelRemovedMedicationNotifications: (suspend (Collection<Long>) -> Unit)? = null,
+    private val cleanMedicationCalendar: (suspend () -> Unit)? = null,
+    private val cancelMeasurementNotifications: () -> Unit = {
+        MedicationReminders.cancelMeasurementNotifications(context)
+    },
+    private val applyMeasurementReminders: (AppSettings) -> Unit = {
+        ReminderScheduler(context).apply(it)
+    }
 ) : SettingsRepository {
     private val calendarSettingsMutex = Mutex()
     private val reminderSettingsMutex = Mutex()
@@ -189,7 +198,11 @@ class DefaultSettingsRepository(
             val previous = appSettingsStore.settingsFlow.first()
             appSettingsStore.setMedicationCalendar(calendarId, includeDetails)
             try {
-                medicationResync?.invoke()
+                if (calendarId == null && cleanMedicationCalendar != null) {
+                    cleanMedicationCalendar.invoke()
+                } else {
+                    medicationResync?.invoke()
+                }
             } catch (throwable: Throwable) {
                 // 关闭同步后即使暂时无法清理旧日程，也不能恢复原来的写入授权。
                 if (calendarId != null) {
@@ -270,7 +283,7 @@ class DefaultSettingsRepository(
                 if (cancel != null) cancel(knownMedicationTimeIds)
                 else MedicationReminders.cancelNotifications(context, knownMedicationTimeIds)
             }
-            MedicationReminders.cancelMeasurementNotifications(context)
+            cancelMeasurementNotifications()
         }.onFailure {
             warnings += "已发出的提醒通知清理失败"
         }
@@ -284,7 +297,7 @@ class DefaultSettingsRepository(
         try {
             // 在清空 DataStore 前先用持久化的旧时间点 id 取消药物闹钟，
             // 否则清空设置会丢失取消旧 PendingIntent 所需的 id。
-            medicationResync?.invoke()
+            (medicationAlarmResync ?: medicationResync)?.invoke()
         } catch (_: Throwable) {
             remindersRescheduled = false
             warnings += "服药提醒同步失败"
@@ -294,6 +307,14 @@ class DefaultSettingsRepository(
             settingsCleared = true
         } catch (_: Throwable) {
             warnings += "设置重置失败"
+        }
+        if (settingsCleared) {
+            runCatching { cleanMedicationCalendar?.invoke() }.onFailure {
+                warnings += "旧服药日程待清理"
+            }
+        }
+        runCatching { clearLegacyBackupImportFiles(context.cacheDir) }.onFailure {
+            warnings += "旧备份导入临时文件清理失败"
         }
         FileSessionDraftRepository(context).clearAll().onFailure {
             warnings += "测量草稿清理失败"
@@ -535,7 +556,7 @@ class DefaultSettingsRepository(
     }
 
     private suspend fun rescheduleReminders() {
-        ReminderScheduler(context).apply(appSettingsStore.settingsFlow.first())
+        applyMeasurementReminders(appSettingsStore.settingsFlow.first())
     }
 
     @Suppress("DEPRECATION")

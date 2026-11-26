@@ -1,8 +1,28 @@
 package com.example.bloodpressurerecord.data.repository
 
+import android.content.Context
+import android.content.ContextWrapper
+import android.net.Uri
+import androidx.lifecycle.SavedStateHandle
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPayload
+import com.example.bloodpressurerecord.data.repository.backup.BackupExportPlan
+import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
+import kotlinx.coroutines.withContext
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
+import com.example.bloodpressurerecord.data.datastore.PreferenceKeys
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.db.entity.BloodPressureMeasurementEntity
 import com.example.bloodpressurerecord.data.db.entity.MeasurementSessionEntity
@@ -27,25 +47,44 @@ import org.junit.Test
 class DefaultSettingsRepositoryAndroidTest {
     private lateinit var database: AppDatabase
     private lateinit var repository: DefaultSettingsRepository
+    private lateinit var preferences: DataStore<Preferences>
+    private lateinit var storeScope: CoroutineScope
+    @get:Rule val temporary = TemporaryFolder()
+    private lateinit var context: Context
 
     @Before
     fun setUp() {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val app = ApplicationProvider.getApplicationContext<Context>()
+        val files = temporary.newFolder("files")
+        val cache = temporary.newFolder("cache")
+        context = object : ContextWrapper(app) {
+            override fun getApplicationContext(): Context = this
+            override fun getFilesDir(): File = files
+            override fun getCacheDir(): File = cache
+        }
+        storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        preferences = PreferenceDataStoreFactory.create(scope = storeScope) {
+            File(files, "test.preferences_pb")
+        }
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
         repository = DefaultSettingsRepository(
             context = context,
-            appSettingsStore = AppSettingsStore(context),
+            appSettingsStore = AppSettingsStore.using(preferences),
             database = database,
             userProfileDao = database.userProfileDao(),
             measurementSessionDao = database.measurementSessionDao(),
-            measurementDao = database.measurementDao()
+            measurementDao = database.measurementDao(),
+            cancelRemovedMedicationNotifications = {},
+            cancelMeasurementNotifications = {},
+            applyMeasurementReminders = {}
         )
     }
 
     @After
     fun tearDown() {
+        storeScope.cancel()
         database.close()
     }
 
@@ -96,8 +135,7 @@ class DefaultSettingsRepositoryAndroidTest {
     }
     @Test
     fun selectedDisplayProfileAndMeasurementsNeverRestoreMedicationTablesOrResync() = runTest {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val store = AppSettingsStore(context)
+        val store = AppSettingsStore.using(preferences)
         store.clearAll()
         try {
             store.setAppearanceMode("dark")
@@ -133,6 +171,7 @@ class DefaultSettingsRepositoryAndroidTest {
             val guardedRepository = DefaultSettingsRepository(context, store, database,
                 database.userProfileDao(), database.measurementSessionDao(), database.measurementDao(),
                 medicationResync = { medicationResyncCalls++ },
+                applyMeasurementReminders = {},
                 medicationAlarmResync = { alarmSettings += store.settingsFlow.first().medicationReminderEnabled })
             val service = BackupImportService(database, store)
             val preview = service.previewXlsx(ByteArrayInputStream(bytes))
@@ -188,6 +227,100 @@ class DefaultSettingsRepositoryAndroidTest {
             assertEquals(listOf(false), alarmSettings)
         } finally {
             store.clearAll()
+        }
+    }
+
+    @Test
+    fun secondVolumeResumesAndRestoredPickerCannotWriteWithoutItsPlan() = runTest {
+        val payload = BackupExportPayload(
+            instructions = emptyList(), measurements = emptyList(),
+            userProfile = emptyList(), meta = emptyList()
+        )
+        val saved = SavedStateHandle()
+        val volumes = mutableListOf<Int>()
+        val source = object : SettingsRepository by repository {
+            override suspend fun prepareBackupExport() =
+                Result.success(BackupExportPlan(listOf(payload, payload)))
+
+            override suspend fun exportBackupVolumeToUri(
+                plan: BackupExportPlan,
+                volumeIndex: Int,
+                uri: Uri,
+                passphrase: CharArray?
+            ): Result<Unit> {
+                assertEquals("safe-test-password", passphrase?.concatToString())
+                volumes += volumeIndex
+                return Result.success(Unit)
+            }
+        }
+        withContext(Dispatchers.Main) {
+            val vm = SettingsViewModel(source, savedStateHandle = saved)
+            vm.prepareBackupExport("test", "safe-test-password".toCharArray())
+            val first = requireNotNull(vm.uiState.value.exportVolumeRequestId)
+            assertTrue(vm.beginBackupLocation(first))
+            vm.finishExportBackupLocation(first, Uri.parse("content://backup-test/first"))
+            assertEquals(listOf(0), volumes)
+            vm.pauseBackupExport()
+            vm.requestBackupExport()
+            vm.dismissSwitchExportFormat()
+            vm.requestEncryptedBackupExport()
+            assertEquals(1, vm.uiState.value.exportVolumeIndex)
+            val second = requireNotNull(vm.uiState.value.exportVolumeRequestId)
+            assertTrue(vm.beginBackupLocation(second))
+
+            val restored = SettingsViewModel(source, savedStateHandle = saved)
+            assertEquals(second, restored.interruptedExportRequestId)
+            assertTrue(restored.uiState.value.message.contains("重新导出全部卷"))
+            restored.finishExportBackupLocation(second, Uri.parse("content://backup-test/stale"))
+            assertEquals(listOf(0), volumes)
+        }
+    }
+
+    @Test
+    fun setMedicationCalendar_handlesMissingAndLegacyKeysSafely() = runTest {
+        val store = AppSettingsStore.using(preferences)
+        preferences.edit { it.clear() }
+        try {
+            // 新安装/键不存在：开启、更新、重复关闭都不应因空 Boolean Preference 抛出异常。
+            store.setMedicationCalendar(calendarId = 42L, includeDetails = true)
+            val enabled = store.settingsFlow.first()
+            assertTrue(enabled.medicationCalendarSyncEnabled)
+            assertEquals(42L, enabled.medicationCalendarId)
+            assertTrue(enabled.medicationCalendarIncludeDetails)
+            assertFalse(store.calendarEventsMayExist.first())
+
+            store.setMedicationCalendar(calendarId = null, includeDetails = false)
+            store.setMedicationCalendar(calendarId = null, includeDetails = false)
+            val disabled = store.settingsFlow.first()
+            assertFalse(disabled.medicationCalendarSyncEnabled)
+            assertEquals(null, disabled.medicationCalendarId)
+            assertFalse(disabled.medicationCalendarIncludeDetails)
+            assertFalse(store.calendarEventsMayExist.first())
+
+            // 旧版本开启过同步（存在 legacy true 且未写入 events_may_exist）：迁移为 events_may_exist = true 并移除旧键。
+            preferences.edit { prefs ->
+                prefs.clear()
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] = true
+            }
+            store.setMedicationCalendar(calendarId = 7L, includeDetails = false)
+            val migratedPrefs = preferences.data.first()
+            assertEquals(null, migratedPrefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED])
+            assertEquals(true, migratedPrefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST])
+            assertTrue(store.calendarEventsMayExist.first())
+            assertEquals(7L, store.settingsFlow.first().medicationCalendarId)
+
+            // 旧版本显式关闭过同步（legacy false）：移除旧键但不误标记 events_may_exist。
+            preferences.edit { prefs ->
+                prefs.clear()
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] = false
+            }
+            store.setMedicationCalendar(calendarId = null, includeDetails = false)
+            val legacyDisabledPrefs = preferences.data.first()
+            assertEquals(null, legacyDisabledPrefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED])
+            assertEquals(null, legacyDisabledPrefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST])
+            assertFalse(store.calendarEventsMayExist.first())
+        } finally {
+            preferences.edit { it.clear() }
         }
     }
 

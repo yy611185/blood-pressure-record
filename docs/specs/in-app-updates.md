@@ -4,9 +4,9 @@ App 保留版本检查与更新提醒，将 APK 下载交给外部浏览器，�
 
 ## 更新流程
 
-1. 启动或返回前台时，按自动检查偏好和请求间隔获取 `latest.json`；用户也可从“我的 → 应用说明与更新说明”手动检查。
-2. 按实际安装的 `versionCode` 比较版本，显示最新与当前版本、发布时间和纯文本更新内容。录入、编辑、备份等操作期间暂缓自动弹窗。
-3. 点击“前往浏览器下载更新”，验证清单中的 `url` 后通过 `Intent.ACTION_VIEW` 打开外部浏览器。成功打开后关闭弹窗，将该版本提醒延后 72 小时并保存在本机；立即返回或重启不会重复自动提示，手动检查与更高版本提示继续有效。
+1. 启动或返回前台（`Lifecycle.Event.ON_START`）时，按自动检查偏好和 24 小时成功检查间隔获取 `latest.json`；用户也可从“我的 → 使用指南与更新”手动检查（`SettingsInfoScreen`，原入口名为“应用说明与更新说明”）。
+2. 按实际安装的 `versionCode` 比较版本，显示最新与当前版本、发布时间和纯文本更新内容。录入、编辑、备份与服药提醒确认等操作期间暂缓自动弹窗。
+3. 点击“前往浏览器下载更新”，优先使用清单 `mirrors` 中通过安全校验的直连镜像（自 v2.3.8 起），无可用可信镜像时回退验证后的主地址 `manifest.url`，通过 `Intent.ACTION_VIEW` 打开外部浏览器。成功打开后关闭弹窗，将该版本提醒延后 72 小时并保存在本机；立即返回或重启不会重复自动提示，手动检查与更高版本提示继续有效。
 4. 浏览器负责下载。用户打开下载的 APK，按 Android 系统提示覆盖安装，无需卸载旧版或清空数据。安装来源许可由浏览器和系统处理。
 5. 打开浏览器不代表下载或安装成功。App 重新启动后仍按实际安装的 `versionCode` 判断更新状态，不记录“安装成功”的推测状态。
 
@@ -28,9 +28,9 @@ App 保留版本检查与更新提醒，将 APK 下载交给外部浏览器，�
 | `UpdatePromptGate.kt` | 录入、编辑、备份等关键操作的弹窗避让 |
 | `LegacyUpdateCleanup` | 仅清理旧更新模块的内部专用目录 |
 
-`navigation/AppNavigation.kt` 保留前台生命周期检查及全局提示门控；现有应用说明页嵌入精简后的更新设置。更新失败不改变健康页面的可用性，不读取健康 Repository。
+`navigation/AppNavigation.kt` 保留前台生命周期（`ON_START` / `ON_STOP`）检查及全局提示门控；「我的 → 使用指南与更新」页（`SettingsInfoScreen`）嵌入精简后的更新设置。更新失败不改变健康页面的可用性，不读取健康 Repository。
 
-本次修改更新核心、`AppContainer.kt`、`AppViewModelFactory.kt`、`BloodPressureApplication.kt`、`AppNavigation.kt`、`SettingsSubpages.kt`、`AppInfoContent.kt` 和 `AndroidManifest.xml`，同步 README、更新说明与隐私声明；新增 `LegacyUpdateCleanup.kt` 及清理、ViewModel 测试。
+2026-10-18 的轻量化改造涉及更新核心、`AppContainer.kt`、`AppViewModelFactory.kt`、`BloodPressureApplication.kt`、`AppNavigation.kt`、`SettingsSubpages.kt`、`AppInfoContent.kt` 和 `AndroidManifest.xml`，同步 README、更新说明与隐私声明；新增 `LegacyUpdateCleanup.kt` 及清理、ViewModel 测试。
 
 删除 `UpdateDownloadManager.kt`、`UpdateDownloadSafety.kt`、`UpdateHttpDownload.kt`、`UpdateVerifier.kt`、`UpdateInstaller.kt`、`UpdateInstallState.kt`、`update_file_paths.xml`，以及 `UpdateDownloadSafetyTest.kt`、`UpdateHttpDownloadTest.kt`、`UpdateInstallStateTest.kt`。进度、下载任务、续传、安装来源授权和内部 APK FileProvider 的调用已移除。自动下载与仅 Wi-Fi 下载设置不再显示。
 
@@ -73,7 +73,7 @@ GitHub 最终备用入口固定为本仓库的 HTTPS Releases 页面，不接受
 
 请求节流与提醒策略独立运行，延后到期可依据有效缓存提示。检查失败不能用缓存伪装成本次成功或“已是最新版本”。
 
-弹窗和应用说明页沿用 Material 3、深色模式和大字支持。更新内容可滚动，操作按纵向布局适配小屏，按钮保留可读文字及无障碍语义。自动提示继续避让测量录入、编辑、设置编辑和数据管理；实际备份等任务结束前由应用范围门控持续阻止弹窗。
+弹窗和「使用指南与更新」页沿用 Material 3、深色模式和大字支持。更新内容可滚动，操作按纵向布局适配小屏，按钮保留可读文字及无障碍语义。自动提示继续避让测量录入、编辑、设置编辑、数据管理和服药提醒确认；实际备份等任务结束前由应用范围门控持续阻止弹窗。
 
 ## 权限、旧文件与隐私
 
@@ -87,7 +87,9 @@ App 不读取或上传血压、症状备注、用药、个人资料、Excel/BPX 
 
 元数据请求可能让更新服务及 Cloudflare 获得 IP 地址、时间、路径和基本请求日志。用户可以关闭自动检查；手动检查仍会联网。主动打开下载或 GitHub 入口后，浏览器访问相应服务并可能产生访问、下载日志；App 不向外部入口传递健康数据，不管理 APK 下载、校验或安装授权。
 
-## 开发验证
+## 开发验证（2026-10-18 历史阶段记录）
+
+> 以下小节保留 2026-10-18 轻量化更新改造完成时的历史验证快照；线上版本已于后续发布推进（2026-11-26 核对 `latest.json` 为 `v2.3.12 / versionCode 53`）。
 
 本次仅执行必要的更新模块 JVM 测试、静态检查与 Debug 构建。自动测试使用固定 JSON、内存输入流、真实本地 DataStore，以及模拟的元数据返回和浏览器打开回调；浏览器 Intent 的实际启动留待实机验收。不修改生产清单或投放测试 APK。
 

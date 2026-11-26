@@ -147,7 +147,7 @@ class TrendReadoutAccessibilityTest {
             }
         }
         composeRule.onNodeWithText("125/82 mmHg", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("收缩压 125，舒张压 82", substring = true)
+        composeRule.onNodeWithContentDescription("高压 125，低压 82", substring = true)
             .assertIsDisplayed()
     }
 
@@ -183,7 +183,7 @@ class TrendReadoutAccessibilityTest {
 
     private fun assertTextFitsAndActionsAreReachable() {
         val actionTop = action("上一条").performScrollTo().fetchSemanticsNode().boundsInRoot.top
-        listOf("上一条", "下一条", "明细", "最新", "恢复").forEach {
+        listOf("上一条", "下一条", "明细", "最新", "复位视野").forEach {
             val node = action(it).performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             assertEquals("Actions must stay on one line", actionTop, node.fetchSemanticsNode().boundsInRoot.top, 1f)
         }
@@ -219,7 +219,7 @@ class TrendReadoutAccessibilityTest {
         assertEquals(points[2].id, selectedId)
         action("明细").performScrollTo().performClick()
         assertEquals(points[1].id, detailId)
-        action("恢复").performScrollTo().performClick()
+        action("复位视野").performScrollTo().performClick()
         assertEquals(1, resetCount)
         action("最新").performScrollTo().performClick()
         assertEquals(1, latestCount)

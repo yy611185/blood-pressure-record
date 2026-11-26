@@ -2,9 +2,12 @@ package com.example.bloodpressurerecord.ui.common
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.FlingBehavior
+import androidx.compose.foundation.gestures.ScrollScope
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -210,6 +215,53 @@ private fun LazyListState.centeredIndex(itemCount: Int): Int {
     return (firstVisibleItemIndex + offsetRatio.roundToInt()).coerceIn(0, itemCount - 1)
 }
 
+/**
+ * 0x 减少动态效果下滚轮松手即刻落位的目标下标计算：
+ * 已拖过半格则按最近格对齐；未拖过半格但带明确轻拂速度时前进/后退一格，绝不滑行。
+ */
+internal fun computeWheelSnapTargetIndex(
+    currentIndex: Int,
+    currentOffsetPx: Int,
+    itemSizePx: Int,
+    initialVelocityPxPerSec: Float,
+    itemCount: Int
+): Int {
+    if (itemCount <= 0) return 0
+    if (itemSizePx <= 0) return currentIndex.coerceIn(0, itemCount - 1)
+    val nearestStep = (currentOffsetPx.toFloat() / itemSizePx.toFloat()).roundToInt()
+    val velocityStep = when {
+        nearestStep == 0 && initialVelocityPxPerSec > 600f -> 1
+        nearestStep == 0 && initialVelocityPxPerSec < -600f -> -1
+        else -> 0
+    }
+    return (currentIndex + nearestStep + velocityStep).coerceIn(0, itemCount - 1)
+}
+
+/** 0x 模式专属吸附：绕过不受系统动画缩放控制的 Decay 惯性曲线，在单次同步 scrollBy 中 0ms 落位。 */
+private class ImmediateSnapFlingBehavior(
+    private val state: LazyListState,
+    private val itemCount: Int
+) : FlingBehavior {
+    override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
+        val itemSize = state.layoutInfo.visibleItemsInfo.firstOrNull()?.size ?: return 0f
+        if (itemSize <= 0) return 0f
+        val currentIndex = state.firstVisibleItemIndex
+        val currentOffset = state.firstVisibleItemScrollOffset
+        val targetIndex = computeWheelSnapTargetIndex(
+            currentIndex = currentIndex,
+            currentOffsetPx = currentOffset,
+            itemSizePx = itemSize,
+            initialVelocityPxPerSec = initialVelocity,
+            itemCount = itemCount
+        )
+        val deltaPx = (targetIndex - currentIndex) * itemSize - currentOffset
+        if (deltaPx != 0) {
+            scrollBy(deltaPx.toFloat())
+        }
+        return 0f
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WheelColumn(
@@ -225,6 +277,10 @@ private fun WheelColumn(
     val reducedMotion = LocalReducedMotion.current
     val haptics = LocalHapticFeedback.current
     var lastHapticIndex by remember { mutableIntStateOf(centeredIndex) }
+    val normalFlingBehavior = rememberSnapFlingBehavior(lazyListState = state)
+    val reducedFlingBehavior = remember(state, itemCount) {
+        ImmediateSnapFlingBehavior(state, itemCount)
+    }
 
     LaunchedEffect(centeredIndex) {
         if (centeredIndex != lastHapticIndex) {
@@ -235,9 +291,24 @@ private fun WheelColumn(
         }
     }
 
+    // scrollToItem 会取消同优先级的惯性滚动。手指仍在拖动时，由手势结束后的分支对齐。
+    LaunchedEffect(reducedMotion) {
+        if (reducedMotion && state.isScrollInProgress) {
+            state.scrollToItem(state.centeredIndex(itemCount))
+        }
+    }
+
+    // 拖动手势取消后也要对齐整格。
+    LaunchedEffect(reducedMotion, state.isScrollInProgress) {
+        if (reducedMotion && !state.isScrollInProgress && state.firstVisibleItemScrollOffset != 0) {
+            state.scrollToItem(state.centeredIndex(itemCount))
+        }
+    }
+
+    val itemShape = RoundedCornerShape(12.dp)
     LazyColumn(
         state = state,
-        flingBehavior = rememberSnapFlingBehavior(lazyListState = state),
+        flingBehavior = if (reducedMotion) reducedFlingBehavior else normalFlingBehavior,
         modifier = Modifier
             .width(84.dp)
             .height(itemHeight * WheelVisibleCount)
@@ -259,16 +330,21 @@ private fun WheelColumn(
     ) {
         items(itemCount) { index ->
             val isSelected = index == selectedIndex
+            val itemInteraction = remember { MutableInteractionSource() }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(itemHeight)
                     .selectable(
                         selected = isSelected,
+                        interactionSource = itemInteraction,
+                        indication = null,
                         role = Role.RadioButton,
                         onClick = { onItemClick(index) }
                     )
                     .semantics { contentDescription = describe(index) }
+                    .clip(itemShape)
+                    .focusRing(itemInteraction, itemShape)
                     .graphicsLayer {
                         if (reducedMotion) {
                             alpha = if (isSelected) 1f else 0.55f

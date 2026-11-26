@@ -11,6 +11,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -76,8 +78,10 @@ import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
+import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
 import com.example.bloodpressurerecord.ui.common.WheelTimePickerDialog
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
@@ -113,7 +117,7 @@ fun SettingsProfileScreen(
         AlertDialog(
             onDismissRequest = { showDiscardDialog = false },
             title = { Text("放弃未保存的修改？") },
-            text = { Text("您对个人资料或达标值的修改尚未保存。") },
+            text = { Text("你对个人资料或达标值的修改尚未保存。") },
             confirmButton = {
                 TextButton(onClick = {
                     showDiscardDialog = false
@@ -193,7 +197,7 @@ fun SettingsProfileScreen(
                     value = uiState.targetSystolicText,
                     onValueChange = viewModel::updateTargetSystolicText,
                     enabled = uiState.isProfileLoaded && !uiState.isSavingProfile,
-                    label = { Text("达标高压（用于趋势参考线与达标率）") },
+                    label = { Text("个人达标高压（收缩压）") },
                     placeholder = { Text("例如 135") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -205,13 +209,18 @@ fun SettingsProfileScreen(
                     value = uiState.targetDiastolicText,
                     onValueChange = viewModel::updateTargetDiastolicText,
                     enabled = uiState.isProfileLoaded && !uiState.isSavingProfile,
-                    label = { Text("达标低压（用于趋势参考线与达标率）") },
+                    label = { Text("个人达标低压（舒张压）") },
                     placeholder = { Text("例如 85") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = uiState.targetDiastolicError != null,
                     supportingText = uiState.targetDiastolicError?.let { error -> { Text(error) } }
+                )
+                Text(
+                    "个人达标值默认未设置，可按医嘱或家庭自测参考自行填写；填写一项即可显示对应的趋势目标线，两项齐全才计算日历达标天数与趋势达标率。医学分级沿用诊室标准。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -254,7 +263,15 @@ fun SettingsReminderScreen(
         AlertDialog(
             onDismissRequest = { pendingMedicationDelete = null },
             title = { Text("删除药品？") },
-            text = { Text("将删除「${pending.name}」及其全部服药时间。") },
+            text = {
+                Text(
+                    if (uiState.medicationCalendarSyncEnabled) {
+                        "将删除「${pending.name}」及其全部服药计划和历史打卡记录，并移除已同步的日历日程。删除后可在底部提示条立即撤销。"
+                    } else {
+                        "将删除「${pending.name}」及其全部服药计划和历史打卡记录。删除后可在底部提示条立即撤销。"
+                    }
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -274,7 +291,7 @@ fun SettingsReminderScreen(
         authorizationStatus = ReminderAuthorization.status(context)
         if (!granted || authorizationStatus != ReminderAuthorizationStatus.GRANTED) {
             viewModel.showReminderAuthorizationRequired(
-                "提醒开关已启用，但通知权限未授予；应用内闹钟仍会继续安排，到点后不会显示系统通知。"
+                "提醒开关已开启，但未授予通知权限，到点后无法弹出系统通知。"
             )
         }
     }
@@ -310,11 +327,11 @@ fun SettingsReminderScreen(
             ReminderType.EVENING -> viewModel.setEveningReminderEnabled(true)
         }
         checkNotificationPermissionForReminder(
-            "提醒已启用，但系统通知已关闭；应用内闹钟仍会继续安排。请前往系统通知设置开启通知。"
+            "提醒已开启，但系统通知已关闭。请前往系统通知设置开启通知，以免错过提醒。"
         )
     }
 
-    SettingsSubPageShell("提醒中心", onBack) {
+    SettingsSubPageShell("提醒与服药", onBack) {
         AnimatedVisibility(
             visible = authorizationStatus != ReminderAuthorizationStatus.GRANTED,
             enter = AppMotion.expandVisibilityEnter(reducedMotion),
@@ -323,7 +340,7 @@ fun SettingsReminderScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 DataCard {
                     Text(
-                        "通知权限未开启。提醒仍会按时触发，但不会显示系统通知。",
+                        "系统通知权限未开启，到点后将无法弹出提醒。请开启通知；如遇提醒延迟，请在手机省电或后台管理中允许本应用后台运行。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -387,7 +404,7 @@ fun SettingsReminderScreen(
 
         Text("服药提醒", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(
-            "为每种降压药设置每天的服药时间，到点提醒，通知栏或首页都可一键打勾。",
+            "为常用药品设置每日服药时间，到点发送通用隐私通知；首页可一键打卡，点按通知可在应用内核对具体药品后确认打卡。如遇提醒延迟，请在系统省电管理中允许后台运行。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -398,7 +415,7 @@ fun SettingsReminderScreen(
             if (enabled) {
                 viewModel.setMedicationReminderEnabled(true)
                 checkNotificationPermissionForReminder(
-                    "服药提醒已启用，但系统通知已关闭；应用内闹钟仍会继续安排。请前往系统通知设置开启通知。"
+                    "服药提醒已开启，但系统通知已关闭。请前往系统通知设置开启通知，以免错过提醒。"
                 )
             } else {
                 viewModel.setMedicationReminderEnabled(false)
@@ -408,6 +425,7 @@ fun SettingsReminderScreen(
             enabled = uiState.medicationCalendarSyncEnabled,
             calendarId = uiState.medicationCalendarId,
             includeDetails = uiState.medicationCalendarIncludeDetails,
+            cleanupPending = uiState.medicationCalendarCleanupPending,
             viewModel = viewModel
         )
 
@@ -416,13 +434,13 @@ fun SettingsReminderScreen(
         uiState.medications.forEach { med ->
             val sortedTimes = med.times.map { it.timeText }.sorted()
             val cardInteraction = remember { MutableInteractionSource() }
+            val cardShape = RoundedCornerShape(24.dp)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .pressableScale(cardInteraction)
                     .clickable(
                         interactionSource = cardInteraction,
-                        indication = LocalIndication.current
+                        indication = null
                     ) {
                         editorState = MedicationEditorState(
                             id = med.medication.id,
@@ -430,14 +448,17 @@ fun SettingsReminderScreen(
                             dosage = med.medication.dosage,
                             times = sortedTimes
                         )
-                    },
-                shape = RoundedCornerShape(24.dp),
+                    }
+                    .pressableScale(cardInteraction, pressedScale = 0.985f)
+                    .focusRing(cardInteraction, cardShape),
+                shape = cardShape,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 64.dp)
+                        .indication(cardInteraction, LocalIndication.current)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -511,6 +532,7 @@ private fun MedicationCalendarSettings(
     enabled: Boolean,
     calendarId: Long?,
     includeDetails: Boolean,
+    cleanupPending: Boolean,
     viewModel: SettingsViewModel
 ) {
     val context = LocalContext.current
@@ -521,9 +543,14 @@ private fun MedicationCalendarSettings(
     fun hasPermissions() = permissions.all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
+    var requestingCleanup by rememberSaveable { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (hasPermissions()) editing = true
-        else viewModel.showReminderAuthorizationRequired("需要日历权限才能选择服药提醒的目标日历。")
+        if (hasPermissions()) {
+            if (requestingCleanup) viewModel.setMedicationCalendarSyncEnabled(false) else editing = true
+        } else {
+            viewModel.showReminderAuthorizationRequired("需要日历读写权限才能管理服药日程。")
+        }
+        requestingCleanup = false
     }
     fun configure() {
         if (hasPermissions()) editing = true else permissionLauncher.launch(permissions)
@@ -557,6 +584,21 @@ private fun MedicationCalendarSettings(
     Text("系统日历", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     SettingsSwitchRow("同步到系统日历", enabled) { checked ->
         if (checked) configure() else viewModel.setMedicationCalendarSyncEnabled(false)
+    }
+    if (cleanupPending) {
+        Text("同步已关闭，先前写入的服药日程仍待清理。")
+        AppSecondaryButton(
+            text = "清理旧服药日程",
+            onClick = {
+                if (hasPermissions()) {
+                    viewModel.setMedicationCalendarSyncEnabled(false)
+                } else {
+                    requestingCleanup = true
+                    permissionLauncher.launch(permissions)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
     AnimatedVisibility(
         visible = enabled,
@@ -599,6 +641,7 @@ private fun MedicationCalendarSettings(
                                 Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .selectable(selectedId == target.id, role = Role.RadioButton, onClick = {
                                         if (selectedId != target.id) showDetails = false
                                         selectedId = target.id
@@ -698,7 +741,7 @@ private fun MedicationEditorDialog(
                         if (it.isNotBlank()) nameError = null
                     },
                     label = { Text("药品名称") },
-                    placeholder = { Text("如：氨氯地平") },
+                    placeholder = { Text("请输入药品名称") },
                     singleLine = true,
                     isError = nameError != null,
                     supportingText = nameError?.let { err -> { Text(err) } },
@@ -707,8 +750,8 @@ private fun MedicationEditorDialog(
                 OutlinedTextField(
                     value = dosage,
                     onValueChange = { dosage = it },
-                    label = { Text("每次数量（选填）") },
-                    placeholder = { Text("如：1片") },
+                    label = { Text("每次用量（选填）") },
+                    placeholder = { Text("如：1 片 / 5 mg") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -726,6 +769,7 @@ private fun MedicationEditorDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
                                 .clickable { pickerTarget = time }
                                 .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -832,16 +876,6 @@ private fun ReminderTimePickerButton(
 }
 
 @Composable
-fun SettingsDisplayScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageShell("显示设置", onBack) {
-        SettingsSwitchRow("显示趋势图", uiState.showTrendChart, viewModel::setShowTrendChart)
-        SettingsSwitchRow("启用高风险提醒", uiState.highRiskAlertEnabled, viewModel::setHighRiskAlertEnabled)
-        SettingsSwitchRow("大字模式", uiState.isLargeTextEnabled, viewModel::setLargeTextEnabled)
-    }
-}
-
-@Composable
 fun SettingsInfoScreen(
     onBack: () -> Unit,
     onOpenAppGuide: () -> Unit,
@@ -852,7 +886,7 @@ fun SettingsInfoScreen(
     onOpenDirectDownload: (() -> Unit)?
 ) {
     val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageShell("应用说明与更新说明", onBack) {
+    SettingsSubPageShell("使用指南与更新", onBack) {
         UpdateSettingsContent(
             state = updateState,
             currentVersion = BuildConfig.VERSION_NAME,
@@ -863,14 +897,14 @@ fun SettingsInfoScreen(
             onOpenDirectDownload = onOpenDirectDownload
         )
         SettingListItem(
-            title = "应用说明",
-            subtitle = "查看当前可实现功能、测量建议和免责声明",
+            title = "使用指南",
+            subtitle = "快速上手、血压分级标准、数据隐私与测量建议",
             icon = Icons.Outlined.Info,
             onClick = onOpenAppGuide
         )
         SettingListItem(
-            title = "更新说明",
-            subtitle = "查看 ${AppInfoContent.CURRENT_VERSION} 及历史版本更新记录",
+            title = "版本更新与历史",
+            subtitle = "查看当前版本（${AppInfoContent.CURRENT_VERSION}）及历史更新记录",
             icon = Icons.Outlined.Update,
             onClick = onOpenReleaseNotes
         )
@@ -879,7 +913,7 @@ fun SettingsInfoScreen(
 
 @Composable
 fun SettingsAppGuideScreen(onBack: () -> Unit) {
-    SettingsSubPageShell("应用说明", onBack) {
+    SettingsSubPageShell("使用指南", onBack) {
         AppInfoContent.featureSections.forEach { section ->
             InfoSectionCard(section)
         }
@@ -888,31 +922,61 @@ fun SettingsAppGuideScreen(onBack: () -> Unit) {
 
 @Composable
 fun SettingsInfoReleaseNotesScreen(onBack: () -> Unit) {
-    SettingsSubPageShell("更新说明", onBack) {
-        AppReleaseNotes.notes.forEach { note ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    val assets = LocalContext.current.assets
+    val notes = remember(assets) {
+        AppReleaseNotes.forInstalledVersion(AppInfoContent.CURRENT_VERSION) { path ->
+            runCatching { assets.open(path).bufferedReader().use { it.readText() } }.getOrNull()
+        }
+    }
+    val recentNotes = notes.take(4)
+    val archivedNotes = notes.drop(4)
+    SettingsSubPageShell("版本更新与历史", onBack) {
+        recentNotes.forEach { note ->
+            ReleaseNoteCard(note)
+        }
+        if (archivedNotes.isNotEmpty()) {
+            ExpandableSection(
+                title = "更早历史版本",
+                summary = "共 ${archivedNotes.size} 个历史版本（${archivedNotes.first().version} – ${archivedNotes.last().version}）",
+                initiallyExpanded = false,
+                stateKey = "release-notes-archive"
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "版本 ${note.version}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(note.summary, style = MaterialTheme.typography.bodyMedium)
-                    note.changes.forEach { change ->
-                        Text(
-                            "• $change",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                Text(
+                    "以下为更早版本的历史变更记录，部分页面入口与操作方式已在后续版本中调整，请以最新《使用指南》为准。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                archivedNotes.forEach { note ->
+                    ReleaseNoteCard(note)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReleaseNoteCard(note: ReleaseNote) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "版本 ${note.version}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(note.summary, style = MaterialTheme.typography.bodyMedium)
+            note.changes.forEach { change ->
+                Text(
+                    "• $change",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -949,24 +1013,27 @@ private fun SettingsSubPageShell(
 @Composable
 private fun SettingsSwitchRow(title: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
+    val rowShape = RoundedCornerShape(24.dp)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .pressableScale(interactionSource),
-        shape = RoundedCornerShape(24.dp),
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = onChecked
+            )
+            .pressableScale(interactionSource, pressedScale = 0.985f)
+            .focusRing(interactionSource, rowShape),
+        shape = rowShape,
         color = MaterialTheme.colorScheme.surface
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 64.dp)
-                .toggleable(
-                    value = checked,
-                    interactionSource = interactionSource,
-                    indication = LocalIndication.current,
-                    role = Role.Switch,
-                    onValueChange = onChecked
-                )
+                .indication(interactionSource, LocalIndication.current)
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically

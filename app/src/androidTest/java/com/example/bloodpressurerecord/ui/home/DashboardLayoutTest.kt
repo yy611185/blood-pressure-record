@@ -99,7 +99,7 @@ class DashboardLayoutTest {
             composeRule.onNodeWithContentDescription("小压，点一下换一句话")
                 .performScrollTo().performClick()
         }
-        composeRule.onNodeWithText("每天早晚各测一次，我会帮你记着～").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("每天早晚各测一次，记在这里方便回看变化。").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("今天的药都吃过啦，真棒！").assertDoesNotExist()
     }
 

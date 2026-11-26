@@ -274,7 +274,7 @@ fun ReportPreviewScreen(
             item {
                 Text("${state.period.startDate} 至 ${state.period.endDate} · 共 ${artifact.plan.pageCount} 页")
                 Text(
-                    "请检查各页内容后导出。隐私选择只用于本次报告。",
+                    "请检查各页内容后导出。隐私选择仅用于本次报告；「存摘要图」仅保存第 1 页摘要，完整逐日明细请分享或保存 PDF。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

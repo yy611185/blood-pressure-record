@@ -63,7 +63,6 @@ class ReportViewModelTest {
         val end = vm.uiState.value.period.endDate
         assertFalse(vm.selectCustomPeriod(end.minusDays(7), end))
         assertTrue(vm.selectCustomPeriod(end.minusDays(6), end))
-        vm.requestPreview()
         vm.setIncludeIdentity(true)
         vm.confirmAndGenerate()
         advanceUntilIdle()
@@ -131,7 +130,6 @@ class ReportViewModelTest {
     fun `changing period removes old preview and prevents saving before new confirmation`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val previous = requireNotNull(vm.uiState.value.artifact)
@@ -156,7 +154,6 @@ class ReportViewModelTest {
         ))
         val generator = FakeReportGenerator()
         val vm = model(repository, generator)
-        vm.requestPreview()
         vm.setIncludeIdentity(true)
         vm.confirmAndGenerate()
         advanceUntilIdle()
@@ -186,7 +183,6 @@ class ReportViewModelTest {
     fun `failed privacy regeneration blocks stale saving until retry succeeds`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val previous = vm.uiState.value.artifact
@@ -218,7 +214,6 @@ class ReportViewModelTest {
     fun `second privacy change discards cancelled late result and retains newest report`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val original = requireNotNull(vm.uiState.value.artifact)
@@ -250,7 +245,6 @@ class ReportViewModelTest {
     fun `manual regeneration failure invalidates matching previous preview`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val previous = vm.uiState.value.artifact
@@ -273,7 +267,6 @@ class ReportViewModelTest {
     fun `returning privacy option to old value cannot reenable failed stale preview`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val previous = vm.uiState.value.artifact
@@ -294,11 +287,10 @@ class ReportViewModelTest {
     }
 
     @Test
-    fun `return to options restores every privacy default and asks identity again`() = runTest {
+    fun `return to options restores every privacy default`() = runTest {
         val vm = model()
         vm.setIncludeNotes(false)
         vm.setIncludeMedications(false)
-        vm.requestPreview()
         vm.setIncludeIdentity(true)
         vm.confirmAndGenerate()
         advanceUntilIdle()
@@ -307,8 +299,6 @@ class ReportViewModelTest {
         assertEquals(ReportOptions(), vm.uiState.value.options)
         assertNull(vm.uiState.value.previewOptions)
         assertFalse(vm.uiState.value.canExport)
-        vm.requestPreview()
-        assertTrue(vm.uiState.value.showIdentityConfirmation)
         assertFalse(vm.uiState.value.options.includeIdentity)
         advanceUntilIdle()
     }
@@ -316,7 +306,6 @@ class ReportViewModelTest {
     @Test
     fun `saving disables duplicate output and option changes until completion`() = runTest {
         val vm = model()
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val options = vm.uiState.value.options
@@ -344,14 +333,12 @@ class ReportViewModelTest {
     fun `empty period stops before rendering and explains how to proceed`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(FakeReportRepository(ReportSnapshot()), generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
 
         assertEquals(0, generator.reports.size)
         assertNull(vm.uiState.value.artifact)
         assertFalse(vm.uiState.value.isGenerating)
-        assertFalse(vm.uiState.value.showIdentityConfirmation)
         assertTrue(vm.uiState.value.message.contains("请先记录血压"))
     }
 
@@ -360,8 +347,6 @@ class ReportViewModelTest {
         val repository = FakeReportRepository()
         val generator = FakeReportGenerator()
         val vm = model(repository, generator)
-        vm.requestPreview()
-        assertTrue(vm.uiState.value.showIdentityConfirmation)
         assertFalse(vm.uiState.value.options.includeIdentity)
         vm.setIncludeIdentity(true)
         vm.confirmAndGenerate()
@@ -375,7 +360,6 @@ class ReportViewModelTest {
         assertNull(vm.uiState.value.artifact)
         assertFalse(vm.uiState.value.options.includeIdentity)
 
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         assertFalse(repository.requests.last().second.includeIdentity)
@@ -385,13 +369,11 @@ class ReportViewModelTest {
     }
 
     @Test
-    fun `cancelled identity dialog is not carried into next confirmation`() = runTest {
+    fun `re-entering report options resets identity opt in`() = runTest {
         val vm = model()
-        vm.requestPreview()
         vm.setIncludeIdentity(true)
-        vm.dismissIdentityConfirmation()
-        assertFalse(vm.uiState.value.showIdentityConfirmation)
-        vm.requestPreview()
+        assertTrue(vm.uiState.value.options.includeIdentity)
+        vm.onScreenEntered()
         assertFalse(vm.uiState.value.options.includeIdentity)
         advanceUntilIdle()
     }
@@ -401,7 +383,6 @@ class ReportViewModelTest {
         val repository = FakeReportRepository()
         val generator = FakeReportGenerator()
         val vm = model(repository, generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val preview = requireNotNull(vm.uiState.value.artifact)
@@ -422,7 +403,6 @@ class ReportViewModelTest {
     @Test
     fun `save callback for previous preview cannot write a newer privacy report`() = runTest {
         val vm = model()
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val expected = requireNotNull(vm.uiState.value.artifact)
@@ -445,7 +425,6 @@ class ReportViewModelTest {
     @Test
     fun `save failure does not reveal exception health data or discard preview`() = runTest {
         val vm = model()
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val preview = vm.uiState.value.artifact
@@ -463,7 +442,6 @@ class ReportViewModelTest {
             generateAction = { throw IllegalStateException("李某 189/112 次数 30") }
         }
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
 
@@ -480,16 +458,13 @@ class ReportViewModelTest {
         }
         val repository = FakeReportRepository()
         val vm = model(repository, generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         runCurrent()
         assertTrue(vm.uiState.value.isGenerating)
         vm.confirmAndGenerate()
-        vm.requestPreview()
         runCurrent()
         assertEquals(1, repository.requests.size)
         assertEquals(1, generator.reports.size)
-        assertFalse(vm.uiState.value.showIdentityConfirmation)
 
         gate.complete(Unit)
         advanceUntilIdle()
@@ -504,7 +479,6 @@ class ReportViewModelTest {
             generateAction = { suspendCoroutine { completion = it } }
         }
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.setIncludeIdentity(true)
         vm.confirmAndGenerate()
         runCurrent()
@@ -523,7 +497,6 @@ class ReportViewModelTest {
     fun `clearing screen discards its unshared preview`() = runTest {
         val generator = FakeReportGenerator()
         val vm = model(generator = generator)
-        vm.requestPreview()
         vm.confirmAndGenerate()
         advanceUntilIdle()
         val preview = requireNotNull(vm.uiState.value.artifact)

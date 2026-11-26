@@ -43,17 +43,21 @@ private suspend fun fetchManifest(): UpdateManifest = withContext(Dispatchers.IO
         val code = connection.responseCode
         if (code != 200) {
             throw UpdateRequestException(
-                if (code in 300..399) "更新服务返回了不可信重定向" else "暂时无法获取更新清单（HTTP $code）"
+                if (code in 300..399) {
+                    "更新服务连接异常，请稍后重试或使用备用下载"
+                } else {
+                    "暂时无法获取版本信息（代码 $code），请稍后重试或使用备用下载"
+                }
             )
         }
         if (connection.contentLengthLong > UpdateManifest.MAX_JSON_BYTES) {
-            throw UpdateRequestException("更新清单过大")
+            throw UpdateRequestException("版本信息读取异常，请稍后重试或使用备用下载")
         }
         val bytes = connection.inputStream.use { readBounded(it, UpdateManifest.MAX_JSON_BYTES) }
         val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
         val manifest = try { UpdateManifest.parse(text) } catch (error: IllegalArgumentException) {
-            throw UpdateRequestException("更新清单格式无效，请稍后重试", error)
+            throw UpdateRequestException("版本信息读取异常，请稍后重试或使用备用下载", error)
         }
         manifest
     } finally {
@@ -71,7 +75,7 @@ internal fun readBounded(input: InputStream, maximum: Int): ByteArray {
             break
         }
         if (output.size() > maximum - read) {
-            throw UpdateRequestException("更新清单过大")
+            throw UpdateRequestException("版本信息读取异常，请稍后重试或使用备用下载")
         }
         output.write(buffer, 0, read)
     }

@@ -24,13 +24,12 @@ sealed class AppDestination(
     data object AddMeasurement : AppDestination("record/add", "新增", Icons.Outlined.Add)
 
     data object SettingsProfile : AppDestination("settings/profile", "用户资料", Icons.Outlined.Settings)
-    data object SettingsReminder : AppDestination("settings/reminder", "提醒设置", Icons.Outlined.Settings)
-    data object SettingsDisplay : AppDestination("settings/display", "显示设置", Icons.Outlined.Settings)
+    data object SettingsReminder : AppDestination("settings/reminder", "提醒与服药", Icons.Outlined.Settings)
     data object SettingsDataManagement : AppDestination("settings/data", "数据管理", Icons.Outlined.Settings)
-    data object DoctorReport : AppDestination("settings/data/report", "导出医生报告", Icons.Outlined.Settings)
-    data object SettingsInfo : AppDestination("settings/info", "应用说明与更新说明", Icons.Outlined.Settings)
-    data object SettingsInfoAppGuide : AppDestination("settings/info/app-guide", "应用说明", Icons.Outlined.Settings)
-    data object SettingsInfoReleaseNotes : AppDestination("settings/info/release-notes", "更新说明", Icons.Outlined.Settings)
+    data object DoctorReport : AppDestination("settings/data/report", "医生报告", Icons.Outlined.Settings)
+    data object SettingsInfo : AppDestination("settings/info", "使用指南与更新", Icons.Outlined.Settings)
+    data object SettingsInfoAppGuide : AppDestination("settings/info/app-guide", "使用指南", Icons.Outlined.Settings)
+    data object SettingsInfoReleaseNotes : AppDestination("settings/info/release-notes", "版本更新与历史", Icons.Outlined.Settings)
 
     data object NoteSearch : AppDestination("history/search", "搜索备注", Icons.Outlined.Search)
     data object HistoryLocation : AppDestination("history/location/{sessionId}", "定位记录", Icons.Outlined.CalendarMonth) {

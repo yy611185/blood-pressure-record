@@ -19,9 +19,10 @@
     <string name="history_period_month">本月</string>
     <string name="previous_month">上一个月</string>
     <string name="next_month">下一个月</string>
-    <string name="calendar_select_recorded_day">请选择有记录的日期查看当天记录</string>
+    <string name="calendar_select_recorded_day">点击日期查看当天记录，或直接记一次血压</string>
     <string name="calendar_empty_month">本月还没有血压记录</string>
     <string name="add_measurement">新增测量</string>
+    <string name="high_risk_reading_guidance">有读数达到收缩压 ≥180 或舒张压 ≥120 mmHg。如伴有胸痛、呼吸困难、剧烈头痛、言语不清、一侧肢体麻木无力或视物模糊等症状，请立即联系当地急救服务，勿自行加药。若无不适，请静坐休息 5–10 分钟后复测。若复测仍达到上述范围，请尽快联系医生。</string>
     <string name="widget_label">血压概览</string>
     <string name="widget_description">查看最近血压、今日测量与服药进度；拖大到 4×4 可显示近 7 天趋势。</string>
     <string name="weekday_sunday">日</string>
@@ -42,13 +43,12 @@
     <string name="bp_range_description">收缩压 %1$d，舒张压 %2$d，属于%3$s区间</string>
     <string name="bp_range_empty_description">还没有有效读数，测一次后显示你的区间</string>
     <string name="bp_range_empty_hint">测一次后显示你的区间</string>
-    <string name="bp_range_edit_hint">目标范围可自定义</string>
     <string name="bp_zone_config_title">首页四色条区间</string>
-    <string name="bp_zone_config_placeholder_note">默认范围参考常用成人血压区间（90/60、120/80、140/90 mmHg），仅用于调整首页四色条的显示位置，不改变医学血压分级；可按医生建议微调。</string>
+    <string name="bp_zone_config_placeholder_note">默认区间（90/60、120/80、140/90 mmHg）仅用于首页四色条和周卡参考虚线的视觉显示，不改变医学血压分级与趋势达标率；可按个人需要微调。</string>
     <string name="bp_zone_config_reset">恢复默认区间</string>
     <string name="bp_zone_config_help">单位为 mmHg。三个起点须严格递增，并在显示范围内；读数等于起点时进入更高一级。</string>
-    <string name="bp_zone_config_sys">收缩压</string>
-    <string name="bp_zone_config_dia">舒张压</string>
+    <string name="bp_zone_config_sys">高压（收缩压）</string>
+    <string name="bp_zone_config_dia">低压（舒张压）</string>
     <string name="bp_zone_config_field_min">显示下限</string>
     <string name="bp_zone_config_field_low_cut">正常起点</string>
     <string name="bp_zone_config_field_normal_cut">偏高起点</string>
@@ -57,7 +57,7 @@
     <string name="bp_zone_config_field_description">%1$s，%2$s，单位 mmHg</string>
     <string name="bp_zone_config_invalid">请填写正整数：下限须小于上限，三个起点须严格递增并在显示范围内。</string>
     <string name="bp_zone_config_save_failed">保存失败，请重试。</string>
-    <string name="bp_zone_config_save">保存范围</string>
+    <string name="bp_zone_config_save">保存区间</string>
     <string name="bp_zone_config_saving">正在保存…</string>
     <string name="bp_zone_config_cancel">取消</string>
 </resources>

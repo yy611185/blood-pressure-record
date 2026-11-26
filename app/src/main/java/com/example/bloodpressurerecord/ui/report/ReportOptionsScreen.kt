@@ -11,11 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -92,27 +93,6 @@ fun ReportScreen(viewModel: ReportViewModel, onBack: () -> Unit) {
             )
         }
     }
-    if (state.showIdentityConfirmation) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissIdentityConfirmation,
-            title = { Text("是否包含姓名和年龄？") },
-            text = {
-                Column {
-                    Text("此选择只用于本次报告，下次导出会再次询问。")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(state.options.includeIdentity, viewModel::setIncludeIdentity)
-                        Text("包含姓名和年龄")
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::confirmAndGenerate) { Text("生成预览") }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissIdentityConfirmation) { Text("取消") }
-            }
-        )
-    }
 }
 
 @Composable
@@ -146,7 +126,16 @@ fun ReportOptionsScreen(
                 Column {
                     Text("报告模板", style = MaterialTheme.typography.titleLarge)
                     ReportTemplate.entries.forEach { template ->
-                        PeriodChoice(template.title, state.options.template == template, !state.isGenerating) {
+                        val subtitle = when (template) {
+                            ReportTemplate.GENERAL -> "适合复诊回顾近 7 / 30 / 90 天或自定义时间段"
+                            ReportTemplate.HOME_SEVEN_DAY -> "按早晚分列近 7 天记录，便于医生评估一周血压波动"
+                        }
+                        PeriodChoice(
+                            label = template.title,
+                            subtitle = subtitle,
+                            selected = state.options.template == template,
+                            enabled = !state.isGenerating
+                        ) {
                             viewModel.selectTemplate(template)
                         }
                     }
@@ -280,13 +269,31 @@ private fun ReportOptionSwitchRow(
 }
 
 @Composable
-private fun PeriodChoice(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun PeriodChoice(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    subtitle: String? = null,
+    onClick: () -> Unit
+) {
     Row(
-        Modifier.fillMaxWidth().selectable(selected, enabled, Role.RadioButton, onClick),
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .selectable(selected, enabled, Role.RadioButton, onClick),
         verticalAlignment = Alignment.CenterVertically
     ) {
         RadioButton(selected, onClick = null, enabled = enabled)
-        Text(label, Modifier.padding(vertical = 12.dp))
+        Column(Modifier.padding(vertical = 10.dp)) {
+            Text(label)
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

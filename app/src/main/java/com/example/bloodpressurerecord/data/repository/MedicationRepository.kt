@@ -30,6 +30,7 @@ data class DeletedMedicationSnapshot(
 
 enum class MarkMedicationTakenResult {
     RECORDED,
+    ALREADY_TAKEN,
     EXPIRED_OR_REMOVED
 }
 
@@ -46,11 +47,12 @@ interface MedicationRepository {
 
     suspend fun setTaken(medicationId: Long, timeId: Long, date: LocalDate, taken: Boolean)
 
-    /** 通知栏快捷“已服用”专用：安全区分正常打卡（幂等）、已删/停用过期通知与真实数据库异常。 */
+    /** 提醒确认打卡专用：安全区分正常打卡（幂等）、已删/停用过期提醒与真实数据库异常。 */
     suspend fun markTakenFromReminder(
         medicationId: Long,
         timeId: Long,
-        date: LocalDate
+        date: LocalDate,
+        expectedSlot: MedicationSlot? = null
     ): Result<MarkMedicationTakenResult> = runCatching {
         setTaken(medicationId, timeId, date, taken = true)
         MarkMedicationTakenResult.RECORDED
@@ -82,7 +84,9 @@ class DefaultMedicationRepository(
     /** 数据变化后的回调（用于刷新桌面小部件、重排提醒等）。 */
     private val onDataChanged: (() -> Unit)? = null,
     /** 时间点被删除或停用后清理对应系统通知。 */
-    private val onTimeIdsRemoved: (suspend (Collection<Long>) -> Unit)? = null
+    private val onTimeIdsRemoved: (suspend (Collection<Long>) -> Unit)? = null,
+    /** 某天该时段完成打卡后收起对应系统通知。 */
+    private val onSlotTaken: (suspend (timeId: Long, epochDay: Long) -> Unit)? = null
 ) : MedicationRepository {
 
     override fun observeMedicationsWithTimes(): Flow<List<MedicationWithTimes>> =
@@ -138,7 +142,8 @@ class DefaultMedicationRepository(
                     takenAt = System.currentTimeMillis()
                 )
             )
-            if (!recorded) return
+            if (recorded == null) return
+            runCatching { onSlotTaken?.invoke(timeId, date.toEpochDay()) }
         } else {
             dao.deleteLog(timeId, date.toEpochDay())
         }
@@ -148,7 +153,8 @@ class DefaultMedicationRepository(
     override suspend fun markTakenFromReminder(
         medicationId: Long,
         timeId: Long,
-        date: LocalDate
+        date: LocalDate,
+        expectedSlot: MedicationSlot?
     ): Result<MarkMedicationTakenResult> = runCatching {
         val recorded = dao.insertLogIfSlotActive(
             MedicationIntakeLogEntity(
@@ -156,13 +162,18 @@ class DefaultMedicationRepository(
                 timeId = timeId,
                 epochDay = date.toEpochDay(),
                 takenAt = System.currentTimeMillis()
-            )
+            ),
+            expectedTime = expectedSlot?.timeText,
+            expectedName = expectedSlot?.name,
+            expectedDosage = expectedSlot?.dosage
         )
-        if (recorded) {
-            onDataChanged?.invoke()
-            MarkMedicationTakenResult.RECORDED
-        } else {
-            MarkMedicationTakenResult.EXPIRED_OR_REMOVED
+        when (recorded) {
+            null -> MarkMedicationTakenResult.EXPIRED_OR_REMOVED
+            -1L -> MarkMedicationTakenResult.ALREADY_TAKEN
+            else -> {
+                onDataChanged?.invoke()
+                MarkMedicationTakenResult.RECORDED
+            }
         }
     }
 

@@ -352,7 +352,7 @@ private fun TrendFullscreenActionsMenu(uiState: TrendUiState, viewModel: TrendVi
             )
             HorizontalDivider()
             DropdownMenuItem(
-                text = { Text("恢复默认视野") },
+                text = { Text("复位视野") },
                 enabled = points.isNotEmpty(),
                 onClick = { expanded = false; viewModel.resetChart() }
             )

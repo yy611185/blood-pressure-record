@@ -5,7 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -78,15 +80,44 @@ fun SettingsDataManagementScreen(
     }
     BackHandler(enabled = dataBusy) { }
 
+    uiState.pendingExportFormatSwitchToEncrypted?.let { switchToEncrypted ->
+        val currentLabel = if (uiState.exportEncrypted) "加密备份（.bpx）" else "明文 Excel（.xlsx）"
+        val targetLabel = if (switchToEncrypted) "加密备份（.bpx）" else "明文 Excel（.xlsx）"
+        val progressDetail = if (uiState.exportVolumeCount > 1) {
+            "当前还有未完成的$currentLabel 导出（已保存 ${uiState.exportVolumeIndex}/${uiState.exportVolumeCount} 卷）。"
+        } else {
+            "当前有一项已暂停的$currentLabel 导出尚未保存。"
+        }
+        AlertDialog(
+            onDismissRequest = { if (!dataBusy) viewModel.dismissSwitchExportFormat() },
+            title = { Text(if (switchToEncrypted) "切换为加密备份？" else "切换为明文 Excel？") },
+            text = {
+                Text("${progressDetail}切换到$targetLabel 将放弃当前进度并重新开始。")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !dataBusy,
+                    onClick = viewModel::confirmSwitchExportFormat
+                ) { Text("放弃当前并切换") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !dataBusy,
+                    onClick = viewModel::dismissSwitchExportFormat
+                ) { Text("保留原导出") }
+            }
+        )
+    }
+
     if (uiState.showBackupExportConfirm) {
         AlertDialog(
             onDismissRequest = { if (!uiState.isDataActionRunning) viewModel.dismissBackupExport() },
             title = { Text("导出 Excel 备份") },
             text = {
                 Text(
-                    "明文导出的 Excel 文件未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置。" +
-                        "请勿保存到公共设备、不受信任的云盘或与他人共享的位置。文件只会保存到您选择的位置，" +
-                        "应用不会上传服务器。超过 5000 条记录会自动分卷，建议选择“加密导出”。"
+                    "明文导出的 Excel 表格未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置。" +
+                        "请勿保存到公共设备、不受信任的云盘或与他人共享的位置。文件只会保存到你选择的位置，" +
+                        "应用不会上传服务器。超过 5000 条记录会自动分卷，建议使用「加密导出（推荐）」。"
                 )
             },
             confirmButton = {
@@ -94,7 +125,7 @@ fun SettingsDataManagementScreen(
                     enabled = !uiState.isDataActionRunning,
                     onClick = viewModel::requestEncryptedBackupExport
                 ) {
-                    Text("加密导出")
+                    Text("加密导出（推荐）")
                 }
             },
             dismissButton = {
@@ -210,35 +241,58 @@ fun SettingsDataManagementScreen(
         )
     }
 
-    uiState.exportVolumeRequestId?.let { requestId ->
+    val pickerRequestId = uiState.exportVolumeRequestId ?: viewModel.interruptedExportRequestId
+    val exportLauncher = pickerRequestId?.let { requestId ->
         val mime = if (uiState.exportEncrypted) "application/octet-stream"
             else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        val launcher = key(requestId) {
+        key(requestId) {
             rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mime)) { uri ->
-                viewModel.finishBackupLocation { viewModel.onExportLocationResult(requestId, uri) }
+                viewModel.finishExportBackupLocation(requestId, uri)
             }
         }
+    }
+    uiState.exportVolumeRequestId?.let { requestId ->
+        val isMultiVolume = uiState.exportVolumeCount > 1
         AlertDialog(
             onDismissRequest = viewModel::pauseBackupExport,
-            title = { Text("保存第 ${uiState.exportVolumeIndex + 1}/${uiState.exportVolumeCount} 卷") },
+            title = {
+                Text(
+                    if (isMultiVolume) {
+                        "保存第 ${uiState.exportVolumeIndex + 1}/${uiState.exportVolumeCount} 卷"
+                    } else {
+                        "保存备份文件"
+                    }
+                )
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("共 ${uiState.exportTotalRecords} 条测量，每卷最多 5000 条；本卷 ${uiState.exportVolumeRecords} 条。每次测量和原始组会完整保留。")
-                    Text("用户资料和设置在第一卷，用药数据可能分布在多卷。")
-                    Text(
-                        "请依次保存全部 ${uiState.exportVolumeCount} 卷，恢复时逐卷导入。" +
-                            if (uiState.exportEncrypted) "全部卷使用同一口令。" else "文件为明文 Excel。"
-                    )
+                    if (isMultiVolume) {
+                        Text("共 ${uiState.exportTotalRecords} 条测量，每卷最多 5000 条；本卷 ${uiState.exportVolumeRecords} 条。每次测量和原始读数组会完整保留。")
+                        Text("用户资料和设置在第一卷，用药数据可能分布在多卷。")
+                        Text(
+                            "请依次保存全部 ${uiState.exportVolumeCount} 卷，恢复时从第 1 卷起逐卷导入。" +
+                                if (uiState.exportEncrypted) "全部卷使用同一口令。" else "文件为明文 Excel。"
+                        )
+                    } else {
+                        Text("共 ${uiState.exportTotalRecords} 条测量记录（含原始读数组、用户资料、设置与用药数据）。")
+                        Text(
+                            if (uiState.exportEncrypted) {
+                                "将以加密备份（.bpx）格式保存，请妥善保管文件并牢记口令。"
+                            } else {
+                                "将以明文 Excel（.xlsx）格式保存，请注意隐私保护。"
+                            }
+                        )
+                    }
                     Text(uiState.exportFileName, style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = {
                 TextButton(enabled = !dataBusy, onClick = {
-                    if (viewModel.beginBackupLocation()) {
-                        try { launcher.launch(uiState.exportFileName) }
+                    if (exportLauncher != null && viewModel.beginBackupLocation(requestId)) {
+                        try { exportLauncher.launch(uiState.exportFileName) }
                         catch (_: Exception) { viewModel.onBackupLocationLaunchFailed() }
                     }
-                }) { Text("选择本卷保存位置") }
+                }) { Text(if (isMultiVolume) "选择本卷保存位置" else "选择保存位置") }
             },
             dismissButton = {
                 TextButton(enabled = !dataBusy, onClick = viewModel::pauseBackupExport) { Text("稍后继续") }
@@ -389,7 +443,7 @@ fun SettingsDataManagementScreen(
                             onCheckedChange = viewModel::setImportMeasurementsSelected,
                             enabled = preview.validRecordCount > 0
                         )
-                        Text("导入测量记录（覆盖同 record_id）")
+                        Text("导入测量记录（已存在的同条记录将自动覆盖更新）")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
@@ -460,13 +514,20 @@ fun SettingsDataManagementScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = !uiState.isDataActionRunning) { acknowledged = !acknowledged },
+                            .clip(RoundedCornerShape(12.dp))
+                            .heightIn(min = 48.dp)
+                            .toggleable(
+                                value = acknowledged,
+                                enabled = !uiState.isDataActionRunning,
+                                role = androidx.compose.ui.semantics.Role.Checkbox,
+                                onValueChange = { acknowledged = it }
+                            ),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(
                             checked = acknowledged,
                             enabled = !uiState.isDataActionRunning,
-                            onCheckedChange = { acknowledged = it }
+                            onCheckedChange = null
                         )
                         Text(
                             "我已知晓清空后无法恢复",
@@ -540,10 +601,10 @@ fun SettingsDataManagementScreen(
                         Text("本地备份与导出", style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        text = "• 数据保存在本机，应用不主动上传\n" +
-                            "• Android 系统自动备份已关闭\n" +
-                            "• 卸载或换机前请主动导出备份\n" +
-                            "• 应用不提供医学诊断",
+                        text = "• 健康记录默认保存在本机，不主动上传\n" +
+                            "• Android 系统自动云备份已关闭\n" +
+                            "• 卸载或换机前请务必先导出备份\n" +
+                            "• 应用仅用于健康记录，不提供医学诊断",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
@@ -572,36 +633,40 @@ fun SettingsDataManagementScreen(
             AppSecondaryButton(
                 text = "导出医生报告 PDF",
                 onClick = onOpenDoctorReport,
-                enabled = !uiState.isDataActionRunning,
+                enabled = !dataBusy,
                 modifier = Modifier.fillMaxWidth()
             )
             if (uiState.exportVolumeCount > 1) {
                 Text(
-                    "当前导出共 ${uiState.exportVolumeCount} 卷，每卷最多 5000 条记录，请依次保存。",
+                    "当前${if (uiState.exportEncrypted) "加密备份（.bpx）" else "明文 Excel（.xlsx）"}导出共 ${uiState.exportVolumeCount} 卷，每卷最多 5000 条记录，请依次保存。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             AppPrimaryButton(
-                text = if (uiState.activeDataAction == SettingsDataAction.EXPORT_XLSX) {
-                    "正在导出…"
-                } else {
-                    "导出为 Excel (.xlsx)"
+                text = when {
+                    uiState.activeDataAction == SettingsDataAction.EXPORT_XLSX -> "正在导出…"
+                    uiState.exportVolumeCount > 1 && !uiState.exportEncrypted ->
+                        "继续保存明文 Excel（第 ${uiState.exportVolumeIndex + 1}/${uiState.exportVolumeCount} 卷）"
+                    uiState.exportVolumeCount == 1 && !uiState.exportEncrypted -> "继续保存明文 Excel"
+                    else -> "导出明文 Excel (.xlsx)"
                 },
                 icon = Icons.Outlined.SaveAlt,
                 onClick = viewModel::requestBackupExport,
-                enabled = !uiState.isDataActionRunning,
+                enabled = !dataBusy,
                 modifier = Modifier.fillMaxWidth()
             )
 
             AppSecondaryButton(
                 text = when {
                     uiState.activeDataAction == SettingsDataAction.EXPORT_BPX -> "正在导出…"
-                    uiState.exportVolumeCount > 0 -> "继续保存备份（第 ${uiState.exportVolumeIndex + 1} 卷）"
-                    else -> "加密备份 (.bpx)"
+                    uiState.exportVolumeCount > 1 && uiState.exportEncrypted ->
+                        "继续保存加密备份（第 ${uiState.exportVolumeIndex + 1}/${uiState.exportVolumeCount} 卷）"
+                    uiState.exportVolumeCount == 1 && uiState.exportEncrypted -> "继续保存加密备份"
+                    else -> "加密导出（推荐 · .bpx）"
                 },
                 onClick = viewModel::requestEncryptedBackupExport,
-                enabled = !uiState.isDataActionRunning,
+                enabled = !dataBusy,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -612,7 +677,7 @@ fun SettingsDataManagementScreen(
                     "从备份文件恢复（支持 .xlsx / .bpx）"
                 },
                 onClick = viewModel::requestBackupImport,
-                enabled = !uiState.isDataActionRunning,
+                enabled = !dataBusy,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -624,7 +689,7 @@ fun SettingsDataManagementScreen(
                     "清空所有本地数据"
                 },
                 onClick = viewModel::requestClearAll,
-                enabled = !uiState.isDataActionRunning,
+                enabled = !dataBusy,
                 modifier = Modifier.fillMaxWidth()
             )
 

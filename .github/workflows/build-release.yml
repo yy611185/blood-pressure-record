@@ -36,10 +36,10 @@ jobs:
         uses: gradle/actions/wrapper-validation@v4
       - name: Validate release detection and recovery
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
-      - name: Compile app and run unit tests and lint
+      - name: Build app and test APKs, run unit tests and lint
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -207,8 +207,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/release_ci.py publish
+      - name: Compare update manifest and prepare verified released APK
+        id: distribution
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_ci.py prepare-distribution
       - name: Publish signed APK to update server
-        if: steps.version.outputs.should_release == 'true'
+        if: steps.distribution.outputs.should_deploy == 'true'
         shell: bash
         env:
           BP_UPDATE_SSH_KEY: ${{ secrets.BP_UPDATE_SSH_KEY }}
@@ -233,12 +238,7 @@ jobs:
           test -n "${EXPECTED}" || { echo "::error::APK missing from release-sha256.txt"; exit 1; }
           test "${EXPECTED}" = "${SHA}" || { echo "::error::SHA-256 mismatch vs CI checksum file (${EXPECTED} != ${SHA})"; exit 1; }
 
-          NOTES_FILE="docs/release-v${VERSION_NAME}.md"
-          if [ -f "${NOTES_FILE}" ]; then
-            NOTES_B64="$(base64 -w0 "${NOTES_FILE}")"
-          else
-            NOTES_B64="$(printf 'Release v%s' "${VERSION_NAME}" | base64 -w0)"
-          fi
+          NOTES_B64="$(base64 -w0 app/build/outputs/distribution-notes.txt)"
 
           SSH_DIR="${RUNNER_TEMP}/bp-deploy"
           mkdir -p "${SSH_DIR}" && chmod 700 "${SSH_DIR}"

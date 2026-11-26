@@ -66,7 +66,7 @@ class BpRangeBarTest {
             BloodPressureRecordTheme { Surface { BpRangeBar(BpRangeUiState.Empty) } }
         }
         composeRule.onNodeWithContentDescription(context.getString(R.string.bp_range_empty_description)).assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.bp_range_edit_hint)).assertDoesNotExist()
+        composeRule.onNodeWithText("目标范围可自定义").assertDoesNotExist()
     }
 
     @Test
@@ -76,7 +76,7 @@ class BpRangeBarTest {
             BloodPressureRecordTheme { Surface { BpRangeBar(state) } }
         }
         composeRule.onNodeWithContentDescription(description(state)).assertIsDisplayed()
-        composeRule.onNodeWithText(context.getString(R.string.bp_range_edit_hint)).assertDoesNotExist()
+        composeRule.onNodeWithText("目标范围可自定义").assertDoesNotExist()
     }
 
     @Test
@@ -164,7 +164,7 @@ class BpRangeBarTest {
             composeRule.setContent {
                 BloodPressureRecordTheme {
                     Box(Modifier.testTag("settings-capture")) {
-                        SettingsScreen(viewModel, {}, {}, {}, {}, {})
+                        SettingsScreen(viewModel, {}, {}, {}, {})
                     }
                 }
             }
@@ -221,7 +221,7 @@ class BpRangeBarTest {
                 assertTrue("Pulse must sit to the right of pressure", pulse.left >= pressure.right)
                 assertTrue("Pulse must share the reading row", pulse.top < pressure.bottom && pulse.bottom > pressure.top)
                 composeRule.onNodeWithText("正常高值", useUnmergedTree = true).assertIsDisplayed()
-                composeRule.onNodeWithText(context.getString(R.string.bp_range_edit_hint)).assertDoesNotExist()
+                composeRule.onNodeWithText("目标范围可自定义").assertDoesNotExist()
                 assertHeroTextFits()
                 captureIfRequested("hero-${screenWidth.value.toInt()}-${scale}-${if (darkTheme) "dark" else "light"}", "hero-capture")
             }

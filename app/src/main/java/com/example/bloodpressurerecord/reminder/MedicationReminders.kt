@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import com.example.bloodpressurerecord.BuildConfig
+import com.example.bloodpressurerecord.MainActivity
 import com.example.bloodpressurerecord.data.calendar.MedicationCalendarSync
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
 import com.example.bloodpressurerecord.data.datastore.MedicationAlarmState
@@ -22,9 +23,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+data class MedicationReminderConfirmationRequest(
+    val medicationId: Long,
+    val timeId: Long,
+    val dateEpochDay: Long
+)
+
 object MedicationReminders {
     val ACTION = "${BuildConfig.APPLICATION_ID}.REMINDER_MEDICATION"
     val ACTION_MARK_TAKEN = "${BuildConfig.APPLICATION_ID}.ACTION_MEDICATION_MARK_TAKEN"
+    val ACTION_OPEN_CONFIRMATION = "${BuildConfig.APPLICATION_ID}.ACTION_OPEN_MEDICATION_CONFIRMATION"
+    private const val EXTRA_CONFIRMATION_PROOF = "medication_confirmation_proof"
     const val EXTRA_MEDICATION_ID = "medication_id"
     const val EXTRA_TIME_ID = "medication_time_id"
     const val EXTRA_DATE_EPOCH_DAY = "medication_date_epoch_day"
@@ -39,6 +48,71 @@ object MedicationReminders {
 
     fun markTakenUri(timeId: Long, epochDay: Long): Uri =
         Uri.parse("medication://mark-taken/$timeId/$epochDay")
+
+    fun openConfirmationUri(timeId: Long, epochDay: Long): Uri =
+        Uri.parse("medication://confirm/$timeId/$epochDay")
+
+    fun createOpenConfirmationIntent(
+        context: Context,
+        medicationId: Long,
+        timeId: Long,
+        dateEpochDay: Long
+    ): Intent = Intent(context, MainActivity::class.java).apply {
+        action = ACTION_OPEN_CONFIRMATION
+        data = openConfirmationUri(timeId, dateEpochDay)
+        putExtra(EXTRA_MEDICATION_ID, medicationId)
+        putExtra(EXTRA_TIME_ID, timeId)
+        putExtra(EXTRA_DATE_EPOCH_DAY, dateEpochDay)
+        putExtra(EXTRA_CONFIRMATION_PROOF, requireNotNull(confirmationProof(context, medicationId, timeId, dateEpochDay, createKey = true)))
+        addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    }
+
+    fun parseConfirmationRequest(context: Context, intent: Intent?): MedicationReminderConfirmationRequest? {
+        if (intent?.action != ACTION_OPEN_CONFIRMATION) return null
+        val medicationId = intent.getLongExtra(EXTRA_MEDICATION_ID, -1L)
+        val timeId = intent.getLongExtra(EXTRA_TIME_ID, -1L)
+        val day = intent.getLongExtra(EXTRA_DATE_EPOCH_DAY, Long.MIN_VALUE)
+        if (medicationId <= 0 || timeId <= 0 || day > LocalDate.now().toEpochDay() ||
+            day < LocalDate.MIN.toEpochDay() || intent.data != openConfirmationUri(timeId, day)
+        ) return null
+        val proof = intent.getStringExtra(EXTRA_CONFIRMATION_PROOF) ?: return null
+        val expected = runCatching {
+            confirmationProof(context, medicationId, timeId, day, createKey = false)
+        }.getOrNull() ?: return null
+        if (!java.security.MessageDigest.isEqual(proof.toByteArray(), expected.toByteArray())) return null
+        return MedicationReminderConfirmationRequest(medicationId, timeId, day)
+    }
+
+    @Synchronized
+    private fun confirmationProof(
+        context: Context,
+        medicationId: Long,
+        timeId: Long,
+        day: Long,
+        createKey: Boolean
+    ): String? {
+        val preferences = context.getSharedPreferences("medication_notification", Context.MODE_PRIVATE)
+        val key = preferences.getString("confirmation_key", null) ?: run {
+            if (!createKey) return null
+            val bytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+            val encoded = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            check(preferences.edit().putString("confirmation_key", encoded).commit())
+            encoded
+        }
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec(android.util.Base64.decode(key, android.util.Base64.NO_WRAP), "HmacSHA256"))
+        return android.util.Base64.encodeToString(
+            mac.doFinal("$medicationId/$timeId/$day".toByteArray()),
+            android.util.Base64.NO_WRAP
+        )
+    }
+
+    fun clearConfirmationExtras(intent: Intent?) {
+        intent?.removeExtra(EXTRA_MEDICATION_ID)
+        intent?.removeExtra(EXTRA_TIME_ID)
+        intent?.removeExtra(EXTRA_DATE_EPOCH_DAY)
+        intent?.removeExtra(EXTRA_CONFIRMATION_PROOF)
+    }
 
     fun cancelNotifications(context: Context, timeIds: Iterable<Long>) {
         val manager = NotificationManagerCompat.from(context)
@@ -135,6 +209,8 @@ class MedicationReminderCoordinator(
 
     suspend fun cleanUnconfiguredCalendarEvents() = calendarSync.cleanUnconfiguredEvents()
 
+    suspend fun clearCalendarEvents() = calendarSync.rebuild(emptyList())
+
     suspend fun resyncAlarms() {
         synchronize()
     }
@@ -148,22 +224,53 @@ class MedicationReminderCoordinator(
         MedicationReminders.cancelNotifications(context, timeIds)
     }
 
-    suspend fun dismissTakenNotification(timeId: Long, epochDay: Long, legacyAction: Boolean) =
-        alarmMutex.withLock {
-            val manager = context.getSystemService(NotificationManager::class.java)
-            val id = MedicationReminders.notificationIdFor(timeId)
-            if (legacyAction) {
-                manager.cancel(id)
-            } else {
-                val tag = MedicationReminders.notificationTagFor(timeId)
-                val active = manager.activeNotifications.firstOrNull { it.id == id && it.tag == tag }
-                val activeDay = active?.notification?.extras?.getLong(
-                    MedicationReminders.EXTRA_DATE_EPOCH_DAY,
-                    Long.MIN_VALUE
-                )
-                if (activeDay == epochDay) manager.cancel(tag, id)
-            }
+    suspend fun dismissTakenNotification(timeId: Long, epochDay: Long) = alarmMutex.withLock {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val id = MedicationReminders.notificationIdFor(timeId)
+        val tag = MedicationReminders.notificationTagFor(timeId)
+        val active = manager.activeNotifications.firstOrNull { it.id == id && it.tag == tag }
+        val activeDay = active?.notification?.extras?.getLong(
+            MedicationReminders.EXTRA_DATE_EPOCH_DAY,
+            Long.MIN_VALUE
+        )
+        if (activeDay == epochDay) manager.cancel(tag, id)
+    }
+
+    suspend fun migrateLegacyNotifications() = alarmMutex.withLock {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val knownIds = medicationRepository.getAllTimeIds().map(MedicationReminders::notificationIdFor).toSet()
+        manager.activeNotifications.filter {
+            it.notification.publicVersion == null &&
+                (it.tag?.startsWith("medication:") == true || (it.tag == null && it.id in knownIds))
+        }.forEach { manager.cancel(it.tag, it.id) }
+    }
+
+    internal suspend fun reviewLegacyAction(
+        medicationId: Long,
+        timeId: Long,
+        epochDay: Long,
+        legacyUntagged: Boolean,
+        notify: () -> Unit
+    ) = alarmMutex.withLock {
+        val date = runCatching { LocalDate.ofEpochDay(epochDay) }.getOrNull() ?: return@withLock
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val id = MedicationReminders.notificationIdFor(timeId)
+        val tag = MedicationReminders.notificationTagFor(timeId)
+        val active = manager.activeNotifications.firstOrNull { it.tag == tag && it.id == id }
+        val activeDay = active?.notification?.extras?.getLong(MedicationReminders.EXTRA_DATE_EPOCH_DAY, Long.MIN_VALUE)
+        if (legacyUntagged) manager.cancel(id)
+        if (activeDay != null && activeDay > epochDay) return@withLock
+        val slot = medicationRepository.getSlotsForDay(date)
+            .firstOrNull { it.medicationId == medicationId && it.timeId == timeId }
+        if (date > LocalDate.now() || slot == null || slot.taken ||
+            !appSettingsStore.settingsFlow.first().medicationReminderEnabled ||
+            ReminderAuthorization.status(context) != ReminderAuthorizationStatus.GRANTED
+        ) {
+            if (activeDay == epochDay) manager.cancel(tag, id)
+        } else {
+            notify()
         }
+    }
 
     private suspend fun synchronize(): List<MedicationSlot> = alarmMutex.withLock {
         val now = System.currentTimeMillis()

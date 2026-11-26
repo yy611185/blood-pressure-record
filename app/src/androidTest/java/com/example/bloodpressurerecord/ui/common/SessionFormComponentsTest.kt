@@ -199,7 +199,7 @@ class SessionFormComponentsTest {
             }
         }
 
-        listOf("收缩压（高压）", "舒张压（低压）", "脉搏（选填）").forEach { label ->
+        listOf("高压（收缩压）", "低压（舒张压）", "脉搏（选填）").forEach { label ->
             composeRule.onNodeWithContentDescription("第 1 组$label")
                 .assertHeightIsAtLeast(64.dp)
         }
@@ -225,7 +225,7 @@ class SessionFormComponentsTest {
             }
         }
 
-        listOf("收缩压（高压）", "舒张压（低压）", "脉搏（选填）").forEach { label ->
+        listOf("高压（收缩压）", "低压（舒张压）", "脉搏（选填）").forEach { label ->
             composeRule.onNodeWithContentDescription("第 2 组$label")
                 .assertHeightIsAtLeast(64.dp)
         }
@@ -244,7 +244,7 @@ class SessionFormComponentsTest {
                 }
             }
         }
-        val input = composeRule.onNodeWithContentDescription("第 1 组收缩压（高压）")
+        val input = composeRule.onNodeWithContentDescription("第 1 组高压（收缩压）")
         input.performScrollTo().assertIsDisplayed()
         // Measure the actual glyph layout: Android 14+ scales large text nonlinearly.
         val inputLayouts = mutableListOf<TextLayoutResult>()

@@ -411,7 +411,7 @@ class PdfReportRenderer(private val appName: String) {
         line(canvas, ReportTheme.MARGIN,
             ReportTheme.TABLE_ROW_TOP + detail.rows.size * ReportTheme.TABLE_ROW_HEIGHT, right,
             ReportTheme.TABLE_ROW_TOP + detail.rows.size * ReportTheme.TABLE_ROW_HEIGHT)
-        val legend = "加粗并带底色：高于参考线（${ReportTheme.REFERENCE_SYSTOLIC}/${ReportTheme.REFERENCE_DIASTOLIC}）。—：该时段无记录。"
+        val legend = "加粗并带底色：达到或超过诊室参考线（≥${ReportTheme.REFERENCE_SYSTOLIC} 或 ≥${ReportTheme.REFERENCE_DIASTOLIC} mmHg）。—：该时段无记录。"
         text(canvas, legend + if (report.template == ReportTemplate.HOME_SEVEN_DAY) ""
                 else "每个时段为当次多组读数的平均值。",
             ReportTheme.MARGIN, ReportTheme.DETAIL_LEGEND_Y,

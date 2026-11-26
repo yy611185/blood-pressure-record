@@ -109,7 +109,7 @@ class TrendFullscreenLayoutTest {
         assertTrue("Readout stays above the plot", readout.bottom <= chart.top + 1f)
         assertTrue("Readout must fit inside the screen", readout.right <= screen.right + 1f)
         composeRule.onNodeWithText("每日范围").assertDoesNotExist()
-        composeRule.onNodeWithText("恢复").assertDoesNotExist()
+        composeRule.onNodeWithText("复位视野").assertDoesNotExist()
 
         listOf("上一条", "下一条", "明细").forEach { action ->
             composeRule.onNodeWithText(action).performScrollTo().assertIsDisplayed()

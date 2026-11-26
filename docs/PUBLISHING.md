@@ -75,13 +75,19 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 ## 2. 版本管理
 
-| 项 | 当前值 | 规则 |
+| 项 | 已发布最新值 | 规则 |
 |---|---|---|
-| `versionCode` | 43 | 每次发布**必须递增**（整数，只增不减） |
-| `versionName` | 2.3.2 | 语义化版本，随功能/修复调整 |
+| `versionCode` | 53（v2.3.12） | 每次发布**必须递增**（整数，只增不减；下一发布须 ≥ 54） |
+| `versionName` | 2.3.12 | 语义化版本，随功能/修复调整（合并 `origin/main` 后推送 `main` 时 CI `scripts/auto_version.py` 默认递增至 2.3.13 / 54，或手动同时递增两项） |
 | `applicationId` | `com.yang.bloodpressure` | **首次正式分发后永不再改**——改动会被 Android 视为全新应用，旧用户无法覆盖升级 |
 
 修改位置：`app/build.gradle.kts` → `defaultConfig`。
+
+发布说明放在 `app/src/main/assets/release-notes/v<versionName>.md`，使用一级标题和项目列表。App 与 GitHub Release 使用同一文件，更新服务沿用 GitHub Release 正文。定版时同步更新 README 和仓库版本史。
+
+- 版本提交已存在、标签尚未创建时，可重跑原发布任务。后续 main 推送若沿用这个待发布版本，CI 会再次与历史发布版本核对后继续。
+- GitHub Release 已完整、更新服务尚未收录时，可重跑原任务或手动运行 `Retry Publish Signed APK` 并选择标签。流程核对正式 APK 的哈希，再与线上清单比较。线上已有同版本同哈希或更高版本时跳过。
+- 同版本标签已经指向不同提交时，发布会停止。应从标签对应运行恢复，或用更高版本发布新提交。
 
 发布节奏建议：修复版本递增 `versionName` 末位，功能版本递增中位，大改递增首位；`versionCode` 无条件 +1。
 
@@ -97,11 +103,11 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 ### 3.2 应用声明（易漏项，重点检查）
 
-- [ ] **隐私政策 URL**：可公开访问、非 PDF、非地域限制（应用内设置页同步提供）
-  - 必须如实说明：① 本地健康数据存储方式 ② READ/WRITE_CALENDAR 权限的用途与处理 ③ 用户主动导出的 Excel 文件去向（用户所选位置，可能含云盘）
-  - ⚠️ 导出文件为**明文**，隐私政策需明示这一事实
+- [ ] **隐私政策 URL**：可公开访问、非 PDF、非地域限制（应用内使用指南同步提供）
+  - 必须如实说明：① 本地健康数据存储方式 ② READ/WRITE_CALENDAR 权限的用途与同步风险 ③ 用户主动导出的明文 Excel、加密 `.bpx` 备份及医生报告 PDF/摘要图去向 ④ 软件更新检查的 HTTPS 元数据请求与服务端/Cloudflare 请求 IP 日志 ⑤ 服药系统通知的锁屏私密处理与桌面小部件主屏可见性
+  - ⚠️ 明文 Excel、PDF 与摘要图均未加密，隐私政策需明示这一事实；加密备份 `.bpx` 口令不落盘且遗失不可找回
 - [ ] **Health apps declaration**：本应用至少涉及"疾病/状况管理"与"用药/治疗管理"，按实际情况勾选并如实回答后续问题
-- [ ] **Data safety 表单**：即使应用不上传、不共享任何数据，**也必须提交声明**（全部选"不上传/不共享"）
+- [ ] **Data safety 表单**：如实核对本地健康数据不上传/不共享，并按 Google Play 最新规则复核软件更新检查所产生的网络元数据/IP 日志是否需要申报
 - [ ] 目标受众与内容分级：健康类应用按问卷如实填写（含医疗内容提示）
 
 ### 3.3 构建与签名
@@ -116,8 +122,8 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 - [ ] **提醒**：晨/晚提醒触发、精确闹钟授权流程、拒绝授权后的非精确回退、关→开通知权限后提醒是否恢复（已知问题 M2：当前版本需重进设置页，升级前注意）
 - [ ] **日历授权**：开启/关闭"写入系统日历"、授权/拒绝/撤回后行为、重复日程检查
-- [ ] **导入导出**：导出 v3 → 换机导入 → 数据逐项核对（平均值策略、症状、备注）；旧 v2 文件导入兼容性
-- [ ] **数据库升级**：从上一个已发布版本（如 1.8.0）覆盖安装，验证 v6→v7 迁移无数据丢失
+- [ ] **导入导出**：导出 v6（明文 `.xlsx` 与加密 `.bpx`，含单卷与分卷）→ 换机导入 → 数据逐项核对（平均值策略、症状、备注、用药）；旧 v2–v5 文件导入兼容性
+- [ ] **数据库升级**：从上一个已发布版本覆盖安装，验证 Room 升级至 v9 无数据丢失
 - [ ] **系统导航**：三键导航 / 全面屏手势、深色模式、大字模式、无障碍（TalkBack 关键路径）
 
 全部通过后：
@@ -133,7 +139,7 @@ keytool -printcert -jarfile app-release.apk | grep -E "Owner|SHA256"
 
 - [ ] 用 §1.3 的 `assembleRelease` 产物（**不是** debug 包，也**不是** Play 用的 AAB）
 - [ ] 首次分发时向对方说明：这是自签名应用，安装需允许"未知来源"，后续更新**必须用同一把密钥签名**的 APK 才能覆盖安装
-- [ ] 分发文件命名建议：`blood-pressure-record-v2.0.1-release.apk`（含版本号，避免混淆）
+- [ ] 分发文件命名建议：`blood-pressure-record-v<versionName>-release.apk`（例如 `blood-pressure-record-v2.3.13-release.apk`，含版本号，避免混淆）
 - [ ] 分发渠道：**GitHub Releases**（正式 APK/AAB 不提交到源码目录；如需临时转发，可再通过网盘 / 微信发送 Release 中的 APK）
 - [ ] 升级分发：直接发新版本 APK，用户覆盖安装即可（签名一致时数据保留）
 

@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +56,7 @@ import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.ExpandableSection
 import com.example.bloodpressurerecord.ui.common.RoundIconBadge
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
 import com.example.bloodpressurerecord.ui.home.BpZoneTargetSheet
@@ -67,7 +70,6 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onOpenProfile: () -> Unit,
     onOpenReminder: () -> Unit,
-    onOpenDisplay: () -> Unit = {},
     onOpenDataManagement: () -> Unit,
     onOpenInfo: () -> Unit
 ) {
@@ -110,15 +112,19 @@ fun SettingsScreen(
             DataCard {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     val profileInteraction = remember { MutableInteractionSource() }
+                    val profileShape = RoundedCornerShape(16.dp)
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .pressableScale(profileInteraction)
                             .clickable(
                                 interactionSource = profileInteraction,
-                                indication = LocalIndication.current,
+                                indication = null,
                                 onClick = onOpenProfile
                             )
+                            .pressableScale(profileInteraction, pressedScale = 0.98f)
+                            .clip(profileShape)
+                            .indication(profileInteraction, LocalIndication.current)
+                            .focusRing(profileInteraction, profileShape)
                             .heightIn(min = 56.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -163,7 +169,7 @@ fun SettingsScreen(
             }
             SettingsSectionTitle("提醒")
             SettingsGroup {
-                SettingRow("提醒中心", "早晚测量、服药和日历同步", Icons.Outlined.Notifications, onOpenReminder)
+                SettingRow("提醒与服药", "早晚测量、服药计划和日历同步", Icons.Outlined.Notifications, onOpenReminder)
             }
             ExpandableSection(
                 title = "显示",
@@ -225,29 +231,31 @@ fun SettingsScreen(
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     SettingSwitchRow(
-                        "启用高风险提醒",
-                        "任一组读数达到 ≥180 或 ≥120 时提醒",
+                        "高风险保存前确认",
+                        "收缩压 ≥180 或舒张压 ≥120 mmHg 时弹窗提醒；关闭后仅跳过弹窗，首页与记录中的高风险警示仍会保留",
                         Icons.Outlined.WarningAmber,
                         state.highRiskAlertEnabled,
                         viewModel::setHighRiskAlertEnabled
                     )
                 }
             }
-            ExpandableSection(
-                title = "数据",
-                summary = "医生报告 · 备份恢复 · 更新说明",
-                stateKey = "settings-data"
-            ) {
-                SettingsGroup {
-                    SettingRow(
-                        "数据管理与医生报告",
-                        "医生报告 PDF、备份恢复、清空数据",
-                        Icons.Outlined.Folder,
-                        onOpenDataManagement
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    SettingRow("关于与更新说明", "应用功能和版本变化", Icons.Outlined.Info, onOpenInfo)
-                }
+            SettingsSectionTitle("数据与报告")
+            SettingsGroup {
+                SettingRow(
+                    "数据管理与医生报告",
+                    "生成医生报告 PDF、备份恢复、清空数据",
+                    Icons.Outlined.Folder,
+                    onOpenDataManagement
+                )
+            }
+            SettingsSectionTitle("帮助与更新")
+            SettingsGroup {
+                SettingRow(
+                    "使用指南与更新",
+                    "快速上手、血压标准、隐私与版本更新（v${AppInfoContent.CURRENT_VERSION}）",
+                    Icons.Outlined.Info,
+                    onOpenInfo
+                )
             }
             Surface(
                 shape = RoundedCornerShape(22.dp),
@@ -264,12 +272,12 @@ fun SettingsScreen(
                     )
                     Column {
                         Text(
-                            "数据只在这台手机上。",
+                            "健康记录默认保存在本机",
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                         Text(
-                            "不注册、不上传。卸载或换机前请先导出备份。",
+                            "无需注册账号，不提供健康数据云同步。仅检查软件更新会联网；日历同步与文件导出由你主动开启。卸载或换机前请先导出备份。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
@@ -324,15 +332,19 @@ private fun SettingsGroup(content: @Composable () -> Unit) {
 @Composable
 private fun SettingRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
+    val rowShape = RoundedCornerShape(24.dp)
     Row(
         Modifier
             .fillMaxWidth()
-            .pressableScale(interactionSource)
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 onClick = onClick
             )
+            .pressableScale(interactionSource, pressedScale = 0.985f)
+            .clip(rowShape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, rowShape)
             .heightIn(min = 64.dp)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -370,17 +382,21 @@ private fun SettingSwitchRow(
     onChecked: (Boolean) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val rowShape = RoundedCornerShape(24.dp)
     Row(
         Modifier
             .fillMaxWidth()
-            .pressableScale(interactionSource)
             .toggleable(
                 value = checked,
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = null,
                 role = Role.Switch,
                 onValueChange = onChecked
             )
+            .pressableScale(interactionSource, pressedScale = 0.985f)
+            .clip(rowShape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, rowShape)
             .heightIn(min = 64.dp)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically

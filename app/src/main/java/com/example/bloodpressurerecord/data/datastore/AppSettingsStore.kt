@@ -1,6 +1,8 @@
 package com.example.bloodpressurerecord.data.datastore
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +25,8 @@ data class AppSettings(
     /** 服药提醒总开关。默认开启：添加药品后立即生效，符合用户预期。 */
     val medicationReminderEnabled: Boolean = true,
     val medicationCalendarId: Long? = null,
-    val medicationCalendarIncludeDetails: Boolean = false
+    val medicationCalendarIncludeDetails: Boolean = false,
+    val medicationCalendarCleanupPending: Boolean = false
 ) {
     val medicationCalendarSyncEnabled: Boolean get() = medicationCalendarId != null
 }
@@ -33,11 +36,16 @@ data class MedicationAlarmState(
     val legacyIds: Set<Long>
 )
 
-class AppSettingsStore(
-    private val context: Context
+class AppSettingsStore private constructor(
+    private val preferences: DataStore<Preferences>
 ) {
+    constructor(context: Context) : this(context.appDataStore)
+
+    companion object {
+        internal fun using(preferences: DataStore<Preferences>) = AppSettingsStore(preferences)
+    }
     /** 本机趋势显示偏好，不加入健康数据与备份设置格式。null 表示尚未主动选择。 */
-    val trendAggregationPreference: Flow<TrendAggregation?> = context.appDataStore.data.map { prefs ->
+    val trendAggregationPreference: Flow<TrendAggregation?> = preferences.data.map { prefs ->
         when (prefs[PreferenceKeys.TREND_AGGREGATION]) {
             TrendAggregation.RAW.name -> TrendAggregation.RAW
             TrendAggregation.DAILY.name -> TrendAggregation.DAILY
@@ -47,10 +55,10 @@ class AppSettingsStore(
 
     suspend fun setTrendAggregationPreference(aggregation: TrendAggregation) {
         require(aggregation == TrendAggregation.RAW || aggregation == TrendAggregation.DAILY)
-        context.appDataStore.edit { it[PreferenceKeys.TREND_AGGREGATION] = aggregation.name }
+        preferences.edit { it[PreferenceKeys.TREND_AGGREGATION] = aggregation.name }
     }
 
-    val settingsFlow: Flow<AppSettings> = context.appDataStore.data.map { prefs ->
+    val settingsFlow: Flow<AppSettings> = preferences.data.map { prefs ->
         AppSettings(
             largeTextEnabled = prefs[PreferenceKeys.LARGE_TEXT] ?: true,
             highRiskAlertEnabled = prefs[PreferenceKeys.ENABLE_HIGH_RISK_ALERT] ?: true,
@@ -67,105 +75,109 @@ class AppSettingsStore(
             medicationReminderEnabled = prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] ?: true,
             medicationCalendarId = prefs[PreferenceKeys.MEDICATION_CALENDAR_ID],
             medicationCalendarIncludeDetails =
-                prefs[PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS] ?: false
+                prefs[PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS] ?: false,
+            medicationCalendarCleanupPending = prefs[PreferenceKeys.MEDICATION_CALENDAR_ID] == null &&
+                eventsMayExist(prefs)
         )
     }
 
     suspend fun setLargeTextEnabled(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.LARGE_TEXT] = enabled
         }
     }
 
     suspend fun setHighRiskAlertEnabled(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.ENABLE_HIGH_RISK_ALERT] = enabled
         }
     }
 
     suspend fun setShowTrendChart(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.SHOW_TREND_CHART] = enabled
         }
     }
 
     suspend fun setAppearanceMode(mode: String) {
         require(mode in setOf("system", "light", "dark"))
-        context.appDataStore.edit { it[PreferenceKeys.APPEARANCE_MODE] = mode }
+        preferences.edit { it[PreferenceKeys.APPEARANCE_MODE] = mode }
     }
 
     suspend fun setShowBuddy(enabled: Boolean) {
-        context.appDataStore.edit { it[PreferenceKeys.SHOW_BUDDY] = enabled }
+        preferences.edit { it[PreferenceKeys.SHOW_BUDDY] = enabled }
     }
 
     suspend fun setMorningReminderEnabled(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.MORNING_REMINDER_ENABLED] = enabled
         }
     }
 
     suspend fun setMorningReminderTime(value: String) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.MORNING_REMINDER_TIME] = value
         }
     }
 
     /** 原子写入晨间提醒的时间与启用状态，避免分两次 edit 留下中间状态。 */
     suspend fun updateMorningReminder(enabled: Boolean? = null, time: String? = null) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             enabled?.let { prefs[PreferenceKeys.MORNING_REMINDER_ENABLED] = it }
             time?.let { prefs[PreferenceKeys.MORNING_REMINDER_TIME] = it }
         }
     }
 
     suspend fun setEveningReminderEnabled(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] = enabled
         }
     }
 
     suspend fun setEveningReminderTime(value: String) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.EVENING_REMINDER_TIME] = value
         }
     }
 
     /** 原子写入晚间提醒的时间与启用状态，避免分两次 edit 留下中间状态。 */
     suspend fun updateEveningReminder(enabled: Boolean? = null, time: String? = null) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             enabled?.let { prefs[PreferenceKeys.EVENING_REMINDER_ENABLED] = it }
             time?.let { prefs[PreferenceKeys.EVENING_REMINDER_TIME] = it }
         }
     }
 
     suspend fun setDiscardFirstReading(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.DISCARD_FIRST_READING] = enabled
         }
     }
 
     suspend fun setLastSuccessfulExportAt(value: Long) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.LAST_SUCCESSFUL_EXPORT_AT] = value
         }
     }
 
     suspend fun setMedicationReminderEnabled(enabled: Boolean) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.MEDICATION_REMINDER_ENABLED] = enabled
         }
     }
 
     suspend fun setMedicationCalendar(calendarId: Long?, includeDetails: Boolean = false) {
-        context.appDataStore.edit { prefs ->
-            if (prefs.remove(PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED) == true &&
+        preferences.edit { prefs ->
+            val hadLegacySyncEnabled = prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] == true
+            prefs -= PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED
+            if (hadLegacySyncEnabled &&
                 prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] == null
             ) {
                 prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = true
             }
             if (calendarId == null) {
-                prefs.remove(PreferenceKeys.MEDICATION_CALENDAR_ID)
-                prefs.remove(PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS)
+                prefs -= PreferenceKeys.MEDICATION_CALENDAR_ID
+                prefs -= PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS
             } else {
                 prefs[PreferenceKeys.MEDICATION_CALENDAR_ID] = calendarId
                 prefs[PreferenceKeys.MEDICATION_CALENDAR_INCLUDE_DETAILS] = includeDetails
@@ -173,7 +185,7 @@ class AppSettingsStore(
         }
     }
 
-    val medicationAlarms: Flow<MedicationAlarmState> = context.appDataStore.data.map { prefs ->
+    val medicationAlarms: Flow<MedicationAlarmState> = preferences.data.map { prefs ->
         val triggers = buildMap {
             for (entry in prefs[PreferenceKeys.MEDICATION_ALARM_TRIGGERS].orEmpty()) {
                 val id = entry.substringBefore('@').toLongOrNull() ?: continue
@@ -187,20 +199,21 @@ class AppSettingsStore(
     }
 
     /** 创建前记录，清理成功后清除；兼容旧版本已经开启日历同步的用户。 */
-    val calendarEventsMayExist: Flow<Boolean> = context.appDataStore.data.map { prefs ->
+    val calendarEventsMayExist: Flow<Boolean> = preferences.data.map(::eventsMayExist)
+
+    private fun eventsMayExist(prefs: Preferences): Boolean =
         prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST]
             ?: (prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false)
-    }
 
     suspend fun setCalendarEventsMayExist(value: Boolean) {
-        context.appDataStore.edit { it[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = value }
+        preferences.edit { it[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = value }
     }
 
     suspend fun setMedicationAlarms(state: MedicationAlarmState) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             prefs[PreferenceKeys.MEDICATION_ALARM_TRIGGERS] =
                 state.triggers.mapTo(mutableSetOf()) { (id, trigger) -> "$id@$trigger" }
-            if (state.legacyIds.isEmpty()) prefs.remove(PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS)
+            if (state.legacyIds.isEmpty()) prefs -= PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS
             else prefs[PreferenceKeys.SCHEDULED_MEDICATION_TIME_IDS] = state.legacyIds.joinToString(",")
         }
     }
@@ -214,7 +227,7 @@ class AppSettingsStore(
         restoreDisplaySettings: Boolean,
         restoreReminderSettings: Boolean
     ) {
-        context.appDataStore.edit { prefs ->
+        preferences.edit { prefs ->
             if (restoreDisplaySettings) {
                 values["large_text_enabled"]?.toBooleanStrictOrNull()?.let {
                     prefs[PreferenceKeys.LARGE_TEXT] = it
@@ -262,9 +275,8 @@ class AppSettingsStore(
 
     /** 清空全部设置（含上次导出时间），恢复为默认值。 */
     suspend fun clearAll() {
-        context.appDataStore.edit { prefs ->
-            val pendingCalendarCleanup = prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST]
-                ?: (prefs[PreferenceKeys.MEDICATION_CALENDAR_SYNC_ENABLED] ?: false)
+        preferences.edit { prefs ->
+            val pendingCalendarCleanup = eventsMayExist(prefs)
             prefs.clear()
             // 权限撤销时清空数据仍需保留后续清理外部日程的能力。
             if (pendingCalendarCleanup) prefs[PreferenceKeys.MEDICATION_CALENDAR_EVENTS_MAY_EXIST] = true

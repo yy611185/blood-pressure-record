@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import androidx.core.content.ContextCompat
+import com.example.bloodpressurerecord.data.repository.backup.clearLegacyBackupImportFiles
 import com.example.bloodpressurerecord.update.cleanupLegacyUpdateFiles
 import com.example.bloodpressurerecord.widget.AppWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,7 @@ class BloodPressureApplication : Application() {
         registerTimeAndZoneReceiver()
         applicationScope.launch(Dispatchers.IO) {
             cleanupLegacyUpdateFiles(filesDir, cacheDir)
+            runCatching { clearLegacyBackupImportFiles(cacheDir) }
         }
         applicationScope.launch {
             runCatching { appContainer.medicationReminderCoordinator.cleanUnconfiguredCalendarEvents() }
