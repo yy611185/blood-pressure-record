@@ -50,7 +50,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -135,13 +138,14 @@ fun AddMeasurementScreen(
     LaunchedEffect(state.saved, canConsumeSave) {
         if (state.saved && canConsumeSave && isCurrentEntry()) {
             val saved = viewModel.consumeSavedSession() ?: return@LaunchedEffect
+            onSaved()
             onSavedFeedback?.invoke(
                 saved.sessionId,
                 saved.avgSystolic,
                 saved.avgDiastolic,
                 saved.categoryLabel
             )
-            onSaved()
+
         }
     }
 
@@ -151,13 +155,14 @@ fun AddMeasurementScreen(
             viewModel.uiState.value.saved -> {
                 val saved = if (isCurrentEntry()) viewModel.consumeSavedSession() else null
                 if (saved != null) {
+                    onSaved()
                     onSavedFeedback?.invoke(
                         saved.sessionId,
                         saved.avgSystolic,
                         saved.avgDiastolic,
                         saved.categoryLabel
                     )
-                    onSaved()
+
                 }
             }
             viewModel.uiState.value.isDirty -> showExitDialog = true
@@ -449,14 +454,7 @@ fun AddMeasurementScreen(
                 stateKey = "add_measurement_supplement"
             )
 
-            InlineSessionAction(
-                canSave = state.canSave && !state.saved,
-                disabledReason = state.saveDisabledReason,
-                isSaving = state.isSaving,
-                buttonText = "保存记录",
-                onSave = viewModel::onSaveClicked
-            )
-
+            // AUD-21 / D3-4：校验与保存失败提示统一置于保存主按钮正上方，并附 Polite 实时播报
             AnimatedVisibility(
                 visible = state.formMessage.isNotBlank() && !state.isSaving && !state.saved,
                 enter = AppMotion.expandVisibilityEnter(reducedMotion),
@@ -469,9 +467,22 @@ fun AddMeasurementScreen(
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = if (state.formMessageIsError) {
+                        Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    } else {
+                        Modifier
+                    }
                 )
             }
+
+            InlineSessionAction(
+                canSave = state.canSave && !state.saved,
+                disabledReason = state.saveDisabledReason,
+                isSaving = state.isSaving,
+                buttonText = "保存记录",
+                onSave = viewModel::onSaveClicked
+            )
         }
     }
 }

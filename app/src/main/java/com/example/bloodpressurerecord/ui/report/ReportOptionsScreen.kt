@@ -2,15 +2,20 @@ package com.example.bloodpressurerecord.ui.report
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -52,8 +57,11 @@ import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.DateTimePillButton
+import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
+import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import java.time.Instant
 import java.time.LocalDate
@@ -241,8 +249,26 @@ private fun ReportOptionSwitchRow(
     enabled: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val rowShape = RoundedCornerShape(12.dp)
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = AppDimensions.minimumTouchTarget)
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.985f)
+            .clip(rowShape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, rowShape, enabled = enabled)
+            .padding(vertical = 4.dp)
+            .semantics { contentDescription = label },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -261,9 +287,8 @@ private fun ReportOptionSwitchRow(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled,
-            modifier = Modifier.semantics { contentDescription = label }
+            onCheckedChange = null,
+            enabled = enabled
         )
     }
 }
@@ -279,6 +304,7 @@ private fun PeriodChoice(
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = AppDimensions.minimumTouchTarget)
             .clip(RoundedCornerShape(12.dp))
             .selectable(selected, enabled, Role.RadioButton, onClick),
         verticalAlignment = Alignment.CenterVertically

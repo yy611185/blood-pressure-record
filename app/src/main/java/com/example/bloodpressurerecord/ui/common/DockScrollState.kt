@@ -12,6 +12,10 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 
+internal val DockCollapseThreshold = 28.dp
+/** 暂定对称展开阈值（FRZ-01 / AUD-32），待阶段四真机交互手感验收后冻结。 */
+internal val DockExpandThreshold = 28.dp
+
 /** Observes consumed page scroll; never takes distance away from the page or its top bar. */
 @Stable
 class DockScrollState(
@@ -24,6 +28,7 @@ class DockScrollState(
     // Plain fields: pointer samples do not invalidate composition until a threshold is crossed.
     private var distance = 0f
     private var direction = 0
+    private var wasScrolledDown = false
 
     val nestedScrollConnection: NestedScrollConnection = object : NestedScrollConnection {
         override fun onPostScroll(
@@ -44,6 +49,23 @@ class DockScrollState(
         isCompact = false
         distance = 0f
         direction = 0
+    }
+
+    /**
+     * 观察当前活动顶层页面真实的回顶信号（含惯性 fling 滑回顶部）。
+     * 空态报告 null，重建位置基线。
+     */
+    fun onScrollablePositionChanged(canScrollBackward: Boolean?) {
+        if (canScrollBackward == null) {
+            wasScrolledDown = false
+            distance = 0f
+            direction = 0
+        } else if (canScrollBackward) {
+            wasScrolledDown = true
+        } else if (wasScrolledDown) {
+            wasScrolledDown = false
+            expand()
+        }
     }
 
     private fun observe(deltaY: Float) {
@@ -70,6 +92,11 @@ class DockScrollState(
 fun rememberDockScrollState(route: String?): DockScrollState {
     val density = LocalDensity.current
     return remember(route, density) {
-        with(density) { DockScrollState(28.dp.toPx(), 18.dp.toPx()) }
+        with(density) {
+            DockScrollState(
+                collapseThresholdPx = DockCollapseThreshold.toPx(),
+                expandThresholdPx = DockExpandThreshold.toPx()
+            )
+        }
     }
 }

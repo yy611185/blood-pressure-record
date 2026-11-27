@@ -45,6 +45,6 @@ object BpRangeDimensions {
     val markerWidth = 10.dp
     val markerHeight = 6.dp
     val markerRowHeight = 12.dp
-    val labelSize = 11.sp
+    val labelSize = 12.sp
     const val markerAnimationMillis = 400
 }

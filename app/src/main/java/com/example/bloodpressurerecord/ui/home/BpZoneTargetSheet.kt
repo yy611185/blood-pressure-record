@@ -101,6 +101,7 @@ internal fun BpZoneTargetSheet(
                                     modifier = Modifier.weight(1f).semantics { contentDescription = description },
                                     label = { Text(fieldLabel, style = MaterialTheme.typography.labelSmall) },
                                     singleLine = true,
+                                    shape = MaterialTheme.shapes.small,
                                     enabled = !state.saving,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     isError = state.errorRes == R.string.bp_zone_config_invalid

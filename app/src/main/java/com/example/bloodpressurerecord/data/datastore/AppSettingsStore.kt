@@ -5,8 +5,13 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.launch
 
 data class AppSettings(
     val largeTextEnabled: Boolean = true,
@@ -29,6 +34,45 @@ data class AppSettings(
     val medicationCalendarCleanupPending: Boolean = false
 ) {
     val medicationCalendarSyncEnabled: Boolean get() = medicationCalendarId != null
+}
+
+/**
+ * 冷启动首帧轻量偏好快照：仅依赖 DataStore 偏好流（不等待 Room / 药品 / 页面 VM），
+ * 读取异常或超时时提供确定性可恢复降级出口，避免永久停留在启动底板。
+ */
+data class StartupSettingsState(
+    val isReady: Boolean = false,
+    val settings: AppSettings = AppSettings(),
+    val usedFallback: Boolean = false
+)
+
+internal fun observeStartupSettings(
+    source: Flow<AppSettings>,
+    fallbackTimeoutMillis: Long = 1_500L
+): Flow<StartupSettingsState> = flow {
+    val fallback = StartupSettingsState(isReady = true, usedFallback = true)
+    val updates = channelFlow {
+        val timeoutJob = launch {
+            delay(fallbackTimeoutMillis)
+            send(fallback)
+        }
+        source.retryWhen { cause, _ ->
+            if (cause !is Exception) return@retryWhen false
+            send(fallback)
+            delay(1_000)
+            true
+        }.collect { settings ->
+            timeoutJob.cancel()
+            send(StartupSettingsState(isReady = true, settings = settings))
+        }
+    }
+    var last: StartupSettingsState? = null
+    updates.collect { next ->
+        if (next != last && (!next.usedFallback || last == null)) {
+            emit(next)
+            last = next
+        }
+    }
 }
 
 data class MedicationAlarmState(

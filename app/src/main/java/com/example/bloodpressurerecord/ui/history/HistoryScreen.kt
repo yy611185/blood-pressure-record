@@ -6,14 +6,13 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -22,10 +21,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -63,11 +64,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -80,11 +81,14 @@ import androidx.compose.ui.res.stringResource
 import com.example.bloodpressurerecord.R
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.common.AppCompactActionPill
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
+import com.example.bloodpressurerecord.ui.common.AppTopBarIconButton
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.SegmentedPillGroup
+import com.example.bloodpressurerecord.ui.common.SegmentedPillSize
 import com.example.bloodpressurerecord.ui.common.appMotionColor
 import com.example.bloodpressurerecord.ui.common.dockContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.focusRing
@@ -127,12 +131,13 @@ fun HistoryScreen(
     onOpenDetail: (String) -> Unit,
     onAddMeasurement: () -> Unit,
     onOpenSearch: (() -> Unit)? = null,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    onScrollBackwardChanged: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val location by viewModel.location.collectAsStateWithLifecycle()
     var showMonthPicker by remember { mutableStateOf(false) }
-    // 双击带备注红点的日期：选中后等当天记录加载完成，滚动到第一条带备注的记录卡片。
+    // 选中日显式「定位备注」请求：仅作用于发起请求时的当前日期，切换日期/月份/模式立即作废过期请求（AUD-25 / S8）。
     var pendingNoteScrollDate by remember { mutableStateOf<LocalDate?>(null) }
 
     if (showMonthPicker) {
@@ -146,6 +151,7 @@ fun HistoryScreen(
                     onClick = {
                         pickerState.selectedDateMillis?.let {
                             val date = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()
+                            pendingNoteScrollDate = null
                             viewModel.cancelLocation()
                             viewModel.showMonth(YearMonth.from(date))
                         }
@@ -225,8 +231,20 @@ fun HistoryScreen(
     }
     // 日历卡较高，快速回滚到列表顶部时部分设备不会再派发足够的反向滚动量。
     // 以列表真实位置兜底复位，确保“历史记录”标题一定能重新显示。
-    LaunchedEffect(listState.canScrollBackward) {
+    LaunchedEffect(listState.canScrollBackward, onBack) {
         if (!listState.canScrollBackward) topBarScroll.expand()
+        if (onBack == null) {
+            onScrollBackwardChanged(listState.canScrollBackward)
+        }
+    }
+    LaunchedEffect(uiState.viewMode, uiState.selectedDate, uiState.displayedMonth) {
+        val targetDate = pendingNoteScrollDate ?: return@LaunchedEffect
+        if (uiState.viewMode != HistoryViewMode.CALENDAR ||
+            uiState.selectedDate != targetDate ||
+            uiState.displayedMonth != YearMonth.from(targetDate)
+        ) {
+            pendingNoteScrollDate = null
+        }
     }
     LaunchedEffect(
         pendingNoteScrollDate,
@@ -246,8 +264,10 @@ fun HistoryScreen(
         }
         val notedIndex = calendarRecords.indexOfFirst {
             it.noteSummary != HistoryViewModel.NO_NOTE_TEXT
-        }.coerceAtLeast(0)
-        listState.animateScrollToItem(calendarHeaders.size + notedIndex)
+        }
+        if (notedIndex >= 0) {
+            listState.animateScrollToItem(calendarHeaders.size + notedIndex)
+        }
         pendingNoteScrollDate = null
     }
     Column(
@@ -263,9 +283,11 @@ fun HistoryScreen(
             hideOnScroll = topBarScroll.takeIf { onBack == null },
             actions = {
                 if (onOpenSearch != null) {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.note_search_title))
-                    }
+                    AppTopBarIconButton(
+                        icon = Icons.Outlined.Search,
+                        contentDescription = stringResource(R.string.note_search_title),
+                        onClick = onOpenSearch
+                    )
                 }
             }
         )
@@ -300,6 +322,7 @@ fun HistoryScreen(
                         HistoryModeSelector(
                             selected = uiState.viewMode,
                             onSelected = {
+                                pendingNoteScrollDate = null
                                 viewModel.cancelLocation()
                                 viewModel.setViewMode(it)
                             }
@@ -315,32 +338,54 @@ fun HistoryScreen(
                                 selectedDate = uiState.selectedDate,
                                 today = uiState.today,
                                 onPreviousMonth = {
+                                    pendingNoteScrollDate = null
                                     viewModel.cancelLocation()
                                     viewModel.showPreviousMonth()
                                 },
                                 onNextMonth = {
+                                    pendingNoteScrollDate = null
                                     viewModel.cancelLocation()
                                     viewModel.showNextMonth()
                                 },
                                 onChooseMonth = { showMonthPicker = true },
                                 onJumpToToday = {
+                                    pendingNoteScrollDate = null
                                     viewModel.cancelLocation()
                                     viewModel.openDateWhenAvailable(uiState.today)
                                 },
                                 onDateSelected = {
+                                    pendingNoteScrollDate = null
                                     viewModel.cancelLocation()
                                     viewModel.selectDate(it)
-                                },
-                                onDateDoubleClick = { date ->
-                                    viewModel.cancelLocation()
-                                    pendingNoteScrollDate = date
-                                    viewModel.selectDate(date)
                                 }
                             )
                         }
                     }
                     CalendarHeader.DAY -> item(key = "history:day") {
-                        SelectedDaySummary(uiState)
+                        val notedKeys = remember(calendarRecords) {
+                            calendarRecords
+                                .filter { it.noteSummary != HistoryViewModel.NO_NOTE_TEXT }
+                                .map { calendarSessionKey(it.id) }
+                        }
+                        val allNotesFullyVisible = notedKeys.isNotEmpty() && run {
+                            val layout = listState.layoutInfo
+                            val visibleByKey = layout.visibleItemsInfo.associateBy { it.key }
+                            layout.viewportEndOffset > 0 && notedKeys.all { key ->
+                                val info = visibleByKey[key] ?: return@all false
+                                info.offset >= layout.viewportStartOffset &&
+                                    info.offset + info.size <= layout.viewportEndOffset
+                            }
+                        }
+                        SelectedDaySummary(
+                            state = uiState,
+                            showLocateNote = notedKeys.isNotEmpty() && !allNotesFullyVisible,
+                            onLocateNote = {
+                                uiState.selectedDate?.let { date ->
+                                    viewModel.cancelLocation()
+                                    pendingNoteScrollDate = date
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -467,7 +512,8 @@ private fun RecentPeriodSelector(
             RecentPeriod.THIS_MONTH to stringResource(R.string.history_period_month)
         ),
         selected = selected,
-        onSelected = onSelected
+        onSelected = onSelected,
+        size = SegmentedPillSize.Compact
     )
 }
 
@@ -475,7 +521,8 @@ private fun RecentPeriodSelector(
 private fun <T> SelectionRow(
     options: List<Pair<T, String>>,
     selected: T,
-    onSelected: (T) -> Unit
+    onSelected: (T) -> Unit,
+    size: SegmentedPillSize = SegmentedPillSize.Primary
 ) {
     val selectedIndex = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
     // 使用分段胶囊组件，保留一致的视觉与无障碍语义。
@@ -483,10 +530,12 @@ private fun <T> SelectionRow(
         options = options.map { it.second },
         selectedIndex = selectedIndex,
         onSelect = { index -> options.getOrNull(index)?.let { onSelected(it.first) } },
+        size = size,
         horizontalPadding = AppSpacing.small
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecentSummaryCard(
     period: RecentPeriod,
@@ -498,33 +547,48 @@ private fun RecentSummaryCard(
         stringResource(R.string.history_period_month)
     }
     DataCard {
-        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.medium)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (summary != null) {
+                    Text(
+                        "${summary.startDate.format(DateTimeFormatter.ofPattern("yyyy年M月d日"))} 至 " +
+                            summary.endDateInclusive.format(DateTimeFormatter.ofPattern("M月d日")),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TabularFeatureSettings),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
+                }
+            }
             if (summary != null) {
-                Text(
-                    "${summary.startDate.format(DateTimeFormatter.ofPattern("yyyy年M月d日"))} 至 " +
-                        summary.endDateInclusive.format(DateTimeFormatter.ofPattern("M月d日")),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text("测量次数：${summary.recordCount} 次")
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(AppSpacing.large)
                 ) {
                     SummaryValue(
                         label = "平均高压（收缩压）",
-                        value = summary.averageSystolic?.let { "$it mmHg" } ?: "--",
+                        value = summary.averageSystolic?.let { "$it mmHg" } ?: "—",
                         modifier = Modifier.weight(1f)
                     )
                     SummaryValue(
                         label = "平均低压（舒张压）",
-                        value = summary.averageDiastolic?.let { "$it mmHg" } ?: "--",
+                        value = summary.averageDiastolic?.let { "$it mmHg" } ?: "—",
                         modifier = Modifier.weight(1f)
                     )
                 }
-                summary.averagePulse?.let { Text("平均脉搏：$it 次/分") }
-                Text("高风险记录：${summary.highRiskCount} 条")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.large),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+                ) {
+                    SummaryMetaItem("测量次数", "${summary.recordCount} 次")
+                    summary.averagePulse?.let { SummaryMetaItem("平均脉搏", "$it 次/分") }
+                    SummaryMetaItem("高风险记录", "${summary.highRiskCount} 次")
+                }
             }
         }
     }
@@ -532,13 +596,39 @@ private fun RecentSummaryCard(
 
 @Composable
 private fun SummaryValue(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+            fontFamily = NumberFontFamily,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun SummaryMetaItem(label: String, value: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            "$label：",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TabularFeatureSettings),
+            fontFamily = NumberFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -554,8 +644,7 @@ private fun CalendarMonth(
     onNextMonth: () -> Unit,
     onChooseMonth: () -> Unit,
     onJumpToToday: () -> Unit,
-    onDateSelected: (LocalDate?) -> Unit,
-    onDateDoubleClick: (LocalDate) -> Unit
+    onDateSelected: (LocalDate?) -> Unit
 ) {
     val reducedMotion = LocalReducedMotion.current
     // 与 CalendarMonthLayout 一致：周一开头。
@@ -569,7 +658,6 @@ private fun CalendarMonth(
         stringResource(R.string.weekday_sunday)
     )
     val currentOnDateSelected by rememberUpdatedState(onDateSelected)
-    val currentOnDateDoubleClick by rememberUpdatedState(onDateDoubleClick)
     val monthRecordCount = summaries.values.sumOf { it.recordCount }
     val targetDays = if (targetSystolic != null && targetDiastolic != null) {
         summaries.values.count {
@@ -618,14 +706,15 @@ private fun CalendarMonth(
                                     fontFeatureSettings = TabularFeatureSettings
                                 ),
                                 fontFamily = NumberFontFamily,
-                                fontWeight = FontWeight.ExtraBold
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                         Icon(
                             Icons.Default.ArrowDropDown,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     Text(
@@ -706,9 +795,6 @@ private fun CalendarMonth(
                                 val onCellClick = remember(date) {
                                     { currentOnDateSelected(date) }
                                 }
-                                val onCellDoubleClick = remember(date) {
-                                    { currentOnDateDoubleClick(date) }
-                                }
                                 key(date) {
                                     CalendarDay(
                                         date = date,
@@ -717,7 +803,6 @@ private fun CalendarMonth(
                                         today = today == date,
                                         currentDate = today,
                                         onClick = onCellClick,
-                                        onDoubleClick = onCellDoubleClick,
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
@@ -748,7 +833,6 @@ private class SelectionPulseTracker(initialSelected: Boolean) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CalendarDay(
     date: LocalDate,
@@ -756,7 +840,6 @@ internal fun CalendarDay(
     selected: Boolean,
     today: Boolean,
     onClick: () -> Unit,
-    onDoubleClick: () -> Unit,
     modifier: Modifier = Modifier,
     currentDate: LocalDate = LocalDate.now()
 ) {
@@ -766,7 +849,7 @@ internal fun CalendarDay(
             append("${date.monthValue}月${date.dayOfMonth}日")
             if (today) append("，今天")
             if (summary != null) {
-                append("，有${summary.recordCount}条记录，可选择")
+                append("，有${summary.recordCount}次测量，可选择")
                 if (summary.averageSystolic != null && summary.averageDiastolic != null) {
                     append("，平均${summary.averageSystolic}/${summary.averageDiastolic}")
                     summary.category?.let { append("，${com.example.bloodpressurerecord.ui.common.CategoryPresentation.label(it)}") }
@@ -807,7 +890,11 @@ internal fun CalendarDay(
             selectionScale.animateTo(1f, calendarSelectionHalf)
         }
     }
-    val contentColor = if (summary != null) grade.second else MaterialTheme.colorScheme.onSurfaceVariant
+    val contentColor = when {
+        summary != null -> grade.second
+        today -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     val interactionSource = remember { MutableInteractionSource() }
     var cellModifier = modifier
         .heightIn(min = AppDimensions.calendarDayMinHeight)
@@ -816,48 +903,38 @@ internal fun CalendarDay(
             role = Role.Button
             this.selected = selected
             if (!enabled) disabled()
-            if (enabled && summary?.hasNote == true) {
-                customActions = listOf(CustomAccessibilityAction("定位到备注记录") {
-                    onDoubleClick()
-                    true
-                })
-            }
         }
     if (enabled) {
         cellModifier = cellModifier
-            .combinedClickable(
+            .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick,
-                onDoubleClick = if (summary?.hasNote == true) onDoubleClick else null
+                onClick = onClick
             )
             .pressableScale(interactionSource, enabled = true, pressedScale = 0.92f)
             .focusRing(interactionSource, RoundedCornerShape(15.dp), inset = 2.dp)
     }
 
     Box(cellModifier, contentAlignment = Alignment.Center) {
-        var circleModifier = Modifier
+        // AUD-05：互斥单层边框（selected -> 2.dp primary，today && !selected -> 1.5.dp outline），
+        // 同时通过今日底部主色微条与 ExtraBold 字重在 today && selected 时清晰保留「今天」地标身份。
+        val cellShape = RoundedCornerShape(13.dp)
+        val circleModifier = Modifier
             .size(AppDimensions.calendarDaySize)
             .graphicsLayer {
                 val s = if (reducedMotion) 1f else selectionScale.value
                 scaleX = s
                 scaleY = s
             }
-            .clip(RoundedCornerShape(13.dp))
+            .clip(cellShape)
             .background(background)
-        if (today) {
-            circleModifier = circleModifier.border(
-                BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant),
-                RoundedCornerShape(13.dp)
+            .then(
+                when {
+                    selected -> Modifier.border(BorderStroke(2.dp, MaterialTheme.colorScheme.primary), cellShape)
+                    today -> Modifier.border(BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline), cellShape)
+                    else -> Modifier
+                }
             )
-        }
-        if (selected) {
-            // 选中态用暖色主色，避免日历里出现近黑色描边。
-            circleModifier = circleModifier.border(
-                BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                RoundedCornerShape(13.dp)
-            )
-        }
         Box(circleModifier, contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -865,7 +942,11 @@ internal fun CalendarDay(
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = NumberFontFamily,
                     color = contentColor,
-                    fontWeight = if (summary != null || selected) FontWeight.Bold else FontWeight.Normal
+                    fontWeight = when {
+                        today -> FontWeight.ExtraBold
+                        summary != null || selected -> FontWeight.Bold
+                        else -> FontWeight.Normal
+                    }
                 )
                 if (summary != null) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -875,11 +956,25 @@ internal fun CalendarDay(
                     }
                 }
             }
+            if (today) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
+                        .size(width = 8.dp, height = 2.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                )
+            }
         }
-        // 备注使用中性文档标记，避免与高风险警示争夺红色语义。
+        // AUD-12：备注使用沉稳中性暖灰标记，不再使用红色争夺高风险警示语义。
         if (summary?.hasNote == true) {
-            Box(Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = 3.dp)
-                .size(5.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 4.dp, top = 3.dp)
+                    .size(5.dp)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
+            )
         }
         if (summary?.containsHighRisk == true) {
             Text(
@@ -893,30 +988,37 @@ internal fun CalendarDay(
     }
 }
 
-/** 日历图例：圆角方色块表达 6 档分级、圆点表达有备注、红色 ! 表达高风险，与日历格一一对应。 */
+/** 日历图例：圆角方色块表达 6 档分级（配 1.2.dp 同级细描边）、中性圆点表达有备注、红色 ! 表达高风险。 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CalendarLegend() {
+    val palette = LocalBpGradePalette.current
     FlowRow(
         modifier = Modifier.fillMaxWidth().padding(top = AppSpacing.small),
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.medium),
         verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
     ) {
-        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.NORMAL, false).first, label = "正常")
-        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.HIGH_NORMAL, false).first, label = "正常高值")
-        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.STAGE1, false).first, label = "1级")
-        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.STAGE2, false).first, label = "2级")
-        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.STAGE3, false).first, label = "3级")
-        LegendSwatchItem(color = historyGradeColors(BloodPressureCategory.LOW, false).first, label = "偏低")
-        LegendDotItem(color = MaterialTheme.colorScheme.primary, label = "有备注")
+        LegendSwatchItem(fillColor = palette.normal.soft, borderColor = palette.normal.mid, label = "正常")
+        LegendSwatchItem(fillColor = palette.highNormal.soft, borderColor = palette.highNormal.mid, label = "正常高值")
+        LegendSwatchItem(fillColor = palette.stage1.soft, borderColor = palette.stage1.mid, label = "1级")
+        LegendSwatchItem(fillColor = palette.stage2.soft, borderColor = palette.stage2.mid, label = "2级")
+        LegendSwatchItem(fillColor = palette.stage3.soft, borderColor = palette.stage3.mid, label = "3级")
+        LegendSwatchItem(fillColor = palette.low.soft, borderColor = palette.low.mid, label = "偏低")
+        LegendDotItem(color = MaterialTheme.colorScheme.onSurfaceVariant, label = "有备注")
         LegendExclamationItem(color = MaterialTheme.colorScheme.error, label = "高风险")
     }
 }
 
 @Composable
-private fun LegendSwatchItem(color: Color, label: String) {
+private fun LegendSwatchItem(fillColor: Color, borderColor: Color, label: String) {
+    val swatchShape = RoundedCornerShape(3.dp)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(11.dp).background(color, RoundedCornerShape(3.dp)))
+        Box(
+            Modifier
+                .size(11.dp)
+                .background(fillColor, swatchShape)
+                .border(1.2.dp, borderColor, swatchShape)
+        )
         Spacer(Modifier.width(5.dp))
         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -961,29 +1063,50 @@ private fun historyGradeColors(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SelectedDaySummary(state: HistoryUiState) {
+internal fun SelectedDaySummary(
+    state: HistoryUiState,
+    showLocateNote: Boolean = false,
+    onLocateNote: () -> Unit = {}
+) {
     val date = state.selectedDate ?: return
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+    val isToday = date == state.today
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            date.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINA)),
+            date.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINA)) +
+                if (isToday) " · 今天" else "",
             style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.ExtraBold
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.align(Alignment.CenterVertically)
         )
-        if (state.selectedDayRecords.isNotEmpty()) {
-            Text(
-                pluralStringResource(R.plurals.measurement_count, state.selectedDayRecords.size, state.selectedDayRecords.size),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.align(Alignment.CenterVertically)
+        ) {
+            if (state.selectedDayRecords.isNotEmpty()) {
+                Text(
+                    pluralStringResource(R.plurals.measurement_count, state.selectedDayRecords.size, state.selectedDayRecords.size),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (showLocateNote) {
+                AppCompactActionPill(
+                    text = "定位备注",
+                    onClick = onLocateNote
+                )
+            }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HistorySessionCard(
     session: HistorySessionItemUi,
@@ -1004,68 +1127,114 @@ fun HistorySessionCard(
         reducedMotion = reducedMotion,
         label = "historySessionBorder"
     )
+    val pulseDisplayText = remember(session.avgPulseText) {
+        when {
+            session.avgPulseText == "--" || session.avgPulseText == "—" -> "脉搏 —"
+            session.avgPulseText.endsWith("次/分") -> "脉搏 ${session.avgPulseText}"
+            else -> "脉搏 ${session.avgPulseText} 次/分"
+        }
+    }
     DataCard(
         onClick = onClick,
         containerColor = background,
         modifier = if (highlighted) {
-            Modifier.border(1.5.dp, borderColor, MaterialTheme.shapes.medium)
+            Modifier.border(1.5.dp, borderColor, MaterialTheme.shapes.large)
         } else {
             Modifier
         }
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                Column(modifier = Modifier.width(54.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        session.measuredAtText,
-                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TabularFeatureSettings),
-                        fontFamily = NumberFontFamily,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        session.scene,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2
-                    )
-                }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        session.avgBloodPressureText,
-                        style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TabularFeatureSettings),
-                        fontFamily = NumberFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                    Text(
-                        "脉搏 ${session.avgPulseText}",
-                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    StatusChip(text = session.categoryText, isAbnormal = visualStatus.name != "NORMAL", status = visualStatus)
-                    if (session.containsHighRiskReading) {
-                        StatusChip(text = "高风险", isAbnormal = true, status = riskStatus)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val fontScale = LocalDensity.current.fontScale
+            val compactStack = maxWidth < 250.dp * fontScale
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.small)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .widthIn(min = 54.dp)
+                                .alignBy(FirstBaseline),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                session.measuredAtText,
+                                style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = TabularFeatureSettings),
+                                fontFamily = NumberFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Text(
+                                session.scene,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .alignBy(FirstBaseline),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                session.avgBloodPressureText,
+                                modifier = Modifier.semantics {
+                                    contentDescription = "血压 ${session.avgBloodPressureText} mmHg"
+                                },
+                                style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+                                fontFamily = NumberFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Text(
+                                pulseDisplayText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (!compactStack) {
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            StatusChip(text = session.categoryText, isAbnormal = visualStatus.name != "NORMAL", status = visualStatus)
+                            if (session.containsHighRiskReading) {
+                                StatusChip(text = "高风险", isAbnormal = true, status = riskStatus)
+                            }
+                        }
                     }
                 }
-            }
-            if (session.noteSummary != HistoryViewModel.NO_NOTE_TEXT) {
-                Text(
-                    "“${session.noteSummary}”",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (compactStack) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        StatusChip(text = session.categoryText, isAbnormal = visualStatus.name != "NORMAL", status = visualStatus)
+                        if (session.containsHighRiskReading) {
+                            StatusChip(text = "高风险", isAbnormal = true, status = riskStatus)
+                        }
+                    }
+                }
+                if (session.noteSummary != HistoryViewModel.NO_NOTE_TEXT) {
+                    Text(
+                        "“${session.noteSummary}”",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

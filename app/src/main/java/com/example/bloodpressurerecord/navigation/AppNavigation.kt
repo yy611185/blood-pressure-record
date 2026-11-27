@@ -92,7 +92,6 @@ import com.example.bloodpressurerecord.update.rememberUpdatePlatformActions
 import java.time.LocalDate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 private val TopLevelRoutes = setOf(
@@ -293,9 +292,18 @@ fun BloodPressureAppRoot(
     ) && !trendFullscreen
     val updatePromptAllowed = updateForeground && safeUpdateRoute && !dataActionBusy &&
         pendingDestination == null && pendingMedicationConfirmation == null
-    val snackbar = remember { SnackbarHostState() }
-    val undoSnackbar = remember { SnackbarHostState() }
-    val updateActions = rememberUpdatePlatformActions(updateVm, snackbar)
+    val rootSnackbarHostState = remember { SnackbarHostState() }
+    val snackbarCoordinator = remember(scope, rootSnackbarHostState, undoManager) {
+        RootSnackbarCoordinator(
+            scope = scope,
+            hostState = rootSnackbarHostState,
+            onUndoAction = undoManager::undoCurrentPromptAsync,
+            onUndoNaturalDismiss = undoManager::onPromptDismissedAsync
+        )
+    }
+    val updateActions = rememberUpdatePlatformActions(updateVm) { message ->
+        snackbarCoordinator.showSimpleMessage(message)
+    }
 
     fun popIfCurrent(entry: NavBackStackEntry) {
         if (navController.currentBackStackEntry == entry) {
@@ -383,26 +391,13 @@ fun BloodPressureAppRoot(
         navigatedMedConfirmRequest = request
     }
 
-    // 全局删除撤销提示与恢复结果反馈（独立于单页 ViewModel 生命周期）。
-    LaunchedEffect(currentUndoPrompt?.tokenId) {
-        val prompt = currentUndoPrompt ?: return@LaunchedEffect
-        val result = undoSnackbar.showSnackbar(
-            message = prompt.message,
-            actionLabel = "撤销",
-            duration = SnackbarDuration.Long
-        )
-        when (result) {
-            SnackbarResult.ActionPerformed -> undoManager.undoAsync(prompt.tokenId)
-            SnackbarResult.Dismissed -> undoManager.onPromptDismissedAsync(prompt.tokenId)
-        }
+    // 全局删除撤销提示与恢复结果反馈（经 B3 单通道调度器保障删除撤销严格高优先且不被普通提示误清栈）。
+    LaunchedEffect(currentUndoPrompt) {
+        snackbarCoordinator.onUndoPromptChanged(currentUndoPrompt)
     }
-    LaunchedEffect(undoManager) {
+    LaunchedEffect(undoManager, snackbarCoordinator) {
         undoManager.feedback.collect { feedback ->
-            snackbar.currentSnackbarData?.dismiss()
-            snackbar.showSnackbar(
-                message = feedback.message,
-                duration = if (feedback.isError) SnackbarDuration.Long else SnackbarDuration.Short
-            )
+            snackbarCoordinator.enqueueUndoFeedback(feedback)
         }
     }
 
@@ -447,10 +442,10 @@ fun BloodPressureAppRoot(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = {
-            Column(Modifier.padding(bottom = snackbarBottomPadding)) {
-                SnackbarHost(snackbar)
-                SnackbarHost(undoSnackbar)
-            }
+            SnackbarHost(
+                hostState = rootSnackbarHostState,
+                modifier = Modifier.padding(bottom = snackbarBottomPadding)
+            )
         },
         // 系统栏 inset 全部交给页面自己处理（见 ui/common/AppInsets.kt）：
         // 根布局只做容器，避免出现「innerPadding + 页面 navigationBarsPadding」的重复叠加。
@@ -520,6 +515,27 @@ fun BloodPressureAppRoot(
                         reducedMotion = reducedMotion
                     ) {
                         val dashboardVm: DashboardViewModel = viewModel(factory = factory)
+                        LaunchedEffect(dashboardVm, snackbarCoordinator) {
+                            dashboardVm.medicationFeedback.collect { feedback ->
+                                if (feedback.success) {
+                                    snackbarCoordinator.showNormal(
+                                        NormalSnackbarRequest(
+                                            message = if (feedback.taken) {
+                                                "已打卡 · ${feedback.slot.name}"
+                                            } else {
+                                                "已取消打卡 · ${feedback.slot.name}"
+                                            },
+                                            actionLabel = "撤销",
+                                            duration = SnackbarDuration.Short,
+                                            isStillValid = { dashboardVm.isMedicationFeedbackCurrent(feedback) },
+                                            onAction = { dashboardVm.undoMedicationToggle(feedback) }
+                                        )
+                                    )
+                                } else {
+                                    snackbarCoordinator.showSimpleMessage("保存打卡失败，请重试")
+                                }
+                            }
+                        }
                         val openHistoryDate: (LocalDate) -> Unit = { targetDate ->
                             if (navController.currentBackStackEntry == backStack) {
                                 navController.navigate(AppDestination.History.route) {
@@ -553,6 +569,11 @@ fun BloodPressureAppRoot(
                             onOpenSessionDetail = { sessionId ->
                                 if (sessionId.isNotBlank()) {
                                     navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))
+                                }
+                            },
+                            onScrollBackwardChanged = { canScrollBackward ->
+                                if (current == AppDestination.Measure.route) {
+                                    dockScrollState.onScrollablePositionChanged(canScrollBackward)
                                 }
                             }
                         )
@@ -602,7 +623,6 @@ fun BloodPressureAppRoot(
                     }
                 ) { backStack ->
                     val homeVm: HomeViewModel = viewModel(factory = factory)
-                    var pendingSaveTicket by remember { mutableStateOf<SaveEditActionTicket?>(null) }
                     AddMeasurementScreen(
                         viewModel = homeVm,
                         canConsumeSave = currentEntry == backStack,
@@ -621,43 +641,44 @@ fun BloodPressureAppRoot(
                                 } else {
                                     navController.popBackStack()
                                 }
-                                pendingSaveTicket?.arm(
-                                    entryId = navController.currentBackStackEntry?.id,
-                                    route = navController.currentDestination?.route
-                                )
-                            } else {
-                                pendingSaveTicket?.invalidate()
                             }
                         },
                         onSavedFeedback = { sessionId, avgSys, avgDia, categoryLabel ->
-                            pendingSaveTicket?.invalidate()
-                            val ticket = SaveEditActionTicket(sessionId)
-                            pendingSaveTicket = ticket
+                            val ticket = SaveEditActionTicket(sessionId).apply {
+                                arm(navController.currentBackStackEntry?.id, navController.currentDestination?.route)
+                            }
                             val bpText = if (avgSys != null && avgDia != null) {
                                 "$avgSys/$avgDia mmHg（$categoryLabel）"
                             } else {
                                 "血压记录"
                             }
-                            scope.launch {
-                                snackbar.currentSnackbarData?.dismiss()
-                                val snackbarJob = coroutineContext.job
-                                val listener = NavController.OnDestinationChangedListener { controller, destination, _ ->
-                                    if (ticket.onDestinationChanged(
-                                            currentEntryId = controller.currentBackStackEntry?.id,
-                                            currentRoute = destination.route
-                                        )
-                                    ) {
-                                        snackbarJob.cancel()
-                                    }
-                                }
-                                navController.addOnDestinationChangedListener(listener)
-                                try {
-                                    val result = snackbar.showSnackbar(
-                                        message = "已保存 $bpText",
-                                        actionLabel = if (ticket.validSessionId != null) "再改改" else null,
-                                        duration = SnackbarDuration.Short
+                            var handle: NormalSnackbarHandle? = null
+                            val listener = NavController.OnDestinationChangedListener { controller, destination, _ ->
+                                if (ticket.onDestinationChanged(
+                                        currentEntryId = controller.currentBackStackEntry?.id,
+                                        currentRoute = destination.route
                                     )
-                                    if (result == SnackbarResult.ActionPerformed) {
+                                ) {
+                                    handle?.cancelIfActiveOrQueued()
+                                }
+                            }
+                            navController.addOnDestinationChangedListener(listener)
+                            handle = snackbarCoordinator.showNormal(
+                                NormalSnackbarRequest(
+                                    message = "已保存 $bpText",
+                                    actionLabel = if (ticket.validSessionId != null) "再改改" else null,
+                                    duration = SnackbarDuration.Short,
+                                    isStillValid = {
+                                        val entryId = navController.currentBackStackEntry?.id
+                                        val route = navController.currentDestination?.route
+                                        ticket.validSessionId == null || (
+                                            entryId != null &&
+                                                entryId == ticket.landingEntryId &&
+                                                route == ticket.landingRoute &&
+                                                trendVm?.fullscreen?.value != true
+                                            )
+                                    },
+                                    onAction = {
                                         val targetRoute = ticket.consumeTargetRoute(
                                             currentEntryId = navController.currentBackStackEntry?.id,
                                             currentRoute = navController.currentDestination?.route,
@@ -668,11 +689,12 @@ fun BloodPressureAppRoot(
                                                 launchSingleTop = true
                                             }
                                         }
+                                    },
+                                    onFinished = {
+                                        navController.removeOnDestinationChangedListener(listener)
                                     }
-                                } finally {
-                                    navController.removeOnDestinationChangedListener(listener)
-                                }
-                            }
+                                )
+                            )
                         }
                     )
                 }
@@ -701,6 +723,11 @@ fun BloodPressureAppRoot(
                             onOpenDetail = { sessionId ->
                                 if (sessionId.isNotBlank()) {
                                     navigateFromEntry(backStack, AppDestination.HistoryDetail.route(sessionId))
+                                }
+                            },
+                            onScrollBackwardChanged = { canScrollBackward ->
+                                if (current == AppDestination.History.route) {
+                                    dockScrollState.onScrollablePositionChanged(canScrollBackward)
                                 }
                             }
                         )
@@ -746,6 +773,11 @@ fun BloodPressureAppRoot(
                             onOpenRecord = { id ->
                                 if (id.isNotBlank()) {
                                     navigateFromEntry(backStack, AppDestination.HistoryDetail.route(id))
+                                }
+                            },
+                            onScrollBackwardChanged = { canScrollBackward ->
+                                if (current == AppDestination.Trend.route && !trendFullscreen) {
+                                    dockScrollState.onScrollablePositionChanged(canScrollBackward)
                                 }
                             }
                         )
@@ -794,13 +826,7 @@ fun BloodPressureAppRoot(
                         onSaved = {
                             if (navController.currentBackStackEntry == backStack) {
                                 navController.popBackStack()
-                                scope.launch {
-                                    snackbar.currentSnackbarData?.dismiss()
-                                    snackbar.showSnackbar(
-                                        message = "修改已保存",
-                                        duration = SnackbarDuration.Short
-                                    )
-                                }
+                                snackbarCoordinator.showSimpleMessage("修改已保存")
                             }
                         },
                         onBack = { popIfCurrent(backStack) }
@@ -819,7 +845,12 @@ fun BloodPressureAppRoot(
                             onOpenProfile = { navigateFromEntry(backStack, AppDestination.SettingsProfile.route) },
                             onOpenReminder = { navigateFromEntry(backStack, AppDestination.SettingsReminder.route) },
                             onOpenDataManagement = { navigateFromEntry(backStack, AppDestination.SettingsDataManagement.route) },
-                            onOpenInfo = { navigateFromEntry(backStack, AppDestination.SettingsInfo.route) }
+                            onOpenInfo = { navigateFromEntry(backStack, AppDestination.SettingsInfo.route) },
+                            onScrollBackwardChanged = { canScrollBackward ->
+                                if (current == AppDestination.Settings.route) {
+                                    dockScrollState.onScrollablePositionChanged(canScrollBackward)
+                                }
+                            }
                         )
                     }
                 }
@@ -829,10 +860,7 @@ fun BloodPressureAppRoot(
                         viewModel = vm,
                         onBack = { popIfCurrent(backStack) },
                         onSavedFeedback = {
-                            scope.launch {
-                                snackbar.currentSnackbarData?.dismiss()
-                                snackbar.showSnackbar("用户资料已保存", duration = SnackbarDuration.Short)
-                            }
+                            snackbarCoordinator.showSimpleMessage("用户资料已保存")
                         }
                     )
                 }
@@ -928,9 +956,7 @@ fun BloodPressureAppRoot(
             },
             onDismiss = { onConsumePendingMedicationConfirmation(pendingMedicationConfirmation) },
             onFeedback = { message ->
-                scope.launch {
-                    snackbar.showSnackbar(message = message, duration = SnackbarDuration.Short)
-                }
+                snackbarCoordinator.showSimpleMessage(message)
             }
         )
     }

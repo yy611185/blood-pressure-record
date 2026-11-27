@@ -64,6 +64,7 @@ internal fun Buddy(
     look: GradeLook,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    externalTapTrigger: Int = 0,
     animateIdle: Boolean = true
 ) {
     val reducedMotion = LocalReducedMotion.current
@@ -103,17 +104,18 @@ internal fun Buddy(
     val tapScaleX = remember { Animatable(1f) }
     val tapScaleY = remember { Animatable(1f) }
     var taps by remember { mutableIntStateOf(0) }
-    var handledTaps by remember { mutableIntStateOf(0) }
-    LaunchedEffect(taps, motionEnabled) {
+    val totalTapSignal = taps + externalTapTrigger
+    var handledTaps by remember { mutableIntStateOf(totalTapSignal) }
+    LaunchedEffect(totalTapSignal, motionEnabled) {
         if (!motionEnabled) {
-            handledTaps = taps
+            handledTaps = totalTapSignal
             tapOffsetDp.snapTo(0f)
             tapScaleX.snapTo(1f)
             tapScaleY.snapTo(1f)
             return@LaunchedEffect
         }
-        if (taps > handledTaps) {
-            handledTaps = taps
+        if (totalTapSignal > handledTaps) {
+            handledTaps = totalTapSignal
             tapScaleX.snapTo(1.08f)
             tapScaleY.snapTo(0.92f)
             tapOffsetDp.snapTo(0f)

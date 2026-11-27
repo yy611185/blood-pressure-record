@@ -25,8 +25,8 @@ object AppDimensions {
     /** 原稿通用卡片内边距。 */
     val cardPadding = 18.dp
     val minimumTouchTarget = 48.dp
-    /** 主按钮高度（暖阳设计：60dp，全药丸）。 */
-    val primaryButtonHeight = 56.dp
+    /** 普通主/次/危险按钮统一高度（表单保存主按钮单独保留 saveButtonHeight = 58.dp）。 */
+    val primaryButtonHeight = 54.dp
     /** 表单保存按钮高度。 */
     val saveButtonHeight = 58.dp
     val calendarDayMinHeight = 48.dp
@@ -153,6 +153,7 @@ data class BpGradeVisual(
 
 data class BpGradePalette(
     val isDark: Boolean,
+    val chartPulse: Color,
     val low: BpGradeVisual,
     val normal: BpGradeVisual,
     val highNormal: BpGradeVisual,
@@ -176,12 +177,19 @@ data class BpGradePalette(
 }
 
 private fun buildBpGradePalette(dark: Boolean): BpGradePalette {
-    fun visual(softHex: Long, inkHex: Long, midHex: Long, bodyHex: Long, mood: String): BpGradeVisual {
+    fun visual(
+        softHex: Long,
+        inkHex: Long,
+        midHex: Long,
+        bodyHex: Long,
+        mood: String,
+        darkInkHex: Long = midHex
+    ): BpGradeVisual {
         val ink = Color(inkHex)
         val mid = Color(midHex)
         return BpGradeVisual(
             soft = if (dark) ink.copy(alpha = 0.24f) else Color(softHex),
-            ink = if (dark) mid else ink,
+            ink = if (dark) Color(darkInkHex) else ink,
             mid = mid,
             body = Color(bodyHex),
             mood = mood
@@ -189,7 +197,8 @@ private fun buildBpGradePalette(dark: Boolean): BpGradePalette {
     }
     return BpGradePalette(
         isDark = dark,
-        low = visual(0xFFE9E9FA, 0xFF55509B, 0xFF8E8BC8, 0xFF9F9CD1, "sleepy"),
+        chartPulse = if (dark) ChartPulseDark else ChartPulseLight,
+        low = visual(0xFFE9E9FA, 0xFF55509B, 0xFF8E8BC8, 0xFF9F9CD1, "sleepy", darkInkHex = 0xFFA3A0DE),
         normal = visual(0xFFDFF4E9, 0xFF287958, 0xFF69C49D, 0xFF85CBA9, "happy"),
         highNormal = visual(0xFFEEF3D7, 0xFF61742E, 0xFFA5BF65, 0xFFB8CE7B, "calm"),
         stage1 = visual(0xFFF7F0CF, 0xFF806625, 0xFFD9B55E, 0xFFE5C470, "meh"),

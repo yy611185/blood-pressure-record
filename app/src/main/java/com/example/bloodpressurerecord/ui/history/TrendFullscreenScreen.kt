@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -68,6 +69,7 @@ import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendRange
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.CategoryPresentation
+import com.example.bloodpressurerecord.ui.common.SegmentedPillSize
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
@@ -207,6 +209,7 @@ private fun TrendFullscreenToolbar(uiState: TrendUiState, viewModel: TrendViewMo
                 TrendAggregationControl(
                     selected = uiState.aggregation,
                     onSelected = viewModel::setAggregation,
+                    size = SegmentedPillSize.Compact,
                     modifier = Modifier.width(196.dp * LocalDensity.current.fontScale)
                 )
                 TrendMenu(uiState.metric.label, TrendMetricType.entries, { it.label }, viewModel::setMetric)
@@ -252,6 +255,21 @@ private fun TrendFullscreenToolbar(uiState: TrendUiState, viewModel: TrendViewMo
                     modifier = Modifier.heightIn(min = 48.dp),
                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
                 ) { Text("明细", style = MaterialTheme.typography.labelLarge, softWrap = false) }
+                val fullscreenTargetSummary = buildTrendTargetSummary(
+                    showSystolic = uiState.metric != TrendMetricType.DIASTOLIC,
+                    showDiastolic = uiState.metric != TrendMetricType.SYSTOLIC,
+                    targetSystolic = uiState.targetSystolic,
+                    targetDiastolic = uiState.targetDiastolic
+                )
+                if (fullscreenTargetSummary != null) {
+                    Text(
+                        text = fullscreenTargetSummary,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 6.dp)
+                    )
+                }
 
                 TrendFullscreenActionsMenu(uiState, viewModel)
             }
@@ -346,7 +364,20 @@ private fun TrendFullscreenActionsMenu(uiState: TrendUiState, viewModel: TrendVi
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("脉搏副图") },
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .width(8.dp)
+                                .height(8.dp)
+                                .background(trendChartPalette().pulse, CircleShape)
+                        )
+                        Text("脉搏副图")
+                    }
+                },
                 trailingIcon = { if (uiState.fullscreenShowPulse) Icon(Icons.Default.Check, contentDescription = "已显示") },
                 onClick = { expanded = false; viewModel.setFullscreenShowPulse(!uiState.fullscreenShowPulse) }
             )

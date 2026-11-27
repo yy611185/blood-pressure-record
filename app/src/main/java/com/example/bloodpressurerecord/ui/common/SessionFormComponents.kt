@@ -85,11 +85,13 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bloodpressurerecord.domain.calculator.CategoryCalculator
+import com.example.bloodpressurerecord.domain.calculator.MeasurementInputRules
 import com.example.bloodpressurerecord.domain.model.BloodPressureCategory
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.AppSpacing
+import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
 import com.example.bloodpressurerecord.util.DateTimeInputFormatter
 import java.time.Instant
@@ -266,7 +268,7 @@ fun DateTimePillButton(
     enabled: Boolean = true
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val shape = MaterialTheme.shapes.large
+    val shape = MaterialTheme.shapes.medium
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -333,14 +335,29 @@ fun MeasurementReadingCard(
 
     val systolic = reading.systolic.toIntOrNull()
     val diastolic = reading.diastolic.toIntOrNull()
+    val pulseVal = reading.pulse.toIntOrNull()
+    val systolicRangeError = systolic != null && systolic !in MeasurementInputRules.SYSTOLIC_RANGE
+    val diastolicRangeError = diastolic != null && diastolic !in MeasurementInputRules.DIASTOLIC_RANGE
+    val pulseRangeError = pulseVal != null && pulseVal !in MeasurementInputRules.PULSE_RANGE
     val relationError = systolic != null && diastolic != null && diastolic >= systolic
-    val showGroupResult = systolic != null && diastolic != null && !relationError
+    val fieldErrorText = when {
+        systolicRangeError -> "高压须在 ${MeasurementInputRules.SYSTOLIC_RANGE.first}–${MeasurementInputRules.SYSTOLIC_RANGE.last} mmHg 之间"
+        diastolicRangeError -> "低压须在 ${MeasurementInputRules.DIASTOLIC_RANGE.first}–${MeasurementInputRules.DIASTOLIC_RANGE.last} mmHg 之间"
+        relationError -> "高压应大于低压，请检查后重试"
+        pulseRangeError -> "脉搏须在 ${MeasurementInputRules.PULSE_RANGE.first}–${MeasurementInputRules.PULSE_RANGE.last} 次/分之间"
+        else -> null
+    }
+    val showGroupResult = systolic != null && diastolic != null && fieldErrorText == null
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    // AUD-28：保持无卡片包裹的满宽三栏录入布局；仅在有删除按钮时维持 48dp 最小热区，无删除按钮时收紧组标题虚高贴合输入框。
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp),
+                .then(
+                    if (removable) Modifier.heightIn(min = AppDimensions.minimumTouchTarget)
+                    else Modifier.padding(top = 2.dp)
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -384,6 +401,7 @@ fun MeasurementReadingCard(
                     accessibleLabel = "第 ${index + 1} 组高压（收缩压）",
                     imeAction = ImeAction.Next,
                     keyboardActions = KeyboardActions(onNext = { runCatching { diaRequester.requestFocus() } }),
+                    isError = systolicRangeError,
                     numberSize = numberSize,
                     enabled = enabled,
                     modifier = fieldModifier.then(
@@ -404,7 +422,7 @@ fun MeasurementReadingCard(
                     accessibleLabel = "第 ${index + 1} 组低压（舒张压）",
                     imeAction = ImeAction.Next,
                     keyboardActions = KeyboardActions(onNext = { runCatching { pulseRequester.requestFocus() } }),
-                    isError = relationError,
+                    isError = relationError || diastolicRangeError,
                     numberSize = numberSize,
                     enabled = enabled,
                     modifier = fieldModifier.focusRequester(diaRequester)
@@ -425,6 +443,7 @@ fun MeasurementReadingCard(
                     keyboardActions = KeyboardActions(
                         onNext = { onAdvanceNextGroup?.invoke() }
                     ),
+                    isError = pulseRangeError,
                     numberSize = numberSize,
                     enabled = enabled,
                     modifier = fieldModifier.focusRequester(pulseRequester)
@@ -456,7 +475,7 @@ fun MeasurementReadingCard(
                 FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.large)
+                        .clip(MaterialTheme.shapes.medium)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
@@ -478,15 +497,17 @@ fun MeasurementReadingCard(
             }
         }
         AnimatedVisibility(
-            visible = relationError,
+            visible = fieldErrorText != null,
             enter = AppMotion.expandVisibilityEnter(reducedMotion),
             exit = AppMotion.expandVisibilityExit(reducedMotion)
         ) {
-            Text(
-                "高压应大于低压，请检查后重试",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
+            fieldErrorText?.let { err ->
+                Text(
+                    err,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
@@ -526,12 +547,6 @@ private fun CompactNumberField(
         reducedMotion = reducedMotion,
         label = "number_field_label_color"
     )
-    // 浅色下 #C2B8AC 与白底/纸底对比度显著增强，深色下直接使用 colors.outline (#7F7973)
-    val unfocusedBorder = if (colors.background.red < 0.5f) {
-        colors.outline
-    } else {
-        androidx.compose.ui.graphics.Color(0xFFB3A99D)
-    }
 
     var textFieldValueState by remember {
         mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
@@ -606,9 +621,10 @@ private fun CompactNumberField(
             keyboardActions = keyboardActions,
             isError = isError,
             singleLine = true,
-            shape = MaterialTheme.shapes.large,
+            shape = MaterialTheme.shapes.medium,
             textStyle = TextStyle(
                 fontSize = numberSize,
+                lineHeight = (numberSize.value * 1.16f).sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 color = colors.onSurface,
@@ -616,9 +632,11 @@ private fun CompactNumberField(
             ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = colors.primary,
-                unfocusedBorderColor = unfocusedBorder,
+                unfocusedBorderColor = colors.outline,
+                errorBorderColor = colors.error,
                 focusedContainerColor = colors.surface,
                 unfocusedContainerColor = colors.surface,
+                disabledContainerColor = colors.surface.copy(alpha = 0.6f),
                 errorContainerColor = colors.surface
             ),
             modifier = Modifier
@@ -635,7 +653,7 @@ private fun CompactNumberField(
         )
         Text(
             unit,
-            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+            style = MaterialTheme.typography.labelSmall,
             color = colors.onSurfaceVariant,
             maxLines = 1
         )
@@ -840,20 +858,22 @@ fun UnsavedChangesDialog(
     onSaveDraft: () -> Unit,
     onDiscard: () -> Unit
 ) {
-    AlertDialog(
+    AppThreeActionDialog(
+        title = "保留未保存内容？",
         onDismissRequest = onContinueEditing,
-        title = { Text("保留未保存内容？") },
-        text = { Text("你可以继续编辑、保存草稿后退出，或放弃本次修改。") },
-        confirmButton = {
-            TextButton(onClick = onContinueEditing) { Text("继续编辑") }
-        },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onSaveDraft) { Text("保存草稿") }
-                TextButton(onClick = onDiscard) { Text("放弃") }
-            }
-        }
-    )
+        primaryText = "继续编辑",
+        onPrimaryClick = onContinueEditing,
+        secondaryText = "保存草稿",
+        onSecondaryClick = onSaveDraft,
+        destructiveText = "放弃",
+        onDestructiveClick = onDiscard
+    ) {
+        Text(
+            "你可以继续编辑、保存草稿后退出，或放弃本次修改。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 private val QuickSymptomTags = listOf("头晕", "头痛", "胸闷", "心慌", "乏力")
@@ -919,7 +939,7 @@ fun ExpandableSupplementCard(
                     enabled = enabled,
                     label = { Text("有没有不舒服？") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.small,
                     minLines = 2
                 )
                 Text(
@@ -946,7 +966,7 @@ fun ExpandableSupplementCard(
                     enabled = enabled,
                     label = { Text("有没有可能影响血压的情况？") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.small,
                     minLines = 2
                 )
                 if (showLegacyNoteField && onLegacyNoteChange != null) {
@@ -956,7 +976,7 @@ fun ExpandableSupplementCard(
                         enabled = enabled,
                         label = { Text("原备注") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = MaterialTheme.shapes.small,
                         minLines = 2
                     )
                 }
@@ -988,7 +1008,7 @@ fun SessionAverageCard(
             ) {
                 Text(
                     "本次平均（共 $measurementCount 组）",
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = TabularFeatureSettings),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (resolvedCategory != null && resolvedCategory != "待计算") {
@@ -1005,6 +1025,7 @@ fun SessionAverageCard(
                 Text(
                     "${systolic ?: "—"} / ${diastolic ?: "—"} mmHg",
                     style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = TabularFeatureSettings),
+                    fontFamily = NumberFontFamily,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -1012,6 +1033,7 @@ fun SessionAverageCard(
                     Text(
                         "脉搏 $avgPulse 次/分",
                         style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TabularFeatureSettings),
+                        fontFamily = NumberFontFamily,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterVertically)
                     )

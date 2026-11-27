@@ -1,7 +1,10 @@
 package com.example.bloodpressurerecord.ui.common
 
 import android.view.KeyEvent
+import android.view.ViewConfiguration
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -290,8 +294,7 @@ class InteractionAndMotionRegressionTest {
                                             selected = daySelected,
                                             today = false,
                                             currentDate = sampleDate,
-                                            onClick = { daySelected = true },
-                                            onDoubleClick = {}
+                                            onClick = { daySelected = true }
                                         )
                                         WheelTimePickerDialog(
                                             title = "选择时间",
@@ -330,7 +333,7 @@ class InteractionAndMotionRegressionTest {
                 composeRule.mainClock.advanceTimeBy(32)
                 reducedMotion = true
                 composeRule.mainClock.advanceTimeByFrame()
-                composeRule.onNodeWithContentDescription("7月25日，有2条记录，可选择，已选择")
+                composeRule.onNodeWithContentDescription("7月25日，有2次测量，可选择，已选择")
                     .assertIsSelected()
 
                 composeRule.onNodeWithText("确定").performClick()
@@ -386,6 +389,107 @@ class InteractionAndMotionRegressionTest {
                 .assertIsDisplayed()
                 .assertIsSelected()
                 .assertHeightIsAtLeast(48.dp)
+        }
+    }
+
+    @Test
+    fun reducedMotion_pressableScaleAndWheelItemsShowImmediatePressFeedbackAndRestore() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            var showWheel by mutableStateOf(false)
+            scenario.onActivity { activity ->
+                activity.setContentView(
+                    androidx.compose.ui.platform.ComposeView(activity).apply {
+                        setContent {
+                            CompositionLocalProvider(LocalReducedMotion provides true) {
+                                BloodPressureRecordTheme(darkTheme = false) {
+                                    Column(
+                                        Modifier
+                                            .background(Color.White)
+                                            .padding(16.dp)
+                                    ) {
+                                        val pressSource = remember { MutableInteractionSource() }
+                                        Box(
+                                            Modifier
+                                                .size(88.dp, 54.dp)
+                                                .testTag("reduced-press-btn")
+                                                .clickable(pressSource, indication = null, onClick = {})
+                                                .pressableScale(pressSource)
+                                                .background(Color(0xFFB94B39))
+                                        )
+                                        if (showWheel) {
+                                            WheelTimePickerDialog(
+                                                title = "按压反馈测试",
+                                                initialHour = 10,
+                                                initialMinute = 30,
+                                                onDismiss = {},
+                                                onConfirm = { _, _ -> }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+
+            composeRule.waitForIdle()
+            composeRule.mainClock.autoAdvance = false
+            try {
+                val btnNode = composeRule.onNodeWithTag("reduced-press-btn")
+                val idlePixels = btnNode.captureToImage().toPixelMap()
+                // 取按钮左侧纯填充区像素（避开居中文字）验证 0ms alpha=0.84f 混合变化
+                val sampleX = (idlePixels.width * 0.12f).toInt().coerceAtLeast(4)
+                val sampleY = idlePixels.height / 2
+                val idleColor = idlePixels[sampleX, sampleY]
+
+                btnNode.performTouchInput { down(center) }
+                composeRule.mainClock.advanceTimeByFrame()
+                val pressedColor = btnNode.captureToImage().toPixelMap()[sampleX, sampleY]
+                assertTrue(
+                    "Reduced motion press must immediately alter button pixel color (idle=$idleColor, pressed=$pressedColor)",
+                    abs(pressedColor.red - idleColor.red) > 0.02f ||
+                        abs(pressedColor.green - idleColor.green) > 0.02f ||
+                        abs(pressedColor.blue - idleColor.blue) > 0.02f
+                )
+
+                btnNode.performTouchInput { up() }
+                composeRule.mainClock.advanceTimeByFrame()
+                val restoredColor = btnNode.captureToImage().toPixelMap()[sampleX, sampleY]
+                assertTrue(
+                    "Button color must restore immediately on release",
+                    abs(restoredColor.red - idleColor.red) < 0.01f &&
+                        abs(restoredColor.green - idleColor.green) < 0.01f &&
+                        abs(restoredColor.blue - idleColor.blue) < 0.01f
+                )
+
+                composeRule.runOnIdle { showWheel = true }
+                composeRule.mainClock.advanceTimeByFrame()
+                composeRule.waitForIdle()
+                val wheelAdjacent = composeRule.onNodeWithContentDescription("9 时")
+                val wheelIdleMap = wheelAdjacent.captureToImage().toPixelMap()
+                val wheelSampleX = (wheelIdleMap.width * 0.15f).toInt().coerceAtLeast(4)
+                val wheelSampleY = wheelIdleMap.height / 2
+                val wheelIdleColor = wheelIdleMap[wheelSampleX, wheelSampleY]
+
+                wheelAdjacent.performTouchInput { down(center) }
+                // Scrollable items wait for gesture arbitration before emitting Press.
+                composeRule.mainClock.advanceTimeBy(ViewConfiguration.getTapTimeout().toLong())
+                composeRule.mainClock.advanceTimeByFrame()
+                val wheelPressedColor = wheelAdjacent.captureToImage().toPixelMap()[wheelSampleX, wheelSampleY]
+                assertTrue(
+                    "Wheel item press must show immediate visual feedback in reduced motion",
+                    abs(wheelPressedColor.red - wheelIdleColor.red) > 0.01f ||
+                        abs(wheelPressedColor.green - wheelIdleColor.green) > 0.01f ||
+                        abs(wheelPressedColor.blue - wheelIdleColor.blue) > 0.01f
+                )
+                wheelAdjacent.performTouchInput { cancel() }
+                composeRule.mainClock.advanceTimeByFrame()
+                val wheelRestored = wheelAdjacent.captureToImage().toPixelMap()[wheelSampleX, wheelSampleY]
+                assertEquals(wheelIdleColor, wheelRestored)
+            } finally {
+                composeRule.mainClock.autoAdvance = true
+            }
         }
     }
 

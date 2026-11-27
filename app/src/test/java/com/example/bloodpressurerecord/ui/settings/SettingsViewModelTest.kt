@@ -26,6 +26,8 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -74,8 +76,10 @@ class SettingsViewModelTest {
         assertEquals("", vm.uiState.value.exportFileName)
         assertFalse(vm.uiState.value.exportEncrypted)
         vm.requestBackupExport()
-        assertTrue(vm.uiState.value.showBackupExportConfirm)
-        vm.prepareBackupExport("new")
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.exportEncrypted)
+        assertNotNull(vm.uiState.value.exportVolumeRequestId)
+        assertEquals(vm.uiState.value.exportVolumeRequestId, vm.uiState.value.autoLaunchExportRequestId)
         val newState = vm.uiState.value
         vm.onExportLocationResult(oldRequest, null)
         assertEquals(newState, vm.uiState.value)
@@ -160,29 +164,28 @@ class SettingsViewModelTest {
         vm.requestBackupExport()
         assertEquals(false, vm.uiState.value.pendingExportFormatSwitchToEncrypted)
         assertEquals(null, vm.uiState.value.exportVolumeRequestId)
-        assertFalse(vm.uiState.value.showBackupExportConfirm)
+        assertEquals(null, vm.uiState.value.autoLaunchExportRequestId)
         assertEquals("secret-password", passphrase.concatToString())
 
         // 保留原导出：加密分卷可继续恢复
         vm.dismissSwitchExportFormat()
         vm.requestEncryptedBackupExport()
         assertTrue(vm.uiState.value.exportVolumeRequestId != null)
+        assertEquals(null, vm.uiState.value.autoLaunchExportRequestId)
         assertTrue(vm.uiState.value.exportEncrypted)
         assertTrue(vm.uiState.value.exportFileName.endsWith(".bpx"))
 
-        // 确认切换为明文：清零旧口令、清空旧分卷并弹出明文导出确认框
+        // 确认切换为明文：清零旧口令、清空旧分卷并直接准备明文导出（该仓库为 2 卷计划，故展示第 1 卷进度而非单卷自动拉起）
         vm.pauseBackupExport()
         vm.requestBackupExport()
         vm.confirmSwitchExportFormat()
+        advanceUntilIdle()
         assertTrue(passphrase.all { it == '\u0000' })
-        assertEquals(0, vm.uiState.value.exportVolumeCount)
-        assertFalse(vm.uiState.value.exportEncrypted)
-        assertTrue(vm.uiState.value.showBackupExportConfirm)
-
-        vm.prepareBackupExport("plain_after_switch")
+        assertEquals(2, vm.uiState.value.exportVolumeCount)
         assertFalse(vm.uiState.value.exportEncrypted)
         assertTrue(vm.uiState.value.exportFileName.endsWith(".xlsx"))
-        assertTrue(vm.uiState.value.exportVolumeRequestId != null)
+        assertNotNull(vm.uiState.value.exportVolumeRequestId)
+        assertNull(vm.uiState.value.autoLaunchExportRequestId)
     }
 
     @Test
@@ -348,6 +351,7 @@ class SettingsViewModelTest {
         assertEquals("08:15", vm.uiState.value.morningReminderTime)
         assertEquals("08:15", scheduledTime)
         assertEquals(1, morningScheduleCalls)
+        assertTrue(vm.uiState.value.message.contains("早间提醒"))
 
         assertFalse(vm.uiState.value.isProfileDirty)
         vm.updateName("张阿姨")
@@ -457,7 +461,8 @@ class SettingsViewModelTest {
         vm.dismissClearAll()
         vm.requestBackupExport()
         assertTrue(vm.uiState.value.showClearConfirm)
-        assertFalse(vm.uiState.value.showBackupExportConfirm)
+        assertNull(vm.uiState.value.exportVolumeRequestId)
+        assertNull(vm.uiState.value.autoLaunchExportRequestId)
 
         clearGate.complete(Unit)
         advanceUntilIdle()
@@ -465,6 +470,82 @@ class SettingsViewModelTest {
         assertFalse(vm.uiState.value.showClearConfirm)
         assertTrue(vm.uiState.value.messageIsError)
         assertTrue(vm.uiState.value.message.contains("部分清理未完成"))
+    }
+
+    @Test
+    fun `single volume plain export auto launches once and cancel or launch failure never loops`() = runTest {
+        var prepareCalls = 0
+        val repo = object : SettingsRepository by FakeTargetSettingsRepository() {
+            override suspend fun prepareBackupExport(): Result<BackupExportPlan> {
+                prepareCalls += 1
+                return Result.success(
+                    BackupExportPlan.fromPayload(
+                        BackupExportPayload(
+                            instructions = emptyList(),
+                            measurements = emptyList(),
+                            userProfile = emptyList(),
+                            meta = emptyList()
+                        )
+                    )
+                )
+            }
+        }
+        val vm = SettingsViewModel(repo)
+
+        // 1. 首次点击明文主按钮：直接完成单卷准备并签发一次性自动拉起令牌
+        vm.requestBackupExport()
+        advanceUntilIdle()
+        assertEquals(1, prepareCalls)
+        val firstReq = requireNotNull(vm.uiState.value.exportVolumeRequestId)
+        assertEquals(firstReq, vm.uiState.value.autoLaunchExportRequestId)
+        assertTrue(vm.uiState.value.exportFileName.endsWith(".xlsx"))
+
+        // 2. UI 消费令牌并拉起 SAF：重组重复调用 consume 必须返回 false
+        assertTrue(vm.consumeAutoLaunchExportRequest(firstReq))
+        assertNull(vm.uiState.value.autoLaunchExportRequestId)
+        assertFalse(vm.consumeAutoLaunchExportRequest(firstReq))
+        assertTrue(vm.beginBackupLocation(firstReq))
+
+        // 3. 用户在 SAF 中点击取消（uri = null）：收起请求 ID 且不重拉 SAF、不补弹确认框，保留已准备计划
+        vm.finishExportBackupLocation(firstReq, null)
+        assertNull(vm.uiState.value.exportVolumeRequestId)
+        assertNull(vm.uiState.value.autoLaunchExportRequestId)
+        assertEquals(1, vm.uiState.value.exportVolumeCount)
+        assertTrue(vm.uiState.value.message.contains("保存已取消"))
+
+        // 4. 用户再次主动点击「继续保存明文 Excel」：复用已准备计划（不重复读库），签发新一次性令牌
+        vm.requestBackupExport()
+        assertEquals(1, prepareCalls)
+        val secondReq = requireNotNull(vm.uiState.value.exportVolumeRequestId)
+        assertEquals(secondReq, vm.uiState.value.autoLaunchExportRequestId)
+
+        // 5. 模拟系统文件选择器启动异常：清理请求状态并报错，绝不死循环重拉
+        assertTrue(vm.consumeAutoLaunchExportRequest(secondReq))
+        assertTrue(vm.beginBackupLocation(secondReq))
+        vm.onBackupLocationLaunchFailed()
+        assertFalse(vm.uiState.value.isChoosingBackupLocation)
+        assertNull(vm.uiState.value.exportVolumeRequestId)
+        assertNull(vm.uiState.value.autoLaunchExportRequestId)
+        assertTrue(vm.uiState.value.messageIsError)
+    }
+
+    @Test
+    fun `appendMedicationDosageUnit appends only to bare numbers and never duplicates or overwrites units`() {
+        assertEquals("1 片", appendMedicationDosageUnit("1", "片"))
+        assertEquals("0.5 粒", appendMedicationDosageUnit(" 0.5 ", "粒"))
+        assertEquals("1/2 片", appendMedicationDosageUnit("1/2", "片"))
+        assertEquals("5 mg", appendMedicationDosageUnit("5", "mg"))
+
+        // 已有相同或不同单位：绝不重复追加，也绝不替换已有单位
+        assertEquals("1 片", appendMedicationDosageUnit("1 片", "片"))
+        assertEquals("1片", appendMedicationDosageUnit("1片", "片"))
+        assertEquals("5 mg", appendMedicationDosageUnit("5 mg", "片"))
+        assertEquals("1 粒", appendMedicationDosageUnit("1 粒", "丸"))
+
+        // 空白或复杂剂量描述：绝不臆造数字，也绝不覆盖复杂表达
+        assertEquals("", appendMedicationDosageUnit("", "片"))
+        assertEquals("   ", appendMedicationDosageUnit("   ", "mg"))
+        assertEquals("早1片晚半片", appendMedicationDosageUnit("早1片晚半片", "片"))
     }
 
     private fun customConfig() = BpZoneConfig.Default.copy(

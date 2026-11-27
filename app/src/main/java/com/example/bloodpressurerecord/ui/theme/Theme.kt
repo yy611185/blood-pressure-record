@@ -18,7 +18,7 @@ import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.rememberSystemReducedMotion
 
 // UIredesign 根目录原型：奶白背景、白色卡片、珊瑚橙操作。
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = TerracottaAction,
     onPrimary = OnTerracotta,
     primaryContainer = Terracotta200,
@@ -41,7 +41,7 @@ private val LightColors = lightColorScheme(
     onSurface = WarmText,
     surfaceVariant = WarmSurfaceSoft,
     onSurfaceVariant = WarmTextBody,
-    outline = WarmDivider,
+    outline = WarmOutline,
     outlineVariant = WarmDivider,
     surfaceContainerLow = WarmSurfaceSoft,
     surfaceContainer = WarmSurfaceSoft,
@@ -50,7 +50,7 @@ private val LightColors = lightColorScheme(
 )
 
 // 原稿 .phone.dark 独立深色表面。
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = Terracotta400,
     onPrimary = Terracotta900,
     primaryContainer = Terracotta800,
@@ -81,12 +81,12 @@ private val DarkColors = darkColorScheme(
     surfaceContainerHighest = Color(0xFF2D2823)
 )
 
-// 原稿卡片 26、输入 16、按钮 20；胶囊由对应控件显式指定。
+// 单调递增圆角阶梯：内嵌微块 12、普通输入/搜索 16、按钮/大数字框/行级卡 20、标准暖纸卡 26、核心大卡/大弹窗 32。
 val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(12.dp),
     small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(26.dp),
-    large = RoundedCornerShape(20.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(26.dp),
     extraLarge = RoundedCornerShape(32.dp)
 )
 
@@ -128,6 +128,20 @@ private fun animateColorScheme(target: ColorScheme, reducedMotion: Boolean): Col
     val onPrimary by animateColorAsState(target.onPrimary, spec, label = "theme_on_primary")
     val primaryContainer by animateColorAsState(target.primaryContainer, spec, label = "theme_primary_c")
     val onPrimaryContainer by animateColorAsState(target.onPrimaryContainer, spec, label = "theme_on_primary_c")
+    val secondary by animateColorAsState(target.secondary, spec, label = "theme_secondary")
+    val onSecondary by animateColorAsState(target.onSecondary, spec, label = "theme_on_secondary")
+    val secondaryContainer by animateColorAsState(target.secondaryContainer, spec, label = "theme_secondary_c")
+    val onSecondaryContainer by animateColorAsState(target.onSecondaryContainer, spec, label = "theme_on_secondary_c")
+    val tertiary by animateColorAsState(target.tertiary, spec, label = "theme_tertiary")
+    val onTertiary by animateColorAsState(target.onTertiary, spec, label = "theme_on_tertiary")
+    val tertiaryContainer by animateColorAsState(target.tertiaryContainer, spec, label = "theme_tertiary_c")
+    val onTertiaryContainer by animateColorAsState(target.onTertiaryContainer, spec, label = "theme_on_tertiary_c")
+    val error by animateColorAsState(target.error, spec, label = "theme_error")
+    val onError by animateColorAsState(target.onError, spec, label = "theme_on_error")
+    val errorContainer by animateColorAsState(target.errorContainer, spec, label = "theme_error_c")
+    val onErrorContainer by animateColorAsState(target.onErrorContainer, spec, label = "theme_on_error_c")
+    val outline by animateColorAsState(target.outline, spec, label = "theme_outline")
+    val outlineVariant by animateColorAsState(target.outlineVariant, spec, label = "theme_outline_var")
     val surfaceContainerLow by animateColorAsState(target.surfaceContainerLow, spec, label = "theme_scl")
     val surfaceContainer by animateColorAsState(target.surfaceContainer, spec, label = "theme_sc")
     val surfaceContainerHigh by animateColorAsState(target.surfaceContainerHigh, spec, label = "theme_sch")
@@ -137,12 +151,26 @@ private fun animateColorScheme(target: ColorScheme, reducedMotion: Boolean): Col
         onPrimary = onPrimary,
         primaryContainer = primaryContainer,
         onPrimaryContainer = onPrimaryContainer,
+        secondary = secondary,
+        onSecondary = onSecondary,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = onSecondaryContainer,
+        tertiary = tertiary,
+        onTertiary = onTertiary,
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = onTertiaryContainer,
+        error = error,
+        onError = onError,
+        errorContainer = errorContainer,
+        onErrorContainer = onErrorContainer,
         background = background,
         onBackground = onBackground,
         surface = surface,
         onSurface = onSurface,
         surfaceVariant = surfaceVariant,
         onSurfaceVariant = onSurfaceVariant,
+        outline = outline,
+        outlineVariant = outlineVariant,
         surfaceContainerLow = surfaceContainerLow,
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,

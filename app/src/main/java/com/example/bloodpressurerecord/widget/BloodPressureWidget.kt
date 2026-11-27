@@ -34,6 +34,7 @@ import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.color.ColorProvider
 import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
@@ -198,26 +199,27 @@ private fun WidgetContent(data: WidgetData, darkTheme: Boolean) {
     } else {
         actionStartActivity(openHomeIntent(context))
     }
+    val isLarge = size.width >= BloodPressureWidget.LARGE.width &&
+        size.height >= BloodPressureWidget.LARGE.height
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .background(WidgetBackground)
             .cornerRadius(20.dp)
-            .padding(12.dp)
+            .padding(horizontal = 12.dp, vertical = if (isLarge) 12.dp else 10.dp)
             .clickable(rootClickAction)
     ) {
         LatestBlock(
             data = data,
             compact = size.width < BloodPressureWidget.WIDE.width,
+            tall = isLarge,
             addActionIntent = openAddMeasurementIntent(context)
         )
         if (data.isAvailable && size.width >= BloodPressureWidget.WIDE.width) {
-            Spacer(GlanceModifier.height(6.dp))
+            Spacer(GlanceModifier.height(if (isLarge) 6.dp else 4.dp))
             StatsRow(data)
         }
-        if (data.isAvailable && size.width >= BloodPressureWidget.LARGE.width &&
-            size.height >= BloodPressureWidget.LARGE.height
-        ) {
+        if (data.isAvailable && isLarge) {
             Spacer(GlanceModifier.height(8.dp))
             TrendBlock(
                 trend = data.trend,
@@ -229,7 +231,12 @@ private fun WidgetContent(data: WidgetData, darkTheme: Boolean) {
 }
 
 @Composable
-private fun LatestBlock(data: WidgetData, compact: Boolean, addActionIntent: Intent) {
+private fun LatestBlock(
+    data: WidgetData,
+    compact: Boolean,
+    tall: Boolean,
+    addActionIntent: Intent
+) {
     val latest = data.latest
     val displayZone = runCatching { ZoneId.of(data.zoneId) }.getOrElse { ZoneId.systemDefault() }
     Column(modifier = GlanceModifier.fillMaxWidth()) {
@@ -243,7 +250,8 @@ private fun LatestBlock(data: WidgetData, compact: Boolean, addActionIntent: Int
             ) {
                 Text(
                     "最近血压",
-                    style = TextStyle(color = TextMuted, fontSize = 11.sp)
+                    style = TextStyle(color = TextMuted, fontSize = 11.sp),
+                    maxLines = 1
                 )
                 latest?.let {
                     Spacer(GlanceModifier.width(6.dp))
@@ -251,24 +259,37 @@ private fun LatestBlock(data: WidgetData, compact: Boolean, addActionIntent: Int
                         Instant.ofEpochMilli(it.measuredAt)
                             .atZone(displayZone)
                             .format(DateTimeFormatter.ofPattern("M月d日 HH:mm")),
-                        style = TextStyle(color = TextMuted, fontSize = 11.sp)
+                        style = TextStyle(color = TextMuted, fontSize = 11.sp),
+                        maxLines = 1
                     )
                 }
             }
             if (latest != null && !compact) {
-                Text(
-                    text = "+ 记一次",
-                    style = TextStyle(
-                        color = WidgetChipContent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
+                // FRZ-03 / AUD-19：扩大「+ 记一次」外围可点击命中区与胶囊尺寸，同时保持下方 34.sp 核心读数满宽不挤压
+                Box(
                     modifier = GlanceModifier
-                        .background(WidgetChipBackground)
-                        .cornerRadius(12.dp)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .clickable(actionStartActivity(addActionIntent))
-                )
+                        .then(if (tall) GlanceModifier.height(48.dp) else GlanceModifier)
+                        .padding(start = 8.dp, top = 2.dp, bottom = 2.dp)
+                        .clickable(actionStartActivity(addActionIntent)),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        text = "+ 记一次",
+                        style = TextStyle(
+                            color = WidgetChipContent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        maxLines = 1,
+                        modifier = GlanceModifier
+                            .background(WidgetChipBackground)
+                            .cornerRadius(16.dp)
+                            .padding(
+                                horizontal = if (tall) 14.dp else 12.dp,
+                                vertical = if (tall) 9.dp else 7.dp
+                            )
+                    )
+                }
             }
         }
         if (latest == null) {

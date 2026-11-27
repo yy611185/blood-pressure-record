@@ -277,6 +277,50 @@ class DefaultSettingsRepositoryAndroidTest {
     }
 
     @Test
+    fun singlePlainWriteFailureAndRestoredPickerDoNotRearmAutoLaunch() = runTest {
+        val payload = BackupExportPayload(
+            instructions = emptyList(), measurements = emptyList(),
+            userProfile = emptyList(), meta = emptyList()
+        )
+        val saved = SavedStateHandle()
+        var writes = 0
+        val source = object : SettingsRepository by repository {
+            override suspend fun prepareBackupExport() =
+                Result.success(BackupExportPlan(listOf(payload)))
+
+            override suspend fun exportBackupVolumeToUri(
+                plan: BackupExportPlan, volumeIndex: Int, uri: Uri, passphrase: CharArray?
+            ): Result<Unit> {
+                writes++
+                return Result.failure(IllegalStateException("模拟写入失败"))
+            }
+        }
+        withContext(Dispatchers.Main) {
+            val vm = SettingsViewModel(source, savedStateHandle = saved)
+            vm.requestBackupExport()
+            val request = requireNotNull(vm.uiState.value.autoLaunchExportRequestId)
+            assertTrue(vm.consumeAutoLaunchExportRequest(request))
+            assertTrue(vm.beginBackupLocation(request))
+            val destination = Uri.parse("content://backup-test/single")
+            vm.finishExportBackupLocation(request, destination)
+            assertEquals(1, writes)
+            assertEquals(null, vm.uiState.value.autoLaunchExportRequestId)
+            assertEquals(null, vm.uiState.value.exportVolumeRequestId)
+            assertTrue(vm.uiState.value.messageIsError)
+
+            vm.requestBackupExport()
+            val retry = requireNotNull(vm.uiState.value.autoLaunchExportRequestId)
+            assertTrue(vm.consumeAutoLaunchExportRequest(retry))
+            assertTrue(vm.beginBackupLocation(retry))
+            val restored = SettingsViewModel(source, savedStateHandle = saved)
+            assertEquals(retry, restored.interruptedExportRequestId)
+            restored.finishExportBackupLocation(retry, destination)
+            assertEquals(1, writes)
+            assertEquals(null, restored.uiState.value.autoLaunchExportRequestId)
+        }
+    }
+
+    @Test
     fun setMedicationCalendar_handlesMissingAndLegacyKeysSafely() = runTest {
         val store = AppSettingsStore.using(preferences)
         preferences.edit { it.clear() }

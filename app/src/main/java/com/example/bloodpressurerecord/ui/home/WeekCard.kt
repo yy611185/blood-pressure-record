@@ -65,6 +65,7 @@ import com.example.bloodpressurerecord.ui.common.appMotionColor
 import com.example.bloodpressurerecord.ui.common.appMotionFloat
 import com.example.bloodpressurerecord.ui.common.focusRing
 import com.example.bloodpressurerecord.ui.common.pressableScale
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import com.example.bloodpressurerecord.ui.theme.NumberFontFamily
 import com.example.bloodpressurerecord.ui.theme.TabularFeatureSettings
@@ -236,7 +237,7 @@ private fun WeekAverageSummary(
             ) {
                 Text(
                     "本周平均",
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = colors.onPrimaryContainer,
                     modifier = Modifier.align(Alignment.CenterVertically)
@@ -265,7 +266,7 @@ private fun WeekAverageSummary(
                 )
                 Text(
                     "mmHg",
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
                     color = colors.onPrimaryContainer,
                     modifier = Modifier.align(Alignment.CenterVertically)
@@ -274,7 +275,7 @@ private fun WeekAverageSummary(
             if (state.weekHighRiskCount > 0) {
                 Text(
                     "含 ${state.weekHighRiskCount} 次高风险",
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = colors.onErrorContainer,
                     modifier = Modifier
@@ -286,7 +287,7 @@ private fun WeekAverageSummary(
         } else {
             Text(
                 "本周平均",
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = colors.onPrimaryContainer
             )
@@ -344,8 +345,7 @@ private fun WeekSelectedDayBar(
                     Column(infoModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
                             dayMetaText,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall.copy(
                                 fontFeatureSettings = TabularFeatureSettings
                             ),
                             fontWeight = FontWeight.SemiBold,
@@ -393,7 +393,7 @@ private fun WeekSelectedDayBar(
                             .clip(actionShape)
                             .indication(interactionSource, LocalIndication.current)
                             .focusRing(interactionSource, actionShape)
-                            .heightIn(min = 44.dp)
+                            .heightIn(min = AppDimensions.minimumTouchTarget)
                             .padding(horizontal = 6.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -452,15 +452,15 @@ private fun WeekRangeCapsuleChart(
         )
     }
 
-    val valueLabelStyle = MaterialTheme.typography.labelMedium.copy(
+    val valueLabelStyle = MaterialTheme.typography.labelSmall.copy(
         fontFamily = NumberFontFamily,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         fontFeatureSettings = TabularFeatureSettings
     )
-    val axisRefLabelStyle = MaterialTheme.typography.labelMedium.copy(
+    val axisRefLabelStyle = MaterialTheme.typography.labelSmall.copy(
         fontFamily = NumberFontFamily,
-        fontSize = 10.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
         fontFeatureSettings = TabularFeatureSettings
     )
@@ -861,7 +861,7 @@ private fun WeekRangeDayColumn(
             isFuture -> colors.onSurfaceVariant.copy(alpha = 0.55f)
             else -> colors.onSurfaceVariant
         }
-        val weekdayFontSize = if (LocalDensity.current.fontScale >= 1.5f) 10.sp else 11.sp
+        val weekdayFontSize = 11.sp
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -882,7 +882,7 @@ private fun WeekRangeDayColumn(
             Text(
                 weekdayLabel(day.date),
                 modifier = Modifier.testTag("week-day-label-$index"),
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = weekdayFontSize),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = weekdayFontSize),
                 fontWeight = if (isToday || isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                 color = labelColor,
                 maxLines = 1,
@@ -915,7 +915,7 @@ private fun WeekRangeLegend(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(
@@ -943,7 +943,30 @@ private fun WeekRangeLegend(
                 )
             }
             Text(
-                "空心圆：日均低压 · 虚线：四色条正常上界 $normalSystolicCut/$normalDiastolicCut",
+                "空心圆：日均低压",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
+            )
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Canvas(Modifier.width(16.dp).height(8.dp)) {
+                val centerY = size.height / 2f
+                drawLine(
+                    color = colors.onSurfaceVariant,
+                    start = Offset(0f, centerY),
+                    end = Offset(size.width, centerY),
+                    strokeWidth = 1.6.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(
+                        floatArrayOf(4.dp.toPx(), 3.dp.toPx()),
+                        0f
+                    )
+                )
+            }
+            Text(
+                "虚线：个人参考正常上界 $normalSystolicCut/$normalDiastolicCut",
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TabularFeatureSettings),
                 color = colors.onSurfaceVariant
             )
@@ -1005,7 +1028,7 @@ private fun WeekdayIndicators(state: DashboardUiState, modifier: Modifier = Modi
                 Text(
                     weekdayLabel(day.date),
                     modifier = Modifier.testTag("week-day-label-$index"),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     fontWeight = FontWeight.ExtraBold,
                     color = content
                 )

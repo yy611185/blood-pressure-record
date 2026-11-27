@@ -197,7 +197,16 @@ class DeletionUndoManager(
         scope.launch { undo(tokenId) }
     }
 
-    suspend fun undo(tokenId: Long): UndoExecutionResult = mutex.withLock {
+    fun undoCurrentPromptAsync(tokenId: Long) {
+        scope.launch { undo(tokenId, requireCurrentPrompt = true) }
+    }
+
+    suspend fun undo(tokenId: Long, requireCurrentPrompt: Boolean = false): UndoExecutionResult = mutex.withLock {
+        if (requireCurrentPrompt && entries.lastOrNull()?.tokenId != tokenId &&
+            entries.any { it.tokenId == tokenId }
+        ) {
+            return@withLock UndoExecutionResult(UndoExecutionStatus.EXPIRED_OR_INVALIDATED)
+        }
         if (tokenId in consumedTokens) {
             return@withLock UndoExecutionResult(UndoExecutionStatus.ALREADY_CONSUMED)
         }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,19 +37,19 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +69,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -111,25 +113,14 @@ fun DashboardScreen(
     onViewDateRecords: (LocalDate) -> Unit = { onViewTodayRecords() },
     onOpenMedicationSettings: () -> Unit = {},
     onOpenTrend: () -> Unit = {},
-    onOpenSessionDetail: (String) -> Unit = {}
+    onOpenSessionDetail: (String) -> Unit = {},
+    onScrollBackwardChanged: (Boolean) -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val reducedMotion = LocalReducedMotion.current
-    val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(viewModel) {
-        viewModel.medicationFeedback.collect { feedback ->
-            if (feedback.success) {
-                val result = snackbarHostState.showSnackbar(
-                    message = if (feedback.taken) "已打卡 · ${feedback.slot.name}" else "已取消打卡 · ${feedback.slot.name}",
-                    actionLabel = "撤销"
-                )
-                if (result == SnackbarResult.ActionPerformed) {
-                    viewModel.toggleMedicationTaken(feedback.slot, !feedback.taken)
-                }
-            } else {
-                snackbarHostState.showSnackbar("保存打卡失败，请重试")
-            }
-        }
+    val scrollState = rememberScrollState()
+    LaunchedEffect(scrollState.canScrollBackward) {
+        onScrollBackwardChanged(scrollState.canScrollBackward)
     }
     val bottomInset = dockContentBottomPadding()
     Box(Modifier.fillMaxSize().testTag("dashboardScreen")) {
@@ -137,7 +128,7 @@ fun DashboardScreen(
             Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = AppDimensions.pageHorizontalPadding)
                 .padding(
                     top = statusBarTopPadding(extra = 12.dp),
@@ -250,12 +241,6 @@ fun DashboardScreen(
             )
             WeekCard(state, onOpenDateRecords = onViewDateRecords)
         }
-        SnackbarHost(
-            snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = bottomInset)
-        )
     }
 }
 
@@ -275,7 +260,7 @@ private fun GreetingHeader(state: DashboardUiState) {
     )
     Text(
         "$greeting${state.userName?.let { "，$it" } ?: ""}",
-        style = MaterialTheme.typography.headlineLarge.copy(fontSize = 29.sp),
+        style = MaterialTheme.typography.headlineLarge,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
     )
@@ -359,36 +344,109 @@ internal fun ReadingHero(
             ?: if (state.medicationSlots.isEmpty()) "每天早晚各测一次，记在这里方便回看变化。" else "今天的服药计划都打卡啦，真棒！"
     )
     var messageIndex by remember(latest.id) { mutableIntStateOf(0) }
+    var bubbleTapCount by remember(latest.id) { mutableIntStateOf(0) }
+    var showRangeInfo by remember { mutableStateOf(false) }
+    val advanceBuddyMessage = { messageIndex = (messageIndex + 1) % messages.size }
     val readingInteraction = remember { MutableInteractionSource() }
+    val bubbleInteraction = remember { MutableInteractionSource() }
 
+    if (showRangeInfo) {
+        AlertDialog(
+            onDismissRequest = { showRangeInfo = false },
+            title = { Text("医学分级与个人参考区间") },
+            text = {
+                Text(
+                    "1. 上方状态标签（如「正常」「正常高值」「1级高血压」）严格遵循《中国高血压防治指南》六级医学标准，固定不变。\n\n" +
+                        "2. 下方四色条为你的个人日常观察参考区间（当前正常上界为 ${state.normalSystolicCut}/${state.normalDiastolicCut} mmHg" +
+                        "${if (state.isCustomBpZone) "，已自定义" else "，默认参考"}），可在「我的 → 首页四色条区间」按医嘱或个人习惯微调，不影响医学分级与高风险警示。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showRangeInfo = false }) {
+                    Text("知道了")
+                }
+            }
+        )
+    }
+
+    // 外层水平内距 14.dp + 非点击兄弟行/点击读数区各自内部 6.dp = 全卡可见内容严格共线于 20.dp 内轴（AUD-06）。
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(32.dp))
             .background(animatedSoft)
             .then(if (risk) Modifier.border(2.5.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(32.dp)) else Modifier)
-            .padding(horizontal = 20.dp, vertical = 18.dp)
+            .padding(horizontal = 14.dp, vertical = 18.dp)
     ) {
-        if (state.showBuddy) Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-            Buddy(
-                look.copy(mood = if (risk) "worried" else look.mood),
-                Modifier.size(82.dp, 78.dp),
-                onClick = { messageIndex = (messageIndex + 1) % messages.size }
-            )
-            Box(
-                Modifier
-                    .weight(1f)
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+        if (state.showBuddy) {
+            val bubbleShape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top
             ) {
-                AnimatedContent(
-                    targetState = messages[messageIndex],
-                    transitionSpec = { AppMotion.fadeThrough(reducedMotion) },
-                    label = "Buddy message"
-                ) { message ->
-                    Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                Buddy(
+                    look = look.copy(mood = if (risk) "worried" else look.mood),
+                    modifier = Modifier.size(82.dp, 78.dp),
+                    onClick = advanceBuddyMessage,
+                    externalTapTrigger = bubbleTapCount
+                )
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(top = 8.dp)
+                        .heightIn(min = AppDimensions.minimumTouchTarget)
+                        .semantics {
+                            stateDescription = "第 ${messageIndex + 1} 条，共 ${messages.size} 条"
+                        }
+                        .clickable(
+                            interactionSource = bubbleInteraction,
+                            indication = null,
+                            role = Role.Button,
+                            onClickLabel = "切换下一条小压提示",
+                            onClick = {
+                                bubbleTapCount += 1
+                                advanceBuddyMessage()
+                            }
+                        )
+                        .pressableScale(bubbleInteraction, pressedScale = 0.985f)
+                        .clip(bubbleShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .indication(bubbleInteraction, LocalIndication.current)
+                        .focusRing(bubbleInteraction, bubbleShape)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AnimatedContent(
+                        targetState = messages[messageIndex],
+                        transitionSpec = { AppMotion.fadeThrough(reducedMotion) },
+                        label = "Buddy message"
+                    ) { message ->
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        messages.indices.forEach { dotIndex ->
+                            val active = dotIndex == messageIndex
+                            Box(
+                                Modifier
+                                    .size(if (active) 6.dp else 4.dp)
+                                    .background(
+                                        if (active) look.mid else MaterialTheme.colorScheme.outlineVariant,
+                                        CircleShape
+                                    )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -430,29 +488,41 @@ internal fun ReadingHero(
                     tint = animatedInk
                 )
             }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = AppSpacing.xSmall),
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                HeroPressureValue(latest.avgSystolic, latest.avgDiastolic, animatedInk, Modifier.weight(1f))
-                Column(
-                    Modifier.padding(bottom = AppSpacing.small),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+            val pulseValue = detail?.avgPulse
+            if (pulseValue == null) {
+                HeroPressureSingleRowWithUnit(
+                    sys = latest.avgSystolic,
+                    dia = latest.avgDiastolic,
+                    color = animatedInk,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = AppSpacing.xSmall)
+                )
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = AppSpacing.xSmall),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    // 去掉 0.7f 透明度衰减以保证 WCAG AA >= 4.5:1 对比度
-                    Text("mmHg", style = MaterialTheme.typography.labelMedium, color = animatedInk)
-                    detail?.avgPulse?.let { pulse ->
+                    HeroPressureValue(latest.avgSystolic, latest.avgDiastolic, animatedInk, Modifier.weight(1f))
+                    Column(
+                        Modifier.padding(bottom = AppSpacing.small),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.xSmall)
+                    ) {
+                        // 去掉 0.7f 透明度衰减以保证 WCAG AA >= 4.5:1 对比度
+                        Text("mmHg", style = MaterialTheme.typography.labelMedium, color = animatedInk)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(AppSpacing.xSmall),
-                            modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "脉搏 $pulse 次/分" }
+                            modifier = Modifier.semantics(mergeDescendants = true) {
+                                contentDescription = "脉搏 $pulseValue 次/分"
+                            }
                         ) {
                             Icon(Icons.Outlined.FavoriteBorder, null, Modifier.size(16.dp), tint = animatedInk)
                             Text(
-                                "$pulse 次/分",
+                                "$pulseValue 次/分",
                                 style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = TabularFeatureSettings),
                                 color = animatedInk
                             )
@@ -489,7 +559,13 @@ internal fun ReadingHero(
                 }
             }
         }
-        BpRangeBar(state.bpRange, Modifier.padding(top = AppSpacing.small))
+        HeroPersonalRangeSection(
+            state = state,
+            onShowInfo = { showRangeInfo = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = AppSpacing.small, start = 6.dp, end = 6.dp)
+        )
         AnimatedVisibility(
             visible = risk,
             enter = AppMotion.expandVisibilityEnter(reducedMotion),
@@ -502,10 +578,126 @@ internal fun ReadingHero(
                 color = MaterialTheme.colorScheme.onError,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp)
+                    .padding(top = 12.dp, start = 6.dp, end = 6.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.error)
                     .padding(11.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HeroPersonalRangeSection(
+    state: DashboardUiState,
+    onShowInfo: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val containerShape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = modifier
+            .heightIn(min = AppDimensions.minimumTouchTarget)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "查看个人参考区间说明",
+                onClick = onShowInfo
+            )
+            .pressableScale(interactionSource, pressedScale = 0.99f)
+            .clip(containerShape)
+            .background(colors.surface.copy(alpha = 0.78f))
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, containerShape)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    "个人参考区间",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurfaceVariant
+                )
+                if (state.isCustomBpZone) {
+                    Text(
+                        "已自定义",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onPrimaryContainer,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.primaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    )
+                }
+            }
+            Icon(
+                Icons.Outlined.Info,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(15.dp)
+                    .align(Alignment.CenterVertically),
+                tint = colors.onSurfaceVariant
+            )
+        }
+        BpRangeBar(state.bpRange)
+    }
+}
+
+/** 无脉搏单行状态下直接与右侧 mmHg 建立真实字体基线对齐（AUD-06）。 */
+@Composable
+private fun HeroPressureSingleRowWithUnit(
+    sys: Int,
+    dia: Int,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.displayLarge
+    val unitStyle = MaterialTheme.typography.labelMedium
+    val density = LocalDensity.current
+    fun pressureText(scale: Float) = buildAnnotatedString {
+        append(sys.toString())
+        withStyle(SpanStyle(fontSize = (48 * scale).sp, fontWeight = FontWeight.Light, color = color.copy(alpha = 0.45f))) {
+            append("/")
+        }
+        append(dia.toString())
+    }
+    BoxWithConstraints(modifier) {
+        val gapPx = with(density) { AppSpacing.small.roundToPx() }
+        val unitWidth = textMeasurer.measure("mmHg", unitStyle, softWrap = false, maxLines = 1).size.width
+        val availablePressureWidth = (constraints.maxWidth - unitWidth - gapPx).coerceAtLeast(1)
+        val fullWidth = textMeasurer.measure(pressureText(1f), style, softWrap = false, maxLines = 1).size.width
+        val scale = (availablePressureWidth.toFloat() / fullWidth.coerceAtLeast(1)).coerceAtMost(1f)
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                pressureText(scale),
+                modifier = Modifier.alignByBaseline(),
+                style = style.copy(fontSize = (58 * scale).sp, lineHeight = (62 * scale).sp),
+                color = color,
+                softWrap = false,
+                maxLines = 1
+            )
+            Spacer(Modifier.width(AppSpacing.small))
+            Text(
+                "mmHg",
+                modifier = Modifier.alignByBaseline(),
+                style = unitStyle,
+                color = color,
+                softWrap = false,
+                maxLines = 1
             )
         }
     }
@@ -515,11 +707,7 @@ internal fun ReadingHero(
 @Composable
 private fun HeroPressureValue(sys: Int, dia: Int, color: Color, modifier: Modifier = Modifier) {
     val textMeasurer = rememberTextMeasurer()
-    val style = MaterialTheme.typography.displayMedium.copy(
-        fontSize = 58.sp,
-        lineHeight = 62.sp,
-        fontFeatureSettings = TabularFeatureSettings
-    )
+    val style = MaterialTheme.typography.displayLarge
     fun pressureText(scale: Float) = buildAnnotatedString {
         append(sys.toString())
         withStyle(SpanStyle(fontSize = (48 * scale).sp, fontWeight = FontWeight.Light, color = color.copy(alpha = 0.45f))) {
@@ -724,13 +912,16 @@ internal fun MeasurementSlot(
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             Icon(if (morning) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay, null, Modifier.size(16.dp), tint = colors.onSurfaceVariant)
             val time = session?.let {
                 Instant.ofEpochMilli(it.measuredAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
             } ?: "待测"
             Text(
-                " $label · $time",
+                "$label · $time",
                 style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = TabularFeatureSettings),
                 fontWeight = FontWeight.Bold,
                 color = colors.onSurfaceVariant
@@ -784,7 +975,7 @@ internal fun GradeChip(
         Box(Modifier.size(8.dp).background(look.mid, CircleShape))
         Text(
             label,
-            style = MaterialTheme.typography.labelMedium.copy(fontSize = if (compact) 11.sp else 13.sp),
+            style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             color = look.ink,
             maxLines = 1
@@ -825,7 +1016,7 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
     val haptics = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
     val checkBackground = appMotionColor(
-        targetValue = if (slot.taken) colors.secondaryContainer else colors.surfaceContainerHighest,
+        targetValue = if (slot.taken) colors.secondaryContainer else colors.primaryContainer,
         reducedMotion = reducedMotion,
         label = "Medication background"
     )
@@ -838,7 +1029,7 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .clip(MaterialTheme.shapes.medium)
             .background(colors.surface)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -847,7 +1038,7 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
         Box(
             Modifier
                 .size(44.dp)
-                .clip(RoundedCornerShape(15.dp))
+                .clip(MaterialTheme.shapes.extraSmall)
                 .background(colors.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
@@ -868,7 +1059,7 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
                 maxLines = 1
             )
         }
-        val checkShape = RoundedCornerShape(15.dp)
+        val checkShape = MaterialTheme.shapes.extraSmall
         Box(
             Modifier
                 .widthIn(min = 76.dp)
@@ -918,7 +1109,7 @@ private fun MedicationRow(slot: MedicationSlot, pending: Boolean, onToggle: () -
                         if (taken) "已打卡" else "打卡",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (taken) colors.onSecondaryContainer else colors.onSurfaceVariant
+                        color = if (taken) colors.onSecondaryContainer else colors.onPrimaryContainer
                     )
                 }
             }

@@ -2,7 +2,9 @@ package com.example.bloodpressurerecord
 
 import android.content.Context
 import com.example.bloodpressurerecord.data.datastore.AppSettingsStore
+import com.example.bloodpressurerecord.data.datastore.StartupSettingsState
 import com.example.bloodpressurerecord.data.datastore.appDataStore
+import com.example.bloodpressurerecord.data.datastore.observeStartupSettings
 import com.example.bloodpressurerecord.data.db.AppDatabase
 import com.example.bloodpressurerecord.data.repository.BloodPressureRepository
 import com.example.bloodpressurerecord.data.repository.BpZoneConfigRepository
@@ -29,11 +31,20 @@ import com.example.bloodpressurerecord.update.UpdatePromptGate
 import com.example.bloodpressurerecord.update.UpdateRepository
 import com.example.bloodpressurerecord.widget.AppWidgetUpdater
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.stateIn
 
 interface AppContainer {
+    val startupSettings: StateFlow<StartupSettingsState>
+        get() = MutableStateFlow(StartupSettingsState(isReady = true))
     val bpZoneConfigRepository: BpZoneConfigRepository
     val bloodPressureRepository: BloodPressureRepository
     val settingsRepository: SettingsRepository
@@ -55,8 +66,12 @@ interface AppContainer {
 
 class DefaultAppContainer(context: Context) : AppContainer {
     private val appContext = context.applicationContext
+    private val containerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val database by lazy { AppDatabase.create(appContext) }
     private val appSettingsStore by lazy { AppSettingsStore(appContext) }
+    override val startupSettings: StateFlow<StartupSettingsState> =
+        observeStartupSettings(appSettingsStore.settingsFlow)
+            .stateIn(containerScope, SharingStarted.Eagerly, StartupSettingsState(isReady = false))
     private val mutableTimeChangeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     override val systemTimeChangeSignal: Flow<Unit> = mutableTimeChangeSignal.asSharedFlow()
 

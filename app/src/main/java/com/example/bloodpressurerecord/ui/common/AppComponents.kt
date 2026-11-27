@@ -19,14 +19,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material3.Button
@@ -35,7 +38,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -62,11 +67,14 @@ import androidx.compose.ui.node.SemanticsModifierNode
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.node.invalidateSemantics
 import androidx.compose.ui.platform.InspectorInfo
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -74,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.bloodpressurerecord.R
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.theme.AppDimensions
@@ -253,10 +262,12 @@ private class FocusRingNode(
     }
 }
 
+internal const val ReducedMotionPressedAlpha = 0.84f
+
 /**
  * 零重排按压缩放修饰符：仅驱动 GPU graphicsLayer，不改变外层触控热区。
  * 调用方应将 clickable / selectable / toggleable 置于本修饰符外侧以保证按下时命中坐标恒定；
- * 0x 减少动态效果或禁用时直接返回原修饰符，同帧复位 1.0f 且不启动协程。
+ * 0x 减少动态效果下不启动弹簧协程，直接提供 0ms alpha = 0.84f 瞬时按压反馈。
  */
 @Composable
 fun Modifier.pressableScale(
@@ -264,9 +275,16 @@ fun Modifier.pressableScale(
     enabled: Boolean = true,
     pressedScale: Float = 0.97f
 ): Modifier {
+    if (!enabled) return this
     val reducedMotion = LocalReducedMotion.current
-    if (reducedMotion || !enabled) return this
     val pressed by interactionSource.collectIsPressedAsState()
+    if (reducedMotion) {
+        return this.graphicsLayer {
+            scaleX = 1f
+            scaleY = 1f
+            alpha = if (pressed) ReducedMotionPressedAlpha else 1f
+        }
+    }
     val scaleState = animateFloatAsState(
         targetValue = if (pressed) pressedScale else 1f,
         animationSpec = AppMotion.springPress(reducedMotion = false),
@@ -276,6 +294,7 @@ fun Modifier.pressableScale(
         val s = scaleState.value
         scaleX = s
         scaleY = s
+        alpha = 1f
     }
 }
 
@@ -326,9 +345,9 @@ fun AppPrimaryButton(
         enabled = enabled,
         interactionSource = interactionSource,
         modifier = modifier
-            .heightIn(min = 54.dp)
+            .heightIn(min = AppDimensions.primaryButtonHeight)
             .pressableScale(interactionSource, enabled = enabled),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = contentColor,
@@ -375,9 +394,9 @@ fun AppSecondaryButton(
         enabled = enabled,
         interactionSource = interactionSource,
         modifier = modifier
-            .heightIn(min = 54.dp)
+            .heightIn(min = AppDimensions.primaryButtonHeight)
             .pressableScale(interactionSource, enabled = enabled),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = contentColor,
@@ -403,9 +422,9 @@ fun AppDangerButton(
         enabled = enabled,
         interactionSource = interactionSource,
         modifier = modifier
-            .heightIn(min = 54.dp)
+            .heightIn(min = AppDimensions.primaryButtonHeight)
             .pressableScale(interactionSource, enabled = enabled),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.medium,
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer
@@ -433,7 +452,7 @@ fun DataCard(
                 onClick = onClick
             )
             .pressableScale(interactionSource, pressedScale = 0.985f)
-            .focusRing(interactionSource, MaterialTheme.shapes.medium)
+            .focusRing(interactionSource, MaterialTheme.shapes.large)
     } else {
         Modifier
     }
@@ -442,7 +461,7 @@ fun DataCard(
         modifier = modifier
             .fillMaxWidth()
             .then(clickModifier),
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
             contentColor = MaterialTheme.colorScheme.onSurface
@@ -513,39 +532,135 @@ fun AppBackIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    AppTopBarIconButton(
+        icon = Icons.Default.ChevronLeft,
+        contentDescription = stringResource(R.string.back),
+        onClick = onClick,
+        modifier = modifier
+    )
+}
+
+/**
+ * 与左侧返回键同系的顶栏柔和圆角图标按钮：
+ * surfaceContainerHighest 底座、16.dp 圆角、48.dp 热区、无多余阴影、可见右缘自然贴齐 20.dp 页面轴线。
+ */
+@Composable
+fun AppTopBarIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
     val reducedMotion = LocalReducedMotion.current
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val background = appMotionColor(
-        targetValue = if (pressed) {
+        targetValue = if (pressed && enabled) {
             MaterialTheme.colorScheme.surfaceContainerHigh
         } else {
             MaterialTheme.colorScheme.surfaceContainerHighest
         },
         reducedMotion = reducedMotion,
         duration = AppMotion.Micro,
-        label = "back_btn_bg"
+        label = "topbar_icon_btn_bg"
     )
-    val shape = RoundedCornerShape(16.dp)
+    val shape = MaterialTheme.shapes.small
     Box(
         modifier = modifier
-            .size(48.dp)
+            .size(AppDimensions.minimumTouchTarget)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
+                enabled = enabled,
                 role = Role.Button,
                 onClick = onClick
             )
-            .pressableScale(interactionSource, pressedScale = 0.93f)
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.93f)
             .clip(shape)
             .background(background)
-            .focusRing(interactionSource, shape),
+            .focusRing(interactionSource, shape, enabled = enabled),
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = Icons.Default.ChevronLeft,
-            contentDescription = stringResource(R.string.back),
-            tint = MaterialTheme.colorScheme.onSurface
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            }
+        )
+    }
+}
+
+/**
+ * 与 AppBackIconButton 同系的顶栏右侧柔和浅底圆角动作按钮（如趋势页「全屏」）：
+ * 保持 >= 48.dp 触控热区、surfaceContainerHighest 16.dp 底座，可见右缘直接对齐页面 20.dp 右基准线。
+ */
+@Composable
+fun AppTopBarActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    enabled: Boolean = true
+) {
+    val reducedMotion = LocalReducedMotion.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val background = appMotionColor(
+        targetValue = if (pressed && enabled) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        reducedMotion = reducedMotion,
+        duration = AppMotion.Micro,
+        label = "topbar_action_btn_bg"
+    )
+    val contentColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    }
+    val shape = MaterialTheme.shapes.small
+    Row(
+        modifier = modifier
+            .defaultMinSize(
+                minWidth = AppDimensions.minimumTouchTarget,
+                minHeight = AppDimensions.minimumTouchTarget
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.94f)
+            .clip(shape)
+            .background(background)
+            .focusRing(interactionSource, shape, enabled = enabled)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = contentColor,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
@@ -601,9 +716,18 @@ fun AppTopBar(
     }
 }
 
+enum class SegmentedPillSize {
+    /** 一级主分段：保留 16.sp 适老字号 + primaryContainer 浅陶土色滑块。 */
+    Primary,
+    /** 次级紧凑分段：13.sp + surface 抬升滑块，与上方主分段拉开层次。 */
+    Compact
+}
+
 /**
- * 暖阳配色的分段胶囊选择器：单一共享弹簧滑块跟手滑移（中途连点实时转向），
- * 窄屏大字（如 320dp、2.0x）下自动收紧内边距或纵向堆叠，保证每一项文字完整可见不裁切。
+ * 暖阳配色的公共分段胶囊选择器（支持 Primary / Compact 双规格）：
+ * - 单一共享弹簧滑块跟手滑移（中途连点实时转向，支持单行与多行自适应网格坐标插值）；
+ * - 窄屏大字（如 360dp × 2.0x）下对多项（如 5 项周期条）采用均衡多行自适应排布（如 3+2 / 2+2+1），
+ *   避免 5 项全纵向堆叠成超高柱，同时保证每一项热区 >= 48dp 且文字完整不裁切。
  */
 @Composable
 fun SegmentedPillGroup(
@@ -611,7 +735,8 @@ fun SegmentedPillGroup(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    horizontalPadding: Dp = 16.dp,
+    size: SegmentedPillSize = SegmentedPillSize.Primary,
+    horizontalPadding: Dp = if (size == SegmentedPillSize.Primary) 16.dp else 10.dp,
     enabled: Boolean = true
 ) {
     if (options.isEmpty()) return
@@ -620,20 +745,24 @@ fun SegmentedPillGroup(
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val clampedIndex = selectedIndex.coerceIn(0, options.lastIndex)
-    val animatedIndexState = if (reducedMotion) {
-        null
-    } else {
-        animateFloatAsState(
-            targetValue = clampedIndex.toFloat(),
-            animationSpec = AppMotion.springSnappy(reducedMotion = false),
-            label = "segment_slider_index"
+
+    val sliderColor = when (size) {
+        SegmentedPillSize.Primary -> colors.primaryContainer
+        SegmentedPillSize.Compact -> colors.surface
+    }
+    val selectedTextColor = when (size) {
+        SegmentedPillSize.Primary -> colors.onPrimaryContainer
+        SegmentedPillSize.Compact -> colors.onSurface
+    }
+    val labelStyle = when (size) {
+        SegmentedPillSize.Primary -> MaterialTheme.typography.labelLarge.copy(
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        SegmentedPillSize.Compact -> MaterialTheme.typography.labelMedium.copy(
+            fontWeight = FontWeight.Bold
         )
     }
-    val sliderColor = colors.primaryContainer
-    val labelStyle = MaterialTheme.typography.labelLarge.copy(
-        fontSize = 16.sp,
-        fontWeight = FontWeight.SemiBold
-    )
     val maxOptionWidthPx = remember(options, density.fontScale, density.density, labelStyle) {
         options.maxOf { option ->
             textMeasurer.measure(
@@ -648,85 +777,109 @@ fun SegmentedPillGroup(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
+            .clip(MaterialTheme.shapes.medium)
             .background(colors.surfaceVariant)
             .padding(SegmentedPillGap)
     ) {
         val count = options.size
         val gapPx = with(density) { SegmentedPillGap.toPx() }
         val innerWidthPx = with(density) { maxWidth.toPx() }
-        val singleRowItemWidthPx = ((innerWidthPx - gapPx * (count - 1)).coerceAtLeast(0f)) / count
         val minCompactPaddingPx = with(density) { 2.dp.toPx() }
         val roundingSlackPx = with(density) { 6.dp.toPx() }
-        val stacked = singleRowItemWidthPx < maxOptionWidthPx + minCompactPaddingPx * 2f + roundingSlackPx
-        val effectiveHorizontalPadding = if (stacked) {
-            horizontalPadding
-        } else {
-            val sparePerSidePx = ((singleRowItemWidthPx - maxOptionWidthPx - roundingSlackPx) / 2f)
-                .coerceAtLeast(minCompactPaddingPx)
-            minOf(horizontalPadding, with(density) { sparePerSidePx.toDp() })
-        }
+        val minTouchWidthPx = with(density) { AppDimensions.minimumTouchTarget.toPx() }
+        val requiredItemWidthPx = maxOf(
+            minTouchWidthPx,
+            maxOptionWidthPx + minCompactPaddingPx * 2f + roundingSlackPx
+        )
+        val maxCols = (count downTo 1).firstOrNull { cols ->
+            val candidateWidth = ((innerWidthPx - gapPx * (cols - 1)).coerceAtLeast(0f)) / cols
+            candidateWidth >= requiredItemWidthPx
+        } ?: 1
 
-        if (stacked) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .drawBehind {
-                        val currentIndex = animatedIndexState?.value ?: clampedIndex.toFloat()
-                        val itemHeight = ((size.height - gapPx * (count - 1)).coerceAtLeast(0f)) / count
-                        val y = (itemHeight + gapPx) * currentIndex
-                        val radiusPx = 16.dp.toPx()
-                        drawRoundRect(
-                            color = sliderColor,
-                            topLeft = Offset(0f, y),
-                            size = Size(size.width, itemHeight),
-                            cornerRadius = CornerRadius(radiusPx, radiusPx)
-                        )
-                    },
-                verticalArrangement = Arrangement.spacedBy(SegmentedPillGap)
-            ) {
-                options.forEachIndexed { index, option ->
-                    SegmentedPillOption(
-                        option = option,
-                        labelStyle = labelStyle,
-                        selected = index == clampedIndex,
-                        enabled = enabled,
-                        reducedMotion = reducedMotion,
-                        horizontalPadding = effectiveHorizontalPadding,
-                        onClick = { onSelect(index) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+        val rowCount = ((count + maxCols - 1) / maxCols).coerceAtLeast(1)
+        val baseCols = count / rowCount
+        val extraCols = count % rowCount
+        val rows = remember(count, rowCount, baseCols, extraCols) {
+            buildList {
+                var cursor = 0
+                repeat(rowCount) { r ->
+                    val colsInRow = baseCols + if (r < extraCols) 1 else 0
+                    add((cursor until (cursor + colsInRow)).toList())
+                    cursor += colsInRow
                 }
             }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .drawBehind {
-                        val currentIndex = animatedIndexState?.value ?: clampedIndex.toFloat()
-                        val itemWidth = ((size.width - gapPx * (count - 1)).coerceAtLeast(0f)) / count
-                        val x = (itemWidth + gapPx) * currentIndex
-                        val radiusPx = 16.dp.toPx()
-                        drawRoundRect(
-                            color = sliderColor,
-                            topLeft = Offset(x, 0f),
-                            size = Size(itemWidth, size.height),
-                            cornerRadius = CornerRadius(radiusPx, radiusPx)
-                        )
-                    },
-                horizontalArrangement = Arrangement.spacedBy(SegmentedPillGap)
-            ) {
-                options.forEachIndexed { index, option ->
-                    SegmentedPillOption(
-                        option = option,
-                        labelStyle = labelStyle,
-                        selected = index == clampedIndex,
-                        enabled = enabled,
-                        reducedMotion = reducedMotion,
-                        horizontalPadding = effectiveHorizontalPadding,
-                        onClick = { onSelect(index) },
-                        modifier = Modifier.weight(1f)
+        }
+
+        val selectedRowIdx = rows.indexOfFirst { clampedIndex in it }.coerceAtLeast(0)
+        val selectedColIdx = rows[selectedRowIdx].indexOf(clampedIndex).coerceAtLeast(0)
+        val selectedRowCols = rows[selectedRowIdx].size.coerceAtLeast(1)
+        val targetWidthPx = ((innerWidthPx - gapPx * (selectedRowCols - 1)).coerceAtLeast(0f)) / selectedRowCols
+        val targetLeftPx = selectedColIdx * (targetWidthPx + gapPx)
+        val targetRowFloat = selectedRowIdx.toFloat()
+
+        val animLeftState = if (reducedMotion) null else animateFloatAsState(
+            targetValue = targetLeftPx,
+            animationSpec = AppMotion.springSnappy(reducedMotion = false),
+            label = "segment_slider_x"
+        )
+        val animWidthState = if (reducedMotion) null else animateFloatAsState(
+            targetValue = targetWidthPx,
+            animationSpec = AppMotion.springSnappy(reducedMotion = false),
+            label = "segment_slider_w"
+        )
+        val animRowState = if (reducedMotion) null else animateFloatAsState(
+            targetValue = targetRowFloat,
+            animationSpec = AppMotion.springSnappy(reducedMotion = false),
+            label = "segment_slider_row"
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    val currentX = animLeftState?.value ?: targetLeftPx
+                    val currentW = animWidthState?.value ?: targetWidthPx
+                    val currentRow = animRowState?.value ?: targetRowFloat
+                    val rowHeight = ((this.size.height - gapPx * (rowCount - 1)).coerceAtLeast(0f)) / rowCount
+                    val y = (rowHeight + gapPx) * currentRow
+                    val radiusPx = 16.dp.toPx()
+                    drawRoundRect(
+                        color = sliderColor,
+                        topLeft = Offset(currentX, y),
+                        size = Size(currentW.coerceAtMost(this.size.width), rowHeight),
+                        cornerRadius = CornerRadius(radiusPx, radiusPx)
                     )
+                },
+            verticalArrangement = Arrangement.spacedBy(SegmentedPillGap)
+        ) {
+            rows.forEach { rowIndices ->
+                val colsInThisRow = rowIndices.size.coerceAtLeast(1)
+                val rowCellWidthPx = ((innerWidthPx - gapPx * (colsInThisRow - 1)).coerceAtLeast(0f)) / colsInThisRow
+                val effectiveHorizontalPadding = if (colsInThisRow == 1) {
+                    horizontalPadding
+                } else {
+                    val sparePerSidePx = ((rowCellWidthPx - maxOptionWidthPx - roundingSlackPx) / 2f)
+                        .coerceAtLeast(minCompactPaddingPx)
+                    minOf(horizontalPadding, with(density) { sparePerSidePx.toDp() })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(SegmentedPillGap)
+                ) {
+                    rowIndices.forEach { index ->
+                        SegmentedPillOption(
+                            option = options[index],
+                            labelStyle = labelStyle,
+                            sizeVariant = size,
+                            selectedTextColor = selectedTextColor,
+                            selected = index == clampedIndex,
+                            enabled = enabled,
+                            reducedMotion = reducedMotion,
+                            horizontalPadding = effectiveHorizontalPadding,
+                            onClick = { onSelect(index) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -737,6 +890,8 @@ fun SegmentedPillGroup(
 private fun SegmentedPillOption(
     option: String,
     labelStyle: TextStyle,
+    sizeVariant: SegmentedPillSize,
+    selectedTextColor: Color,
     selected: Boolean,
     enabled: Boolean,
     reducedMotion: Boolean,
@@ -746,9 +901,9 @@ private fun SegmentedPillOption(
 ) {
     val colors = MaterialTheme.colorScheme
     val targetTextColor = when {
-        !enabled && selected -> colors.onPrimaryContainer.copy(alpha = 0.6f)
+        !enabled && selected -> selectedTextColor.copy(alpha = 0.6f)
         !enabled -> colors.onSurfaceVariant.copy(alpha = 0.6f)
-        selected -> colors.onPrimaryContainer
+        selected -> selectedTextColor
         else -> colors.onSurfaceVariant
     }
     val textColor = appMotionColor(
@@ -757,7 +912,8 @@ private fun SegmentedPillOption(
         label = "Segment text"
     )
     val interactionSource = remember { MutableInteractionSource() }
-    val optionShape = MaterialTheme.shapes.large
+    val optionShape = MaterialTheme.shapes.small
+    val selectedWeight = if (sizeVariant == SegmentedPillSize.Compact) FontWeight.Bold else FontWeight.SemiBold
     Box(
         modifier = modifier
             .heightIn(min = AppDimensions.minimumTouchTarget)
@@ -778,7 +934,7 @@ private fun SegmentedPillOption(
         Text(
             text = option,
             style = labelStyle.copy(
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                fontWeight = if (selected) selectedWeight else FontWeight.Medium
             ),
             color = textColor,
             maxLines = 1,
@@ -791,6 +947,80 @@ private fun SegmentedPillOption(
 /** 分段胶囊的内外边距（外框与内部选中块共用，保证选中态与外框同心）。 */
 private val SegmentedPillGap = 4.dp
 
+/**
+ * 轻量紧凑操作胶囊（脱离 M3 TextButton 64.dp 最小宽约束，保持 >= 48dp × 48dp 触控热区），
+ * 配合 FlowRow 用于趋势选点操作栏等高密度操作区，正常字号紧凑单行排布、大字号自然折行。
+ */
+@Composable
+fun AppCompactActionPill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    horizontalPadding: Dp = 6.dp
+) {
+    val reducedMotion = LocalReducedMotion.current
+    val colors = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pillShape = CircleShape
+    val containerColor = appMotionColor(
+        targetValue = when {
+            !enabled -> colors.surfaceVariant.copy(alpha = 0.38f)
+            pressed -> colors.primaryContainer
+            else -> colors.surfaceVariant.copy(alpha = 0.72f)
+        },
+        reducedMotion = reducedMotion,
+        duration = AppMotion.Micro,
+        label = "compact_action_pill_bg"
+    )
+    val contentColor = appMotionColor(
+        targetValue = if (enabled) colors.primary else colors.onSurfaceVariant.copy(alpha = 0.42f),
+        reducedMotion = reducedMotion,
+        duration = AppMotion.Micro,
+        label = "compact_action_pill_fg"
+    )
+    Box(
+        modifier = modifier
+            .defaultMinSize(
+                minWidth = AppDimensions.minimumTouchTarget,
+                minHeight = AppDimensions.minimumTouchTarget
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.95f)
+            .focusRing(interactionSource, pillShape, enabled = enabled),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(vertical = 6.dp)
+                .defaultMinSize(
+                    minWidth = AppDimensions.minimumTouchTarget,
+                    minHeight = 36.dp
+                )
+                .clip(pillShape)
+                .background(containerColor)
+                .indication(interactionSource, LocalIndication.current)
+                .padding(horizontal = horizontalPadding, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor,
+                softWrap = true
+            )
+        }
+    }
+}
+
 /** 暖阳设计的 46dp 圆形图标底座，用于设置列表等。 */
 @Composable
 fun RoundIconBadge(
@@ -799,17 +1029,106 @@ fun RoundIconBadge(
     contentColor: Color,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .size(46.dp)
-            .background(containerColor, CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = contentColor,
-            modifier = Modifier.size(22.dp)
-        )
+        Box(
+            modifier = modifier
+                .size(46.dp)
+                .background(containerColor, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+
+/**
+ * 与 UpdateDialog 一致的纵向全宽三动作确认弹窗（仅用于「未保存离开确认」与「清空所有本地数据确认」两处三动作弹窗）：
+ * - 整窗可滚动，360dp × 2.0x 大字号下绝不横向挤压或裁切操作按钮；
+ * - 按操作风险从安全到破坏性自上而下排布，破坏性操作显式采用 error 警示色。
+ */
+@Composable
+fun AppThreeActionDialog(
+    title: String,
+    onDismissRequest: () -> Unit,
+    primaryText: String,
+    onPrimaryClick: () -> Unit,
+    secondaryText: String,
+    onSecondaryClick: () -> Unit,
+    destructiveText: String,
+    onDestructiveClick: () -> Unit,
+    primaryEnabled: Boolean = true,
+    secondaryEnabled: Boolean = true,
+    destructiveEnabled: Boolean = true,
+    bodyContent: @Composable () -> Unit
+) {
+    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.85f).dp
+    val destructiveInteraction = remember { MutableInteractionSource() }
+    val colors = MaterialTheme.colorScheme
+    Dialog(onDismissRequest = onDismissRequest) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = colors.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onSurface,
+                    modifier = Modifier.semantics { heading() }
+                )
+                bodyContent()
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.small)
+                ) {
+                    AppPrimaryButton(
+                        text = primaryText,
+                        onClick = onPrimaryClick,
+                        enabled = primaryEnabled,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    AppSecondaryButton(
+                        text = secondaryText,
+                        onClick = onSecondaryClick,
+                        enabled = secondaryEnabled,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(
+                        onClick = onDestructiveClick,
+                        enabled = destructiveEnabled,
+                        interactionSource = destructiveInteraction,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = AppDimensions.minimumTouchTarget)
+                            .pressableScale(destructiveInteraction, enabled = destructiveEnabled)
+                    ) {
+                        Text(
+                            text = destructiveText,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (destructiveEnabled) {
+                                colors.error
+                            } else {
+                                colors.onSurfaceVariant.copy(alpha = 0.45f)
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
 }

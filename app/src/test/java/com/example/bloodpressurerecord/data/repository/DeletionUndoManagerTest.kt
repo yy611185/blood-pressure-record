@@ -73,8 +73,13 @@ class DeletionUndoManagerTest {
         manager.onPromptDismissed(token1)
         assertEquals(2, manager.currentPrompt.value?.pendingCount)
 
+        val staleClick = manager.undo(token1, requireCurrentPrompt = true)
+        assertEquals(UndoExecutionStatus.EXPIRED_OR_INVALIDATED, staleClick.status)
+        assertTrue(restoredSessions.isEmpty())
+        assertEquals(token2, manager.currentPrompt.value?.tokenId)
+
         // 撤销栈顶药品后自动接续展示前一条血压记录
-        val res2 = manager.undo(token2)
+        val res2 = manager.undo(token2, requireCurrentPrompt = true)
         assertEquals(UndoExecutionStatus.RESTORED, res2.status)
         assertEquals(listOf(42L), restoredMeds)
         assertEquals(token1, manager.currentPrompt.value?.tokenId)

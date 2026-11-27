@@ -69,6 +69,8 @@ data class DashboardUiState(
     /** 正常区间参考上界（跟随 BpZoneConfig，默认 120/80）。 */
     val normalSystolicCut: Int = BpZoneConfig.Default.sys.cuts.normal,
     val normalDiastolicCut: Int = BpZoneConfig.Default.dia.cuts.normal,
+    /** 用户是否已自定义首页四色条个人参考区间（用于首页显式标明「已自定义」）。 */
+    val isCustomBpZone: Boolean = false,
     val userName: String? = null,
     val showTrendChart: Boolean = true,
     val showBuddy: Boolean = true,
@@ -101,7 +103,9 @@ data class DashboardWeekDay(
 data class MedicationFeedback(
     val slot: MedicationSlot,
     val taken: Boolean,
-    val success: Boolean
+    val success: Boolean,
+    val date: LocalDate,
+    val sequence: Long
 )
 
 private data class MeasurementSources(
@@ -129,6 +133,8 @@ class DashboardViewModel(
     private val medicationFeedbackEvents = MutableSharedFlow<MedicationFeedback>(extraBufferCapacity = 4)
     val medicationFeedback = medicationFeedbackEvents.asSharedFlow()
     private val medicationToggleMutex = Mutex()
+    private var nextMedicationToggleSequence = 0L
+    private val latestMedicationToggle = mutableMapOf<Long, Long>()
     private val locateBpZone = LocateBpZoneUseCase()
     private val activeZoneFlow = timeChangeSignal
         .onStart { emit(Unit) }
@@ -244,6 +250,7 @@ class DashboardViewModel(
                     weekHighRiskCount = weekHighRiskCount,
                     normalSystolicCut = measurements.zoneConfig.sys.cuts.normal,
                     normalDiastolicCut = measurements.zoneConfig.dia.cuts.normal,
+                    isCustomBpZone = measurements.zoneConfig != BpZoneConfig.Default,
                     userName = settings.userProfile.name?.trim()?.takeIf { it.isNotEmpty() },
                     showTrendChart = settings.appSettings.showTrendChart,
                     showBuddy = settings.appSettings.showBuddy,
@@ -286,20 +293,48 @@ class DashboardViewModel(
 
     /** 勾选/取消勾选某个服药时间点的“已服”状态。 */
     fun toggleMedicationTaken(slot: MedicationSlot, taken: Boolean) {
+        setMedicationTaken(slot, taken, LocalDate.now(zoneProvider()))
+    }
+
+    fun isMedicationFeedbackCurrent(feedback: MedicationFeedback): Boolean =
+        feedback.date == LocalDate.now(zoneProvider()) &&
+            latestMedicationToggle[feedback.slot.timeId] == feedback.sequence
+
+    fun undoMedicationToggle(feedback: MedicationFeedback) {
+        if (!isMedicationFeedbackCurrent(feedback)) return
+        setMedicationTaken(feedback.slot, !feedback.taken, feedback.date, feedback)
+    }
+
+    private fun setMedicationTaken(
+        slot: MedicationSlot,
+        taken: Boolean,
+        date: LocalDate,
+        undo: MedicationFeedback? = null
+    ) {
         val medRepo = medicationRepository ?: return
-        val date = LocalDate.now(zoneProvider())
+        val sequence = ++nextMedicationToggleSequence
+        latestMedicationToggle[slot.timeId] = sequence
         pendingMedicationCounts.update { counts ->
             counts + (slot.timeId to ((counts[slot.timeId] ?: 0) + 1))
         }
         viewModelScope.launch {
             try {
                 medicationToggleMutex.withLock {
+                    if (undo != null) {
+                        val currentSlot = medRepo.getSlotsForDay(date).firstOrNull {
+                            it.timeId == slot.timeId && it.medicationId == slot.medicationId
+                        }
+                        if (currentSlot?.taken != undo.taken ||
+                            date != LocalDate.now(zoneProvider()) ||
+                            latestMedicationToggle[slot.timeId] != sequence
+                        ) return@launch
+                    }
                     medRepo.setTaken(slot.medicationId, slot.timeId, date, taken)
                 }
-                medicationFeedbackEvents.emit(MedicationFeedback(slot, taken, success = true))
+                medicationFeedbackEvents.emit(MedicationFeedback(slot, taken, success = true, date, sequence))
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
-                medicationFeedbackEvents.emit(MedicationFeedback(slot, taken, success = false))
+                medicationFeedbackEvents.emit(MedicationFeedback(slot, taken, success = false, date, sequence))
             } finally {
                 pendingMedicationCounts.update { counts ->
                     val remaining = (counts[slot.timeId] ?: 1) - 1

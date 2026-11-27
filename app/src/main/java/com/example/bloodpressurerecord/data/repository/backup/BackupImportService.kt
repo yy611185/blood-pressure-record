@@ -223,7 +223,7 @@ class BackupImportService(
             val volume = document.meta["backup_volume_index"]
             val total = document.meta["backup_volume_count"]
             if (volume != null && total != null) {
-                preview.volumeDescription = "分卷备份第 $volume/$total 卷（共 ${document.meta["backup_total_records"].orEmpty()} 条记录）。" +
+                preview.volumeDescription = "分卷备份第 $volume/$total 卷（共 ${document.meta["backup_total_records"].orEmpty()} 次测量）。" +
                     "请逐卷恢复全部文件，含药品的卷需勾选恢复用药数据。用户资料和设置只在第一卷。"
             }
         }

@@ -1,20 +1,21 @@
 package com.example.bloodpressurerecord.ui.history
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -36,8 +37,7 @@ class CalendarAccessibilityTest {
                         selected = false,
                         today = true,
                         currentDate = date,
-                        onClick = {},
-                        onDoubleClick = {}
+                        onClick = {}
                     )
                 }
             }
@@ -49,7 +49,7 @@ class CalendarAccessibilityTest {
     }
 
     @Test
-    fun recorded_day_announces_count_can_click_and_selected_state() {
+    fun today_and_selected_day_preserves_today_announcement_and_clicks_immediately() {
         val date = LocalDate.of(2026, 7, 25)
         var clicks = 0
         composeRule.setContent {
@@ -58,55 +58,79 @@ class CalendarAccessibilityTest {
                     date = date,
                     summary = CalendarDaySummary(date, recordCount = 3, containsHighRisk = false),
                     selected = true,
-                    today = false,
+                    today = true,
                     currentDate = date,
-                    onClick = { clicks += 1 },
-                    onDoubleClick = { clicks += 2 }
+                    onClick = { clicks += 1 }
                 )
             }
         }
 
         composeRule.onNodeWithContentDescription(
-            "7月25日，有3条记录，可选择，已选择"
+            "7月25日，今天，有3次测量，可选择，已选择"
         )
             .assertIsEnabled()
             .assertIsSelected()
             .performClick()
-        // combinedClickable waits out the double-click interval before a single click.
-        composeRule.waitUntil(timeoutMillis = 2_000) { clicks == 1 }
-        assertEquals(1, clicks)
+        // 移除 combinedClickable 后单击立即响应，无需等待双击判定超时。
+        composeRule.runOnIdle {
+            assertEquals(1, clicks)
+        }
     }
 
     @Test
-    fun noted_day_touchDoubleClick_andAccessibilityAction_invokesDetailAction() {
+    fun noted_day_singleClickSelects_andExplicitLocateNoteEntryInvokesCallback() {
         val date = LocalDate.of(2026, 7, 25)
-        var detailClicks = 0
+        var dayClicks = 0
+        var locateNoteClicks = 0
+        val sampleSession = HistorySessionItemUi(
+            id = "s-note-1",
+            measuredAt = 1_790_340_000_000L,
+            measuredDate = date,
+            measuredAtText = "08:30",
+            avgBloodPressureText = "122/78",
+            avgPulseText = "68",
+            scene = "清晨",
+            category = "NORMAL",
+            categoryText = "正常",
+            noteSummary = "昨晚睡得很好",
+            containsHighRiskReading = false
+        )
         composeRule.setContent {
             BloodPressureRecordTheme {
-                CalendarDay(
-                    date = date,
-                    summary = CalendarDaySummary(
-                        date, recordCount = 1, containsHighRisk = false, hasNote = true
-                    ),
-                    selected = false,
-                    today = false,
-                    currentDate = date,
-                    onClick = {},
-                    onDoubleClick = { detailClicks += 1 }
-                )
+                Column {
+                    CalendarDay(
+                        date = date,
+                        summary = CalendarDaySummary(
+                            date, recordCount = 1, containsHighRisk = false, hasNote = true
+                        ),
+                        selected = true,
+                        today = date == LocalDate.of(2026, 7, 25),
+                        currentDate = date,
+                        onClick = { dayClicks += 1 }
+                    )
+                    SelectedDaySummary(
+                        state = HistoryUiState(
+                            selectedDate = date,
+                            today = date,
+                            selectedDayRecords = listOf(sampleSession)
+                        ),
+                        showLocateNote = true,
+                        onLocateNote = { locateNoteClicks += 1 }
+                    )
+                }
             }
         }
 
-        val day = composeRule.onNodeWithContentDescription(
-            "7月25日，有1条记录，可选择，含备注"
-        )
-        day.performTouchInput { doubleClick() }
-        assertEquals(1, detailClicks)
-        val locateNote = day.fetchSemanticsNode().config[SemanticsActions.CustomActions]
-            .single { it.label == "定位到备注记录" }
-        composeRule.runOnIdle {
-            assertTrue(locateNote.action())
-        }
-        assertEquals(2, detailClicks)
+        composeRule.onNodeWithContentDescription(
+            "7月25日，今天，有1次测量，可选择，含备注，已选择"
+        ).performClick()
+        composeRule.runOnIdle { assertEquals(1, dayClicks) }
+
+        composeRule.onNodeWithText("7月25日 星期六 · 今天").assertIsDisplayed()
+        composeRule.onNodeWithText("定位备注")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+            .performClick()
+        composeRule.runOnIdle { assertEquals(1, locateNoteClicks) }
     }
 }

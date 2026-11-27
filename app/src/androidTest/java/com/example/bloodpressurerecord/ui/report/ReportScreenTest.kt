@@ -86,6 +86,15 @@ class ReportScreenTest {
         if (root.exists()) root.deleteRecursively()
     }
 
+    @Test fun clearDialogExportShortcutOnlyScrollsToExport() {
+        render(fromDataManagement = true)
+        composeRule.onNodeWithText("清空所有本地数据").performScrollTo().performClick()
+        composeRule.onNodeWithText("先导出备份").performClick()
+        composeRule.onNodeWithText("再次确认清空数据").assertDoesNotExist()
+        composeRule.onNodeWithTag("exportAndBackupSectionTitle").assertIsDisplayed()
+        composeRule.onNodeWithText("选择保存位置").assertDoesNotExist()
+    }
+
     @Test fun invalidCustomDatesKeepDialogOpenAndNeverGenerate() {
         render()
         scrollTo("近 7 天")
@@ -163,7 +172,13 @@ class ReportScreenTest {
             assertEquals("测试备注", first?.plan?.report?.notes?.single()?.text)
             assertEquals("测试药品", first?.plan?.report?.medications?.single()?.name)
         }
+        // B2 / AUD-29：首屏默认收折为逐项明示真实状态的隐私摘要条
+        composeRule.onNodeWithText("姓名与年龄：已隐藏").assertIsDisplayed()
+        composeRule.onNodeWithText("备注：已包含").assertIsDisplayed()
+        composeRule.onNodeWithText("药品：已包含").assertIsDisplayed()
 
+        scrollTo("调整隐私")
+        composeRule.onNodeWithTag("reportPrivacyToggle").performClick()
         scrollTo("包含备注")
         composeRule.onNodeWithContentDescription("包含备注").performClick()
         waitForCurrentPreview()
@@ -172,6 +187,8 @@ class ReportScreenTest {
         waitForCurrentPreview()
         composeRule.onNodeWithContentDescription("包含备注").assertIsOff()
         composeRule.onNodeWithContentDescription("包含药品").assertIsOff()
+        composeRule.onNodeWithText("备注：已隐藏").assertIsDisplayed()
+        composeRule.onNodeWithText("药品：已隐藏").assertIsDisplayed()
         composeRule.runOnIdle {
             val artifact = requireNotNull(viewModel.uiState.value.artifact)
             assertTrue(artifact !== first)
@@ -221,12 +238,16 @@ class ReportScreenTest {
         composeRule.onNodeWithText(PrimaryShareLabel).assertIsDisplayed().assertIsEnabled()
 
         restoration.emulateSavedInstanceStateRestore()
-        composeRule.waitForIdle()
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodes(hasText(PrimaryShareLabel) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText(PrimaryShareLabel).assertIsDisplayed().assertIsEnabled()
         composeRule.runOnIdle { assertTrue(original === viewModel.uiState.value.artifact) }
 
         // 新选项产生新匿名文件路径；读过旧摘要不能让新的无效 PDF 获得输出权限。
         generateInvalidPdf = true
+        scrollTo("调整隐私")
+        composeRule.onNodeWithTag("reportPrivacyToggle").performClick()
         scrollTo("包含备注")
         composeRule.onNodeWithContentDescription("包含备注").performClick()
         waitForCurrentPreview()

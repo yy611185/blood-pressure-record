@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -108,7 +110,7 @@ fun WheelTimePickerDialog(
                         .height(itemHeight)
                         .background(
                             MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.shapes.large
+                            MaterialTheme.shapes.medium
                         )
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -331,6 +333,12 @@ private fun WheelColumn(
         items(itemCount) { index ->
             val isSelected = index == selectedIndex
             val itemInteraction = remember { MutableInteractionSource() }
+            val isPressed by itemInteraction.collectIsPressedAsState()
+            val pressedBackground = if (isPressed) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+            } else {
+                Color.Transparent
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -344,10 +352,12 @@ private fun WheelColumn(
                     )
                     .semantics { contentDescription = describe(index) }
                     .clip(itemShape)
+                    .background(pressedBackground)
                     .focusRing(itemInteraction, itemShape)
                     .graphicsLayer {
                         if (reducedMotion) {
-                            alpha = if (isSelected) 1f else 0.55f
+                            val baseAlpha = if (isSelected) 1f else 0.55f
+                            alpha = if (isPressed) baseAlpha * ReducedMotionPressedAlpha else baseAlpha
                             scaleX = if (isSelected) 1f else 0.78f
                             scaleY = if (isSelected) 1f else 0.78f
                             rotationX = 0f
@@ -363,10 +373,10 @@ private fun WheelColumn(
                                 if (isSelected) 0f else 1f
                             }
                             val fraction = abs(signedDistance).coerceIn(0f, 1f)
-                            val scale = 1f - 0.22f * fraction
+                            val scale = (1f - 0.22f * fraction) * (if (isPressed) 0.95f else 1f)
                             scaleX = scale
                             scaleY = scale
-                            alpha = 1f - 0.52f * fraction
+                            alpha = (1f - 0.52f * fraction) * (if (isPressed) 0.88f else 1f)
                             rotationX = (-signedDistance * 16f).coerceIn(-22f, 22f)
                         }
                     },

@@ -3,13 +3,10 @@ package com.example.bloodpressurerecord.update
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.core.net.toUri
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
 
 class UpdatePlatformActions(
     val download: () -> Unit,
@@ -21,16 +18,15 @@ class UpdatePlatformActions(
 @Composable
 fun rememberUpdatePlatformActions(
     viewModel: UpdateViewModel,
-    snackbar: SnackbarHostState
+    onShowMessage: (String) -> Unit
 ): UpdatePlatformActions {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val state by viewModel.uiState.collectAsState()
     val directUrl = state.manifest?.let(UpdateUrls::directDownload)
 
     fun reportFailure(message: String) {
         viewModel.onBrowserOpenFailed(message)
-        scope.launch { snackbar.showSnackbar(message) }
+        onShowMessage(message)
     }
 
     fun openBrowser(url: String, validate: () -> Unit, onOpened: () -> Unit = {}) {

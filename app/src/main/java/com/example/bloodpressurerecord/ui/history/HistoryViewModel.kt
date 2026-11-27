@@ -460,7 +460,7 @@ class HistoryViewModel(
                 .atZone(activeZone)
                 .format(DateTimeFormatter.ofPattern("HH:mm")),
             avgBloodPressureText = "${record.avgSystolic}/${record.avgDiastolic}",
-            avgPulseText = record.avgPulse?.toString() ?: "--",
+            avgPulseText = record.avgPulse?.toString() ?: "—",
             scene = record.scene,
             category = record.category,
             categoryText = CategoryPresentation.label(record.category),

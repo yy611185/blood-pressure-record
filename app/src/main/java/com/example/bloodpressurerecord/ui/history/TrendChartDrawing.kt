@@ -22,15 +22,20 @@ import com.example.bloodpressurerecord.domain.calculator.TrendSeriesCalculator
 import com.example.bloodpressurerecord.domain.model.TrendAggregation
 import com.example.bloodpressurerecord.domain.model.TrendPoint
 import com.example.bloodpressurerecord.domain.model.TrendYAxis
+import com.example.bloodpressurerecord.ui.LocalReducedMotion
+import com.example.bloodpressurerecord.ui.common.appMotionColor
+import com.example.bloodpressurerecord.ui.theme.LocalBpGradePalette
 
 /**
  * 图表内所有颜色在这里统一取值，绘制函数不再各写各的常量。
- * 收缩压沿用陶土橙（主色），舒张压沿用蓝色（三级容器前景色）；高风险圆环取 scheme.error 适配深浅色。
+ * 收缩压沿用陶土橙（主色），舒张压沿用蓝色（三级容器前景色），脉搏采用独立青绿中性指标色（chartPulse）；
+ * 高风险圆环取 scheme.error 适配深浅色。
  */
 @Immutable
 internal data class TrendChartPalette(
     val systolic: Color,
     val diastolic: Color,
+    val pulse: Color,
     val axis: Color,
     val grid: Color,
     val targetDim: Float,
@@ -43,9 +48,17 @@ internal data class TrendChartPalette(
 @Composable
 internal fun trendChartPalette(): TrendChartPalette {
     val scheme = MaterialTheme.colorScheme
+    val reducedMotion = LocalReducedMotion.current
+    val pulseColor = appMotionColor(
+        targetValue = LocalBpGradePalette.current.chartPulse,
+        reducedMotion = reducedMotion,
+        label = "chartPulseColor",
+        duration = 200
+    )
     return TrendChartPalette(
         systolic = scheme.primary,
         diastolic = scheme.onTertiaryContainer,
+        pulse = pulseColor,
         axis = scheme.onSurfaceVariant,
         grid = scheme.onSurfaceVariant.copy(alpha = 0.16f),
         targetDim = 0.68f,
@@ -154,21 +167,15 @@ internal fun DrawScope.drawYAxisGrid(
 }
 
 /**
- * 横向阈值线：固定的 140/90 长虚线参考线 + 用户个人目标点状虚线（右端带「目标」微缩标签）。
+ * 横向阈值线：固定的 140/90 长虚线参考线 + 用户个人目标点状虚线。
+ * AUD-11 / S11：个人目标具体数值已外置至图表外部图例，画布内仅保留干净参考虚线，避免 10.sp 浮动字压盖折线。
  */
 internal fun DrawScope.drawThresholdLines(
     geometry: ChartGeometry,
     scaler: ChartProjection,
     lines: List<ChartThresholdLine>,
-    palette: TrendChartPalette,
-    textMeasurer: TextMeasurer? = null
-): List<Rect> {
-    data class MeasuredTargetTag(
-        val layout: TextLayoutResult,
-        val spec: TargetLabelSpec
-    )
-    val targetTags = mutableListOf<MeasuredTargetTag>()
-
+    palette: TrendChartPalette
+) {
     lines.forEach { line ->
         val isTarget = line is ChartThresholdLine.SystolicTarget || line is ChartThresholdLine.DiastolicTarget
         val color = when (line) {
@@ -190,51 +197,6 @@ internal fun DrawScope.drawThresholdLines(
             strokeWidth = THRESHOLD_LINE_WIDTH_DP.dp.toPx(),
             pathEffect = dash
         )
-        if (isTarget && textMeasurer != null) {
-            val tagLayout = textMeasurer.measure(
-                text = "目标 ${line.value}",
-                style = TextStyle(color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
-                softWrap = false
-            )
-            targetTags += MeasuredTargetTag(
-                layout = tagLayout,
-                spec = TargetLabelSpec(
-                    lineY = y,
-                    width = tagLayout.size.width.toFloat(),
-                    height = tagLayout.size.height.toFloat()
-                )
-            )
-        }
-    }
-
-    if (targetTags.isEmpty()) return emptyList()
-    return run {
-        val placements = TrendChartMath.resolveTargetLabelPositions(
-            specs = targetTags.map { it.spec },
-            left = geometry.left,
-            right = geometry.right,
-            top = geometry.top,
-            bottom = geometry.bottom,
-            lineGapPx = 2.dp.toPx(),
-            labelGapPx = 2.dp.toPx(),
-            rightMarginPx = 4.dp.toPx()
-        )
-        val padH = 2.dp.toPx()
-        targetTags.mapIndexed { index, tag ->
-            val pos = placements[index]
-            val bounds = Rect(pos.x - padH, pos.y,
-                pos.x + tag.layout.size.width + padH, pos.y + tag.layout.size.height)
-            drawRect(
-                color = palette.nodeBackground.copy(alpha = 0.88f),
-                topLeft = Offset((pos.x - padH).coerceAtLeast(geometry.left), pos.y),
-                size = androidx.compose.ui.geometry.Size(
-                    tag.layout.size.width + padH * 2f,
-                    tag.layout.size.height.toFloat()
-                )
-            )
-            drawText(tag.layout, topLeft = Offset(pos.x, pos.y))
-            bounds
-        }
     }
 }
 
@@ -358,19 +320,19 @@ internal fun DrawScope.drawCrosshair(
     textMeasurer: TextMeasurer,
     showSystolic: Boolean,
     showDiastolic: Boolean,
-    pulseMode: Boolean = false,
-    targetLabelBounds: List<Rect> = emptyList()
+    pulseMode: Boolean = false
 ) {
     val geometry = scaler.geometry
     val x = scaler.xOfTime(point.timestamp)
+    val ringColor = if (pulseMode) palette.pulse else palette.selectionRing
     drawLine(
-        palette.selectionRing.copy(alpha = 0.6f),
+        ringColor.copy(alpha = 0.6f),
         Offset(x, geometry.top),
         Offset(x, geometry.bottom),
         strokeWidth = 1.dp.toPx()
     )
     val rangeMean = if (point.aggregation != TrendAggregation.RAW) "均" else ""
-    val occupied = targetLabelBounds.toMutableList()
+    val occupied = mutableListOf<Rect>()
     fun valueLine(value: Int, label: String, color: Color, atRight: Boolean) {
         val y = scaler.yOfValue(value)
         drawLine(
@@ -414,7 +376,7 @@ internal fun DrawScope.drawCrosshair(
     if (showSystolic) valueLine(point.systolic, "收", palette.systolic, atRight = false)
     if (showDiastolic) valueLine(point.diastolic, "舒", palette.diastolic, atRight = true)
     if (pulseMode) {
-        point.pulse?.let { valueLine(it, "脉搏", palette.systolic, atRight = true) } ?: run {
+        point.pulse?.let { valueLine(it, "脉搏", palette.pulse, atRight = true) } ?: run {
             val missing = textMeasurer.measure(
                 "脉搏 —",
                 TextStyle(color = palette.axis, fontSize = 12.sp),

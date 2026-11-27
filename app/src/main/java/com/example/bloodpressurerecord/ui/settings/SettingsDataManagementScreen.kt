@@ -36,8 +36,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,26 +47,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.bloodpressurerecord.data.repository.backup.BackupCrypto
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppDangerButton
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
+import com.example.bloodpressurerecord.ui.common.AppThreeActionDialog
 import com.example.bloodpressurerecord.ui.common.AppTopBar
 import com.example.bloodpressurerecord.ui.common.DataCard
 import com.example.bloodpressurerecord.ui.common.pageContentBottomPadding
 import com.example.bloodpressurerecord.ui.common.rememberHideOnScrollState
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import java.time.Instant
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsDataManagementScreen(
@@ -75,6 +81,16 @@ fun SettingsDataManagementScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val reducedMotion = LocalReducedMotion.current
     val dataBusy = uiState.isDataActionRunning || uiState.isChoosingBackupLocation
+    val scrollState = rememberScrollState()
+    val topBarScroll = rememberHideOnScrollState()
+    var exportSectionOffsetPx by remember { mutableIntStateOf(0) }
+    var scrollToExportToken by remember { mutableIntStateOf(0) }
+    LaunchedEffect(scrollToExportToken) {
+        if (scrollToExportToken > 0) {
+            topBarScroll.expand()
+            scrollState.animateScrollTo(exportSectionOffsetPx)
+        }
+    }
     val safeBack = {
         if (!dataBusy) onBack()
     }
@@ -109,46 +125,6 @@ fun SettingsDataManagementScreen(
         )
     }
 
-    if (uiState.showBackupExportConfirm) {
-        AlertDialog(
-            onDismissRequest = { if (!uiState.isDataActionRunning) viewModel.dismissBackupExport() },
-            title = { Text("导出 Excel 备份") },
-            text = {
-                Text(
-                    "明文导出的 Excel 表格未加密，可能包含姓名、年龄、血压记录、症状、备注和提醒设置。" +
-                        "请勿保存到公共设备、不受信任的云盘或与他人共享的位置。文件只会保存到你选择的位置，" +
-                        "应用不会上传服务器。超过 5000 条记录会自动分卷，建议使用「加密导出（推荐）」。"
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !uiState.isDataActionRunning,
-                    onClick = viewModel::requestEncryptedBackupExport
-                ) {
-                    Text("加密导出（推荐）")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        enabled = !uiState.isDataActionRunning,
-                        onClick = {
-                            viewModel.prepareBackupExport(defaultBackupFileName().removeSuffix(".xlsx"))
-                        }
-                    ) {
-                        Text("明文导出")
-                    }
-                    TextButton(
-                        enabled = !uiState.isDataActionRunning,
-                        onClick = viewModel::dismissBackupExport
-                    ) {
-                        Text("取消")
-                    }
-                }
-            }
-        )
-    }
-
     if (uiState.showExportPassphraseDialog) {
         var exportPassphrase by remember { mutableStateOf("") }
         var exportPassphraseConfirm by remember { mutableStateOf("") }
@@ -170,6 +146,7 @@ fun SettingsDataManagementScreen(
                         onValueChange = { exportPassphrase = it },
                         label = { Text("备份口令（至少 8 位）") },
                         singleLine = true,
+                        shape = MaterialTheme.shapes.small,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Password,
                             autoCorrectEnabled = false
@@ -193,6 +170,7 @@ fun SettingsDataManagementScreen(
                         onValueChange = { exportPassphraseConfirm = it },
                         label = { Text("再次输入口令") },
                         singleLine = true,
+                        shape = MaterialTheme.shapes.small,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Password,
                             autoCorrectEnabled = false
@@ -227,8 +205,8 @@ fun SettingsDataManagementScreen(
                     enabled = passphraseValid && !uiState.isDataActionRunning,
                     onClick = {
                         viewModel.prepareBackupExport(
-                            defaultEncryptedBackupFileName().removeSuffix(".${BackupCrypto.FILE_EXTENSION}"),
-                            exportPassphrase.toCharArray()
+                            baseName = viewModel.defaultBackupBaseName(),
+                            passphrase = exportPassphrase.toCharArray()
                         )
                         exportPassphrase = ""
                         exportPassphraseConfirm = ""
@@ -251,7 +229,25 @@ fun SettingsDataManagementScreen(
             }
         }
     }
-    uiState.exportVolumeRequestId?.let { requestId ->
+    val activeExportRequestId = uiState.exportVolumeRequestId
+    val shouldAutoLaunchPlainSingle = activeExportRequestId != null &&
+        uiState.autoLaunchExportRequestId == activeExportRequestId &&
+        !uiState.exportEncrypted &&
+        uiState.exportVolumeCount == 1
+    LaunchedEffect(activeExportRequestId, shouldAutoLaunchPlainSingle, exportLauncher != null, dataBusy) {
+        if (shouldAutoLaunchPlainSingle && exportLauncher != null && !dataBusy) {
+            val reqId = activeExportRequestId ?: return@LaunchedEffect
+            if (viewModel.consumeAutoLaunchExportRequest(reqId) && viewModel.beginBackupLocation(reqId)) {
+                try {
+                    exportLauncher.launch(uiState.exportFileName)
+                } catch (_: Exception) {
+                    viewModel.onBackupLocationLaunchFailed()
+                }
+            }
+        }
+    }
+    if (activeExportRequestId != null && !shouldAutoLaunchPlainSingle && !uiState.isChoosingBackupLocation) {
+        val requestId = activeExportRequestId
         val isMultiVolume = uiState.exportVolumeCount > 1
         AlertDialog(
             onDismissRequest = viewModel::pauseBackupExport,
@@ -267,14 +263,14 @@ fun SettingsDataManagementScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (isMultiVolume) {
-                        Text("共 ${uiState.exportTotalRecords} 条测量，每卷最多 5000 条；本卷 ${uiState.exportVolumeRecords} 条。每次测量和原始读数组会完整保留。")
+                        Text("共 ${uiState.exportTotalRecords} 次测量，每卷最多 5000 次；本卷 ${uiState.exportVolumeRecords} 次。每次测量和原始读数组会完整保留。")
                         Text("用户资料和设置在第一卷，用药数据可能分布在多卷。")
                         Text(
                             "请依次保存全部 ${uiState.exportVolumeCount} 卷，恢复时从第 1 卷起逐卷导入。" +
                                 if (uiState.exportEncrypted) "全部卷使用同一口令。" else "文件为明文 Excel。"
                         )
                     } else {
-                        Text("共 ${uiState.exportTotalRecords} 条测量记录（含原始读数组、用户资料、设置与用药数据）。")
+                        Text("共 ${uiState.exportTotalRecords} 次测量记录（含原始读数组、用户资料、设置与用药数据）。")
                         Text(
                             if (uiState.exportEncrypted) {
                                 "将以加密备份（.bpx）格式保存，请妥善保管文件并牢记口令。"
@@ -314,6 +310,7 @@ fun SettingsDataManagementScreen(
                         onValueChange = { importPassphrase = it },
                         label = { Text("备份口令") },
                         singleLine = true,
+                        shape = MaterialTheme.shapes.small,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Password,
                             autoCorrectEnabled = false
@@ -437,50 +434,39 @@ fun SettingsDataManagementScreen(
                             )
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = uiState.importMeasurementsSelected,
-                            onCheckedChange = viewModel::setImportMeasurementsSelected,
-                            enabled = preview.validRecordCount > 0
-                        )
-                        Text("导入测量记录（已存在的同条记录将自动覆盖更新）")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = uiState.restoreMedicationsSelected,
-                            onCheckedChange = viewModel::setRestoreMedicationsSelected,
-                            enabled = preview.medicationCount > 0
-                        )
-                        Text("恢复用药数据（药品、时间点及打卡）")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = uiState.restoreUserProfileSelected,
-                            onCheckedChange = viewModel::setRestoreUserProfileSelected,
-                            enabled = preview.hasSettings
-                        )
-                        Text("恢复用户资料" + if (preview.changesName || preview.changesAgeAndGender || preview.changesTargetPressure) "（有变化）" else "")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = uiState.restoreDisplaySettingsSelected,
-                            onCheckedChange = viewModel::setRestoreDisplaySettingsSelected,
-                            enabled = preview.hasSettings
-                        )
-                        Text("恢复显示设置" + if (preview.changesDisplaySettings) "（有变化）" else "")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = uiState.restoreReminderSettingsSelected,
-                            onCheckedChange = viewModel::setRestoreReminderSettingsSelected,
-                            enabled = preview.hasSettings
-                        )
-                        Text(
-                            "恢复提醒设置" +
-                                (if (preview.hasMedicationReminderSetting) "（含服药提醒开关）" else "") +
-                                (if (preview.changesReminderTimes || preview.changesReminderEnabled) "（有变化）" else "")
-                        )
-                    }
+                    ImportOptionCheckboxRow(
+                        label = "导入测量记录（已存在的同条记录将自动覆盖更新）",
+                        checked = uiState.importMeasurementsSelected,
+                        enabled = preview.validRecordCount > 0 && !uiState.isDataActionRunning,
+                        onCheckedChange = viewModel::setImportMeasurementsSelected
+                    )
+                    ImportOptionCheckboxRow(
+                        label = "恢复用药数据（药品、时间点及打卡）",
+                        checked = uiState.restoreMedicationsSelected,
+                        enabled = preview.medicationCount > 0 && !uiState.isDataActionRunning,
+                        onCheckedChange = viewModel::setRestoreMedicationsSelected
+                    )
+                    ImportOptionCheckboxRow(
+                        label = "恢复用户资料" +
+                            if (preview.changesName || preview.changesAgeAndGender || preview.changesTargetPressure) "（有变化）" else "",
+                        checked = uiState.restoreUserProfileSelected,
+                        enabled = preview.hasSettings && !uiState.isDataActionRunning,
+                        onCheckedChange = viewModel::setRestoreUserProfileSelected
+                    )
+                    ImportOptionCheckboxRow(
+                        label = "恢复显示设置" + if (preview.changesDisplaySettings) "（有变化）" else "",
+                        checked = uiState.restoreDisplaySettingsSelected,
+                        enabled = preview.hasSettings && !uiState.isDataActionRunning,
+                        onCheckedChange = viewModel::setRestoreDisplaySettingsSelected
+                    )
+                    ImportOptionCheckboxRow(
+                        label = "恢复提醒设置" +
+                            (if (preview.hasMedicationReminderSetting) "（含服药提醒开关）" else "") +
+                            (if (preview.changesReminderTimes || preview.changesReminderEnabled) "（有变化）" else ""),
+                        checked = uiState.restoreReminderSettingsSelected,
+                        enabled = preview.hasSettings && !uiState.isDataActionRunning,
+                        onCheckedChange = viewModel::setRestoreReminderSettingsSelected
+                    )
                 }
             },
             confirmButton = {
@@ -503,73 +489,58 @@ fun SettingsDataManagementScreen(
     if (uiState.showClearConfirm) {
         var acknowledged by remember { mutableStateOf(false) }
         val isClearing = uiState.activeDataAction == SettingsDataAction.CLEAR
-        AlertDialog(
+        AppThreeActionDialog(
+            title = "再次确认清空数据",
             onDismissRequest = { if (!uiState.isDataActionRunning) viewModel.dismissClearAll() },
-            title = { Text("再次确认清空数据") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "将永久清空本机全部血压记录、药品与服药打卡、个人资料和偏好设置，且无法恢复。建议先导出备份。"
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .heightIn(min = 48.dp)
-                            .toggleable(
-                                value = acknowledged,
-                                enabled = !uiState.isDataActionRunning,
-                                role = androidx.compose.ui.semantics.Role.Checkbox,
-                                onValueChange = { acknowledged = it }
-                            ),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = acknowledged,
+            primaryText = "先导出备份",
+            onPrimaryClick = {
+                // B1 / D7-1：仅关闭当前清空确认框并平滑滚动定位至「导出与备份」区，不代选格式、不自动拉起 SAF、不恢复清空弹窗
+                viewModel.dismissClearAll()
+                scrollToExportToken += 1
+            },
+            primaryEnabled = !uiState.isDataActionRunning,
+            secondaryText = "取消",
+            onSecondaryClick = viewModel::dismissClearAll,
+            secondaryEnabled = !uiState.isDataActionRunning,
+            destructiveText = if (isClearing) "正在清空…" else "永久清空",
+            onDestructiveClick = viewModel::confirmClearAll,
+            destructiveEnabled = acknowledged && !uiState.isDataActionRunning
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "将永久清空本机全部血压记录、药品与服药打卡、个人资料和偏好设置，且无法恢复。建议先导出备份。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .heightIn(min = AppDimensions.minimumTouchTarget)
+                        .toggleable(
+                            value = acknowledged,
                             enabled = !uiState.isDataActionRunning,
-                            onCheckedChange = null
+                            role = androidx.compose.ui.semantics.Role.Checkbox,
+                            onValueChange = { acknowledged = it }
                         )
-                        Text(
-                            "我已知晓清空后无法恢复",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = acknowledged && !uiState.isDataActionRunning,
-                    onClick = viewModel::confirmClearAll
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = if (isClearing) "正在清空…" else "永久清空",
-                        color = if (acknowledged && !uiState.isDataActionRunning) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
+                    Checkbox(
+                        checked = acknowledged,
+                        enabled = !uiState.isDataActionRunning,
+                        onCheckedChange = null
                     )
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(
-                        enabled = !uiState.isDataActionRunning,
-                        onClick = {
-                            viewModel.dismissClearAll()
-                            viewModel.requestBackupExport()
-                        }
-                    ) { Text("先导出备份") }
-                    TextButton(
-                        enabled = !uiState.isDataActionRunning,
-                        onClick = viewModel::dismissClearAll
-                    ) { Text("取消") }
+                    Text(
+                        "我已知晓清空后无法恢复",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
-        )
+        }
     }
 
-    val topBarScroll = rememberHideOnScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -583,8 +554,8 @@ fun SettingsDataManagementScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
+                .verticalScroll(scrollState)
+                .padding(horizontal = AppDimensions.pageHorizontalPadding)
                 .padding(top = 16.dp, bottom = pageContentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -629,7 +600,15 @@ fun SettingsDataManagementScreen(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            Text("导出与备份", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "导出与备份",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .testTag("exportAndBackupSectionTitle")
+                    .onGloballyPositioned { coords ->
+                        exportSectionOffsetPx = coords.positionInParent().y.roundToInt().coerceAtLeast(0)
+                    }
+            )
             AppSecondaryButton(
                 text = "导出医生报告 PDF",
                 onClick = onOpenDoctorReport,
@@ -638,11 +617,16 @@ fun SettingsDataManagementScreen(
             )
             if (uiState.exportVolumeCount > 1) {
                 Text(
-                    "当前${if (uiState.exportEncrypted) "加密备份（.bpx）" else "明文 Excel（.xlsx）"}导出共 ${uiState.exportVolumeCount} 卷，每卷最多 5000 条记录，请依次保存。",
+                    "当前${if (uiState.exportEncrypted) "加密备份（.bpx）" else "明文 Excel（.xlsx）"}导出共 ${uiState.exportVolumeCount} 卷，每卷最多 5000 次测量记录，请依次保存。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Text(
+                text = "Excel 文件未经加密，请妥善保管。如需保护数据隐私，可选择加密备份。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             AppPrimaryButton(
                 text = when {
                     uiState.activeDataAction == SettingsDataAction.EXPORT_XLSX -> "正在导出…"
@@ -713,12 +697,41 @@ fun SettingsDataManagementScreen(
     }
 }
 
-private fun defaultBackupFileName(): String {
-    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
-    return "家庭血压记录备份_$stamp.xlsx"
-}
-
-private fun defaultEncryptedBackupFileName(): String {
-    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"))
-    return "家庭血压记录备份_$stamp.${BackupCrypto.FILE_EXTENSION}"
+@Composable
+private fun ImportOptionCheckboxRow(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = AppDimensions.minimumTouchTarget)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = androidx.compose.ui.semantics.Role.Checkbox,
+                onValueChange = onCheckedChange
+            )
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Checkbox(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = null
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+    }
 }

@@ -16,6 +16,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,6 +75,7 @@ import com.example.bloodpressurerecord.data.calendar.MedicationCalendarTarget
 import com.example.bloodpressurerecord.reminder.ReminderAuthorization
 import com.example.bloodpressurerecord.reminder.ReminderAuthorizationStatus
 import com.example.bloodpressurerecord.reminder.ReminderType
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
@@ -153,6 +156,7 @@ fun SettingsProfileScreen(
                     enabled = uiState.isProfileLoaded && !uiState.isSavingProfile,
                     label = { Text("姓名") },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
@@ -161,6 +165,7 @@ fun SettingsProfileScreen(
                     enabled = uiState.isProfileLoaded && !uiState.isSavingProfile,
                     label = { Text("年龄") },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = uiState.ageError != null,
@@ -200,6 +205,7 @@ fun SettingsProfileScreen(
                     label = { Text("个人达标高压（收缩压）") },
                     placeholder = { Text("例如 135") },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = uiState.targetSystolicError != null,
@@ -212,6 +218,7 @@ fun SettingsProfileScreen(
                     label = { Text("个人达标低压（舒张压）") },
                     placeholder = { Text("例如 85") },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = uiState.targetDiastolicError != null,
@@ -357,21 +364,21 @@ fun SettingsReminderScreen(
 
         Text("测量提醒", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         SettingsSwitchRow(
-            "晨间提醒",
+            "早间提醒",
             uiState.morningReminderEnabled
         ) { enabled ->
             if (enabled) requestEnable(ReminderType.MORNING)
             else viewModel.setMorningReminderEnabled(false)
         }
         ReminderTimePickerButton(
-            label = "晨间提醒时间",
+            label = "早间提醒时间",
             timeText = uiState.morningReminderTime,
             onTimeSelected = { time ->
                 val wasDisabled = !uiState.morningReminderEnabled
                 viewModel.updateMorningTime(time)
                 if (wasDisabled) {
                     checkNotificationPermissionForReminder(
-                        "已自动开启晨间提醒，但系统通知已关闭；请前往系统通知设置开启通知。"
+                        "已自动开启早间提醒，但系统通知已关闭；请前往系统通知设置开启通知。"
                     )
                 }
             }
@@ -743,6 +750,7 @@ private fun MedicationEditorDialog(
                     label = { Text("药品名称") },
                     placeholder = { Text("请输入药品名称") },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.small,
                     isError = nameError != null,
                     supportingText = nameError?.let { err -> { Text(err) } },
                     modifier = Modifier.fillMaxWidth()
@@ -752,8 +760,16 @@ private fun MedicationEditorDialog(
                     onValueChange = { dosage = it },
                     label = { Text("每次用量（选填）") },
                     placeholder = { Text("如：1 片 / 5 mg") },
+                    supportingText = { Text("建议带上单位（如 1 片、5 mg），输入数字后可点下方快捷补充") },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth()
+                )
+                MedicationDosageUnitBar(
+                    currentDosage = dosage,
+                    onSelectUnit = { unit ->
+                        dosage = appendMedicationDosageUnit(dosage, unit)
+                    }
                 )
                 Text(
                     "每日服药时间（点击时间可修改）",
@@ -811,7 +827,7 @@ private fun MedicationEditorDialog(
                         onClick = onDelete,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 44.dp)
+                            .heightIn(min = AppDimensions.minimumTouchTarget)
                     ) {
                         Text("删除这种药品", color = MaterialTheme.colorScheme.error)
                     }
@@ -838,6 +854,76 @@ private fun MedicationEditorDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+private val MedicationQuickUnits = listOf("片", "粒", "丸", "mg", "袋")
+private val PureNumericDosageRegex = Regex("""^\d+([./]\d+)?$""")
+
+/**
+ * 药品剂量快捷单位纯文本输入辅助（AUD-09）：
+ * 仅在当前输入为纯数字（整数/小数/简单分数，尚无任何单位或复杂描述）时追加单位；
+ * 绝不重复追加已有单位、绝不替换其他单位、绝不在空白时臆造剂量，也不做任何换算。
+ */
+internal fun appendMedicationDosageUnit(currentDosage: String, unit: String): String {
+    val trimmed = currentDosage.trim()
+    val cleanUnit = unit.trim()
+    if (trimmed.isEmpty() || cleanUnit.isEmpty()) return currentDosage
+    if (!PureNumericDosageRegex.matches(trimmed)) return currentDosage
+    return "$trimmed $cleanUnit"
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MedicationDosageUnitBar(
+    currentDosage: String,
+    onSelectUnit: (String) -> Unit
+) {
+    val canAppend = PureNumericDosageRegex.matches(currentDosage.trim())
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        MedicationQuickUnits.forEach { unit ->
+            val interactionSource = remember { MutableInteractionSource() }
+            val shape = RoundedCornerShape(50)
+            Surface(
+                shape = shape,
+                color = if (canAppend) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                modifier = Modifier
+                    .heightIn(min = AppDimensions.minimumTouchTarget)
+                    .clip(shape)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = LocalIndication.current,
+                        enabled = canAppend,
+                        role = Role.Button,
+                        onClick = { onSelectUnit(unit) }
+                    )
+                    .pressableScale(interactionSource, enabled = canAppend)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "+ $unit",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (canAppend) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

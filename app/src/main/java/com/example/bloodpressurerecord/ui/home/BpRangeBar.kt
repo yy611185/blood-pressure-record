@@ -2,6 +2,7 @@ package com.example.bloodpressurerecord.ui.home
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -70,7 +71,17 @@ fun BpRangeBar(
     Column(modifier.fillMaxWidth().semantics { contentDescription = description }) {
         // 父级一次朗读完整读数；色块、三角形、重复标签不单独朗读。
         Column(Modifier.fillMaxWidth().clearAndSetSemantics {}) {
-            Row(Modifier.fillMaxWidth().height(BpRangeDimensions.barHeight).clip(RoundedCornerShape(50))) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(BpRangeDimensions.barHeight)
+                    .clip(RoundedCornerShape(50))
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                        shape = RoundedCornerShape(50)
+                    )
+            ) {
                 BpZone.entries.forEach { zone ->
                     Box(Modifier.weight(1f).height(BpRangeDimensions.barHeight)
                         .background(if (ready == null) palette.empty else palette.segment(zone)))

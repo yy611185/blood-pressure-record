@@ -13,22 +13,37 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -47,12 +62,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.createBitmap
 import com.example.bloodpressurerecord.R
@@ -64,7 +83,10 @@ import com.example.bloodpressurerecord.ui.LocalReducedMotion
 import com.example.bloodpressurerecord.ui.common.AppPrimaryButton
 import com.example.bloodpressurerecord.ui.common.AppSecondaryButton
 import com.example.bloodpressurerecord.ui.common.AppTopBar
+import com.example.bloodpressurerecord.ui.common.focusRing
+import com.example.bloodpressurerecord.ui.common.pressableScale
 import com.example.bloodpressurerecord.ui.common.statusBarTopPadding
+import com.example.bloodpressurerecord.ui.theme.AppDimensions
 import com.example.bloodpressurerecord.ui.theme.AppMotion
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -86,8 +108,17 @@ fun ReportPreviewScreen(
     val renderedPages = remember(artifact.file) { mutableStateMapOf<Int, Boolean>() }
     var viewedSummaryPath by rememberSaveable { mutableStateOf<String?>(null) }
     var failedPreviewPath by rememberSaveable { mutableStateOf<String?>(null) }
-    val canExport = state.canExport && viewedSummaryPath == artifact.file.absolutePath &&
-        failedPreviewPath != artifact.file.absolutePath && renderedPages.values.all { it }
+    var privacyExpanded by rememberSaveable { mutableStateOf(false) }
+    fun isRenderReady() = viewedSummaryPath == artifact.file.absolutePath &&
+        failedPreviewPath != artifact.file.absolutePath &&
+        renderedPages.isNotEmpty() && renderedPages.values.all { it }
+
+    fun canStartOutput(): Boolean {
+        val current = viewModel.uiState.value
+        return current.canExport && current.artifact === artifact && isRenderReady()
+    }
+
+    val canExport = state.canExport && isRenderReady()
     val outputBusy = state.isSaving || state.selectingOutput != null
 
     // UX-07 & P2-07: 系统返回与顶栏返回在保存中保持一致门控，禁止穿透到 NavHost 取消复制或删除预览文件
@@ -115,7 +146,7 @@ fun ReportPreviewScreen(
         })
     }
     fun chooseDestination(kind: ReportOutputKind, launch: () -> Unit) {
-        if (!viewModel.beginOutputSelection(kind, artifact)) return
+        if (!canStartOutput() || !viewModel.beginOutputSelection(kind, artifact)) return
         try {
             launch()
         } catch (_: Exception) {
@@ -149,7 +180,7 @@ fun ReportPreviewScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = AppDimensions.pageHorizontalPadding, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AnimatedVisibility(
@@ -181,7 +212,7 @@ fun ReportPreviewScreen(
                         text = "分享 PDF（发给医生/家人）",
                         enabled = canExport,
                         onClick = {
-                            if (!viewModel.uiState.value.canExport || viewModel.uiState.value.artifact !== artifact) return@AppPrimaryButton
+                            if (!canStartOutput()) return@AppPrimaryButton
                             try {
                                 share.share(artifact.file, artifact.plan.report.template.title)
                             } catch (_: Exception) {
@@ -209,7 +240,7 @@ fun ReportPreviewScreen(
                                 text = "打印",
                                 enabled = canExport,
                                 onClick = {
-                                    if (!viewModel.uiState.value.canExport || viewModel.uiState.value.artifact !== artifact) return@AppSecondaryButton
+                                    if (!canStartOutput()) return@AppSecondaryButton
                                     val activity = context.reportActivity()
                                     try {
                                         if (activity == null) viewModel.showMessage("无法打开打印，请重新进入报告。")
@@ -267,26 +298,27 @@ fun ReportPreviewScreen(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = AppDimensions.pageHorizontalPadding),
             contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text("${state.period.startDate} 至 ${state.period.endDate} · 共 ${artifact.plan.pageCount} 页")
-                Text(
-                    "请检查各页内容后导出。隐私选择仅用于本次报告；「存摘要图」仅保存第 1 页摘要，完整逐日明细请分享或保存 PDF。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PrivacyOption(
-                        label = "包含姓名与年龄",
-                        checked = state.options.includeIdentity && state.hasProfileIdentity,
-                        enabled = !outputBusy && state.hasProfileIdentity,
-                        onChange = viewModel::setIncludeIdentity
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${state.period.startDate} 至 ${state.period.endDate} · 共 ${artifact.plan.pageCount} 页")
+                    Text(
+                        "请检查各页内容后导出。隐私选择仅用于本次报告；「存摘要图」仅保存第 1 页摘要，完整逐日明细请分享或保存 PDF。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    PrivacyOption("包含备注", state.options.includeNotes, !outputBusy, viewModel::setIncludeNotes)
-                    PrivacyOption("包含药品", state.options.includeMedications, !outputBusy, viewModel::setIncludeMedications)
+                    ReportPrivacySummaryCard(
+                        state = state,
+                        expanded = privacyExpanded,
+                        outputBusy = outputBusy,
+                        onToggleExpanded = { privacyExpanded = !privacyExpanded },
+                        onIncludeIdentityChange = viewModel::setIncludeIdentity,
+                        onIncludeNotesChange = viewModel::setIncludeNotes,
+                        onIncludeMedicationsChange = viewModel::setIncludeMedications
+                    )
                 }
             }
             if (state.isGenerating || !state.hasCurrentPreview) {
@@ -319,15 +351,167 @@ fun ReportPreviewScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PrivacyOption(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f))
+internal fun ReportPrivacySummaryCard(
+    state: ReportUiState,
+    expanded: Boolean,
+    outputBusy: Boolean,
+    onToggleExpanded: () -> Unit,
+    onIncludeIdentityChange: (Boolean) -> Unit,
+    onIncludeNotesChange: (Boolean) -> Unit,
+    onIncludeMedicationsChange: (Boolean) -> Unit
+) {
+    // B2 / AUD-29：严格从 state.options 与 state.hasProfileIdentity 单一事实源推导三项真实状态，绝不维护第二套隐私状态。
+    val identityIncluded = state.options.includeIdentity && state.hasProfileIdentity
+    val identityStatus = when {
+        !state.hasProfileIdentity -> "未填写"
+        identityIncluded -> "已包含"
+        else -> "已隐藏"
+    }
+    val notesStatus = if (state.options.includeNotes) "已包含" else "已隐藏"
+    val medsStatus = if (state.options.includeMedications) "已包含" else "已隐藏"
+    val reducedMotion = LocalReducedMotion.current
+    val toggleInteraction = remember { MutableInteractionSource() }
+    val cardShape = MaterialTheme.shapes.medium
+
+    Surface(
+        shape = cardShape,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("reportPrivacySummaryCard")
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = AppDimensions.minimumTouchTarget)
+                    .testTag("reportPrivacyToggle")
+                    .clickable(
+                        interactionSource = toggleInteraction,
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = if (expanded) "收起隐私设置" else "展开调整隐私设置",
+                        onClick = onToggleExpanded
+                    )
+                    .pressableScale(toggleInteraction, pressedScale = 0.99f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .indication(toggleInteraction, LocalIndication.current)
+                    .focusRing(toggleInteraction, RoundedCornerShape(12.dp)),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    PrivacySummaryChip("姓名与年龄：$identityStatus", active = identityIncluded)
+                    PrivacySummaryChip("备注：$notesStatus", active = state.options.includeNotes)
+                    PrivacySummaryChip("药品：$medsStatus", active = state.options.includeMedications)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        if (expanded) "收起隐私" else "调整隐私",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = expanded,
+                enter = AppMotion.expandVisibilityEnter(reducedMotion),
+                exit = AppMotion.expandVisibilityExit(reducedMotion)
+            ) {
+                Column(
+                    modifier = Modifier.padding(top = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    PrivacyOption(
+                        label = "包含姓名与年龄",
+                        checked = identityIncluded,
+                        enabled = !outputBusy && state.hasProfileIdentity,
+                        onChange = onIncludeIdentityChange
+                    )
+                    PrivacyOption(
+                        label = "包含备注",
+                        checked = state.options.includeNotes,
+                        enabled = !outputBusy,
+                        onChange = onIncludeNotesChange
+                    )
+                    PrivacyOption(
+                        label = "包含药品",
+                        checked = state.options.includeMedications,
+                        enabled = !outputBusy,
+                        onChange = onIncludeMedicationsChange
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrivacySummaryChip(text: String, active: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+        color = if (active) colors.onSecondaryContainer else colors.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (active) colors.secondaryContainer else colors.surfaceVariant)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    )
+}
+
+@Composable
+internal fun PrivacyOption(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val rowShape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = AppDimensions.minimumTouchTarget)
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onChange
+            )
+            .pressableScale(interactionSource, enabled = enabled, pressedScale = 0.985f)
+            .clip(rowShape)
+            .indication(interactionSource, LocalIndication.current)
+            .focusRing(interactionSource, rowShape, enabled = enabled)
+            .padding(vertical = 4.dp)
+            .semantics { contentDescription = label },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            label,
+            Modifier.weight(1f),
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Switch(
-            checked,
-            onCheckedChange = onChange,
-            enabled = enabled,
-            modifier = Modifier.semantics { contentDescription = label }
+            checked = checked,
+            onCheckedChange = null,
+            enabled = enabled
         )
     }
 }

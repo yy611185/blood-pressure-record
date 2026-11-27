@@ -28,6 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,7 +95,7 @@ fun HistoryDetailScreen(
         AlertDialog(
             onDismissRequest = viewModel::dismissDelete,
             title = { Text("确认删除") },
-            text = { Text("${uiState.measuredAtText} · ${session.avgSystolic}/${session.avgDiastolic}。删除后可在提示条里撤销。") },
+            text = { Text("${uiState.measuredAtText} · ${session.avgSystolic}/${session.avgDiastolic} mmHg。删除后可在提示条里撤销。") },
             confirmButton = {
                 TextButton(enabled = !uiState.isDeleting, onClick = viewModel::confirmDelete) {
                     Text(if (uiState.isDeleting) "正在删除…" else "删除", color = MaterialTheme.colorScheme.error)
@@ -149,14 +151,29 @@ fun HistoryDetailScreen(
                                     "${uiState.measuredAtText} · ${session.timePeriod ?: session.scene.replace("晨起", "清晨")}",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Text(
-                                    "${session.avgSystolic}/${session.avgDiastolic}",
-                                    style = MaterialTheme.typography.displaySmall.copy(
-                                        fontFeatureSettings = TabularFeatureSettings
-                                    ),
-                                    fontFamily = NumberFontFamily,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    modifier = Modifier.semantics(mergeDescendants = true) {
+                                        contentDescription = "平均血压 ${session.avgSystolic}/${session.avgDiastolic} mmHg"
+                                    },
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        "${session.avgSystolic}/${session.avgDiastolic}",
+                                        modifier = Modifier.alignByBaseline(),
+                                        style = MaterialTheme.typography.displaySmall.copy(
+                                            fontFeatureSettings = TabularFeatureSettings
+                                        ),
+                                        fontFamily = NumberFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "mmHg",
+                                        modifier = Modifier.alignByBaseline(),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -178,7 +195,7 @@ fun HistoryDetailScreen(
                                     (if (session.averageStrategy == AverageStrategy.DISCARD_FIRST && session.readings.size >= 2)
                                         "弃用第 1 组，取其余 ${session.readings.size - 1} 组平均"
                                     else "${session.readings.size} 组全部平均") +
-                                        (session.avgPulse?.let { " · 脉搏 $it" } ?: ""),
+                                        (session.avgPulse?.let { " · 脉搏 $it 次/分" } ?: ""),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontFeatureSettings = TabularFeatureSettings
                                     ),
@@ -194,7 +211,7 @@ fun HistoryDetailScreen(
                                 initiallyExpanded = session.readings.size <= 3,
                                 stateKey = "history-readings-$sessionId"
                             ) {
-                                DetailReadingRow("组别", "高压", "低压", "脉搏", header = true)
+                                DetailReadingRow("组别", "高压\nmmHg", "低压\nmmHg", "脉搏\n次/分", header = true)
                                 session.readings.forEachIndexed { index, reading ->
                                     DetailReadingRow(
                                         label = "第 ${index + 1} 组" + if (session.averageStrategy == AverageStrategy.DISCARD_FIRST && index == 0 && session.readings.size >= 2) "（不计）" else "",
@@ -289,9 +306,23 @@ private fun DetailReadingRow(
         header -> MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.onSurface
     }
+    val rowDescription = if (!header) {
+        val pulseSpeak = if (pulse == "—") "脉搏未填" else "脉搏 $pulse 次/分"
+        val riskSpeak = if (highRisk) "，高风险读数" else ""
+        "$label，高压 $systolic mmHg，低压 $diastolic mmHg，$pulseSpeak$riskSpeak"
+    } else null
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (rowDescription != null) {
+                    Modifier.semantics(mergeDescendants = true) {
+                        contentDescription = rowDescription
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .background(
                 if (highRisk) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
                 RoundedCornerShape(10.dp)

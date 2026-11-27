@@ -373,12 +373,12 @@ class DefaultSettingsRepository(
             writeBackupPayload(uri, payload, passphrase)
             appSettingsStore.setLastSuccessfulExportAt(System.currentTimeMillis())
             if (passphrase != null) {
-                "加密备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n" +
+                "加密备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 次测量记录\n" +
                     payload.diagnostics.toUserMessage() + "\n包含药品 ${payload.medications.size} 种、" +
                     "时间点 ${payload.medicationTimes.size} 个、服药打卡 ${payload.medicationLogs.size} 条。" +
                     "\n文件已用口令加密（.bpx），导入时需要相同口令；请妥善保管口令。"
             } else {
-                "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 条测量记录\n" +
+                "Excel 备份导出成功：$fileNameHint\n共导出 ${payload.measurements.size} 次测量记录\n" +
                     payload.diagnostics.toUserMessage() + "\n包含药品 ${payload.medications.size} 种、" +
                     "时间点 ${payload.medicationTimes.size} 个、服药打卡 ${payload.medicationLogs.size} 条。" +
                     "\n文件已交给你选择的保存位置。"

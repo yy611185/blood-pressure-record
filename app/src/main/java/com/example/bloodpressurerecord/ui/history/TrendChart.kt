@@ -453,12 +453,11 @@ fun SessionTimeSeriesDualLineChart(
                     right = currentGeometry.right,
                     bottom = currentGeometry.bottom
                 ) {
-                    val targetLabelBounds = drawThresholdLines(
+                    drawThresholdLines(
                         geometry = currentGeometry,
                         scaler = scaler,
                         lines = thresholdLines,
-                        palette = palette,
-                        textMeasurer = textMeasurer
+                        palette = palette
                     )
 
                     // 手势期间照常绘制曲线，缩放/拖动有实时反馈。
@@ -473,8 +472,7 @@ fun SessionTimeSeriesDualLineChart(
                         point.timestamp in viewportStart..viewportEnd
                     }
                     selectedVisible?.let { point ->
-                        drawCrosshair(point, scaler, palette, textMeasurer, showSystolic, showDiastolic,
-                            targetLabelBounds = targetLabelBounds)
+                        drawCrosshair(point, scaler, palette, textMeasurer, showSystolic, showDiastolic)
                     }
 
                     // 普通圆点随密度减少；高风险提示与选中节点独立保留。
@@ -734,7 +732,7 @@ fun SessionTimeSeriesPulseChart(
             )
             drawYAxisGrid(currentGeometry, scaler, activeYAxis, textMeasurer, palette)
             clipRect(currentGeometry.left, currentGeometry.top, currentGeometry.right, currentGeometry.bottom) {
-                drawPulseSeriesLine(renderPoints, segmentIds, scaler, palette.systolic, pulsePath)
+                drawPulseSeriesLine(renderPoints, segmentIds, scaler, palette.pulse, pulsePath)
                 selectedPoint?.takeIf { it.timestamp in viewportStart..viewportEnd }?.let { point ->
                     drawCrosshair(point, scaler, palette, textMeasurer, false, false, pulseMode = true)
                 }
@@ -749,9 +747,9 @@ fun SessionTimeSeriesPulseChart(
                     drawPointNode(
                         x = scaler.xOfTime(point.timestamp),
                         y = scaler.yOfValue(point.pulse!!),
-                        color = palette.systolic,
+                        color = palette.pulse,
                         backgroundColor = palette.nodeBackground,
-                        ringColor = palette.selectionRing,
+                        ringColor = palette.pulse,
                         selected = point.id == selectedPoint?.id,
                         highRisk = point.containsHighRiskReading,
                         highRiskColor = palette.outlier
@@ -786,8 +784,8 @@ private fun buildChartDescription(
         else -> "舒张压"
     }
     val granularity = series.aggregation.displayLabel()
-    val first = series.firstMeasuredAt?.let(::formatReadoutDateTime) ?: "--"
-    val last = series.lastMeasuredAt?.let(::formatReadoutDateTime) ?: "--"
+    val first = series.firstMeasuredAt?.let(::formatReadoutDateTime) ?: "—"
+    val last = series.lastMeasuredAt?.let(::formatReadoutDateTime) ?: "—"
     return "血压趋势折线图，$metric，$granularity，共 ${series.points.size} 个数据点，" +
         "样本区间 $first 至 $last。可双指缩放、放大后单指拖动、双击恢复默认视野，长按滑动逐点读数。"
 }

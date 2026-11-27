@@ -364,6 +364,38 @@ class DashboardViewModelTest {
         assertFalse(vm.uiState.value.pendingMedicationTimeIds.contains(slot.timeId))
     }
 
+    @Test
+    fun `medication undo rejects a different day and an older toggle with the same value`() = runTest {
+        val medication = BlockingMedicationRepository()
+        val vm = DashboardViewModel(
+            repository = FakeRepository(emptyMap()),
+            medicationRepository = medication,
+            zoneId = zone
+        )
+        val feedback = mutableListOf<MedicationFeedback>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.medicationFeedback.collect { feedback += it }
+        }
+        val slot = MedicationSlot(1L, 2L, "测试药物", "1 片", "08:00", false)
+        medication.releaseFirstCall.complete(Unit)
+        vm.toggleMedicationTaken(slot, false)
+        advanceUntilIdle()
+        val original = feedback.single()
+        assertTrue(vm.isMedicationFeedbackCurrent(original))
+
+        vm.undoMedicationToggle(original.copy(date = original.date.minusDays(1)))
+        advanceUntilIdle()
+        assertEquals(listOf(false), medication.takenValues)
+
+        vm.toggleMedicationTaken(slot, true)
+        vm.toggleMedicationTaken(slot, false)
+        advanceUntilIdle()
+        assertFalse(vm.isMedicationFeedbackCurrent(original))
+        vm.undoMedicationToggle(original)
+        advanceUntilIdle()
+        assertEquals(listOf(false, true, false), medication.takenValues)
+    }
+
     private fun summary(
         id: String,
         day: LocalDate,

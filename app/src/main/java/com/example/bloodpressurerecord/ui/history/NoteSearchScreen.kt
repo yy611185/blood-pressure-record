@@ -118,7 +118,7 @@ internal fun NoteSearchScreen(
                     modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                     placeholder = { Text(stringResource(R.string.note_search_input)) },
                     singleLine = true,
-                    shape = MaterialTheme.shapes.medium,
+                    shape = MaterialTheme.shapes.small,
                     trailingIcon = {
                         AnimatedVisibility(
                             visible = state.query.isNotEmpty(),

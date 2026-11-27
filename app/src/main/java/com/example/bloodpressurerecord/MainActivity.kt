@@ -9,22 +9,26 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bloodpressurerecord.navigation.BloodPressureAppRoot
 import com.example.bloodpressurerecord.reminder.MedicationReminderConfirmationRequest
 import com.example.bloodpressurerecord.reminder.MedicationReminders
 import com.example.bloodpressurerecord.ui.LocalAppFontScale
-import com.example.bloodpressurerecord.ui.settings.SettingsViewModel
 import com.example.bloodpressurerecord.ui.theme.BloodPressureRecordTheme
+import com.example.bloodpressurerecord.ui.theme.DarkColors
+import com.example.bloodpressurerecord.ui.theme.WarmBackground
 
 class MainActivity : ComponentActivity() {
     private var pendingDestination by mutableStateOf<String?>(null)
@@ -47,19 +51,29 @@ class MainActivity : ComponentActivity() {
         intent?.removeExtra(EXTRA_OPEN_DESTINATION)
         MedicationReminders.clearConfirmationExtras(intent)
         requestHighestRefreshRate()
+        val appContainer = (application as BloodPressureApplication).appContainer
         setContent {
-            val settingsViewModel: SettingsViewModel = viewModel(
-                factory = AppViewModelFactory(application)
-            )
-            val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+            val startupState by appContainer.startupSettings.collectAsStateWithLifecycle()
+            val systemDark = isSystemInDarkTheme()
+            if (!startupState.isReady) {
+                SideEffect { enableImmersiveSystemBars(systemDark) }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(if (systemDark) DarkColors.background else WarmBackground)
+                )
+                return@setContent
+            }
+
+            val appSettings = startupState.settings
             val currentDensity = LocalDensity.current
-            val appFontScale = if (settingsUiState.isLargeTextEnabled) 1.15f else 1f
+            val appFontScale = if (appSettings.largeTextEnabled) 1.15f else 1f
             // 与系统大字相乘时做合理上限钳制，避免 2.3x+ 导致极端裁切
             val effectiveFontScale = (currentDensity.fontScale * appFontScale).coerceAtMost(MAX_EFFECTIVE_FONT_SCALE)
-            val darkTheme = when (settingsUiState.appearanceMode) {
+            val darkTheme = when (appSettings.appearanceMode) {
                 "dark" -> true
                 "light" -> false
-                else -> isSystemInDarkTheme()
+                else -> systemDark
             }
             SideEffect { enableImmersiveSystemBars(darkTheme) }
 
@@ -72,7 +86,7 @@ class MainActivity : ComponentActivity() {
                     )
                 ) {
                     BloodPressureAppRoot(
-                        showTrendChart = settingsUiState.showTrendChart,
+                        showTrendChart = appSettings.showTrendChart,
                         pendingDestination = pendingDestination,
                         onConsumePendingDestination = { pendingDestination = null },
                         pendingMedicationConfirmation = medicationConfirmations.firstOrNull(),

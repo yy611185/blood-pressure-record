@@ -23,7 +23,7 @@ enum class ReminderType(
     val notificationId: Int,
     val title: String
 ) {
-    MORNING("${BuildConfig.APPLICATION_ID}.REMINDER_MORNING", 7101, 8101, "晨间血压提醒"),
+    MORNING("${BuildConfig.APPLICATION_ID}.REMINDER_MORNING", 7101, 8101, "早间血压提醒"),
     EVENING("${BuildConfig.APPLICATION_ID}.REMINDER_EVENING", 7102, 8102, "晚间血压提醒");
 
     companion object {

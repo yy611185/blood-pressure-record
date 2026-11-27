@@ -142,7 +142,7 @@ class PdfReportRenderer(private val appName: String) {
     }
 
     private fun drawCore(canvas: Canvas, report: BpReport): Float {
-        val labels = listOf("平均血压", "早晨均值", "晚间均值", "平均脉搏", "有效测量")
+        val labels = listOf("平均血压", "早间均值", "晚间均值", "平均脉搏", "有效测量")
         val values = listOf(bp(report.average), bp(report.morningAverage), bp(report.eveningAverage),
             report.average.pulse?.toString() ?: "—", "${report.validDays}/${report.period.dayCount}")
         val units = listOf("mmHg", "mmHg", "mmHg", "次/分", "天 · 共 ${report.measurementCount} 次")
